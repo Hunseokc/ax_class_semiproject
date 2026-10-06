@@ -1,0 +1,54 @@
+# 대상 유니버스 (기본값). market: markets.code / ticker: 거래소 코드
+# yf_symbol: yfinance 조회용 심볼 (KR은 .KS=코스피, .KQ=코스닥)
+markets:
+  - {code: KOSPI,  country: KR, currency: KRW, timezone: Asia/Seoul}
+  - {code: KOSDAQ, country: KR, currency: KRW, timezone: Asia/Seoul}
+  - {code: NASDAQ, country: US, currency: USD, timezone: America/New_York}
+  - {code: NYSE,   country: US, currency: USD, timezone: America/New_York}
+
+indices:
+  - {code: KOSPI,  name: KOSPI,              market: KOSPI,  pykrx: "1001", yf_symbol: "^KS11", display_order: 1}
+  - {code: KOSDAQ, name: KOSDAQ,             market: KOSDAQ, pykrx: "2001", yf_symbol: "^KQ11", display_order: 2}
+  - {code: SPX,    name: S&P 500,            market: NYSE,   yf_symbol: "^GSPC", display_order: 3}
+  - {code: IXIC,   name: NASDAQ Composite,   market: NASDAQ, yf_symbol: "^IXIC", display_order: 4}
+  - {code: DJI,    name: Dow Jones,          market: NYSE,   yf_symbol: "^DJI",  display_order: 5}
+
+fx:
+  usd_krw: {yf_symbol: "KRW=X"}
+
+stocks:
+  - {market: KOSPI,  ticker: "005930", name: 삼성전자,          yf_symbol: 005930.KS}
+  - {market: KOSPI,  ticker: "000660", name: SK하이닉스,        yf_symbol: 000660.KS}
+  - {market: KOSPI,  ticker: "005380", name: 현대차,            yf_symbol: 005380.KS}
+  - {market: KOSPI,  ticker: "000270", name: 기아,              yf_symbol: 000270.KS}
+  - {market: KOSPI,  ticker: "035420", name: NAVER,             yf_symbol: 035420.KS}
+  - {market: KOSPI,  ticker: "035720", name: 카카오,            yf_symbol: 035720.KS}
+  - {market: KOSPI,  ticker: "373220", name: LG에너지솔루션,    yf_symbol: 373220.KS}
+  - {market: KOSPI,  ticker: "006400", name: 삼성SDI,           yf_symbol: 006400.KS}
+  - {market: KOSDAQ, ticker: "247540", name: 에코프로비엠,      yf_symbol: 247540.KQ}
+  - {market: KOSPI,  ticker: "207940", name: 삼성바이오로직스,  yf_symbol: 207940.KS}
+  - {market: KOSPI,  ticker: "068270", name: 셀트리온,          yf_symbol: 068270.KS}
+  - {market: KOSPI,  ticker: "005490", name: POSCO홀딩스,       yf_symbol: 005490.KS}
+  - {market: KOSPI,  ticker: "004020", name: 현대제철,          yf_symbol: 004020.KS}
+  - {market: KOSPI,  ticker: "012450", name: 한화에어로스페이스, yf_symbol: 012450.KS}
+  - {market: KOSPI,  ticker: "047810", name: 한국항공우주,      yf_symbol: 047810.KS}
+  - {market: KOSPI,  ticker: "064350", name: 현대로템,          yf_symbol: 064350.KS}
+  - {market: NASDAQ, ticker: AAPL,  name: Apple,     yf_symbol: AAPL}
+  - {market: NASDAQ, ticker: MSFT,  name: Microsoft, yf_symbol: MSFT}
+  - {market: NASDAQ, ticker: GOOGL, name: Alphabet,  yf_symbol: GOOGL}
+  - {market: NASDAQ, ticker: AMZN,  name: Amazon,    yf_symbol: AMZN}
+  - {market: NASDAQ, ticker: NVDA,  name: NVIDIA,    yf_symbol: NVDA}
+  - {market: NASDAQ, ticker: META,  name: Meta Platforms, yf_symbol: META}
+  - {market: NASDAQ, ticker: TSLA,  name: Tesla,     yf_symbol: TSLA}
+  - {market: NASDAQ, ticker: AVGO,  name: Broadcom,  yf_symbol: AVGO}
+  - {market: NASDAQ, ticker: AMD,   name: AMD,       yf_symbol: AMD}
+
+peer_groups:
+  - {name: 반도체,        members: ["005930", "000660", NVDA, AVGO, AMD]}
+  - {name: 자동차,        members: ["005380", "000270", TSLA]}
+  - {name: 인터넷·플랫폼, members: ["035420", "035720", GOOGL, META]}
+  - {name: 빅테크,        members: [AAPL, MSFT, AMZN]}
+  - {name: 2차전지,       members: ["373220", "006400", "247540"]}
+  - {name: 바이오,        members: ["207940", "068270"]}
+  - {name: 철강,          members: ["005490", "004020"]}
+  - {name: 방산,          members: ["012450", "047810", "064350"]}

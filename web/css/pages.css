@@ -1,0 +1,99 @@
+/* 페이지별 레이아웃 */
+
+/* ---------------------------------------------------------------- 주식 리스트 */
+.toolbar { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
+.toolbar .search { flex: 1 1 240px; }
+.toolbar__group { flex: 0 1 220px; }
+.toolbar .select { border-radius: var(--r-pill); }
+
+.stock-list { background: var(--card); border-radius: var(--r-card); padding: var(--sp-3); }
+.stock-row {
+  display: grid; align-items: center; gap: var(--sp-4);
+  grid-template-columns: 28px minmax(180px, 2fr) minmax(130px, 1.2fr) minmax(90px, 1fr) minmax(90px, 1fr) 56px 120px;
+  padding: var(--sp-3) var(--sp-4); border-radius: var(--r-row);
+  transition: background .15s var(--ease);
+}
+.stock-row:not(.stock-row--head):hover { background: var(--card-hover); }
+.stock-row--head { color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); padding-block: var(--sp-2); }
+.stock-row__name { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.stock-row__name:hover .row__title { text-decoration: underline; text-underline-offset: 3px; }
+.stock-row__price { display: flex; flex-direction: column; text-align: right; font-size: var(--fs-sm); }
+.stock-row__price strong { font-size: var(--fs-md); }
+.stock-row__col { text-align: right; font-size: var(--fs-sm); color: var(--text-2); }
+.stock-row__score { text-align: center; }
+.stock-row__actions { display: flex; gap: var(--sp-1); align-items: center; justify-content: flex-end; }
+.stock-row--head > :nth-child(3) { text-align: right; }
+.stock-row--head .stock-row__col { color: var(--text-3); font-size: var(--fs-xs); }
+.stock-row--head > :nth-child(6) { text-align: center; }
+
+@media (max-width: 1023px) {
+  .stock-row { grid-template-columns: 24px minmax(150px, 2fr) minmax(110px, 1fr) 48px 120px; }
+  .stock-row__col { display: none; }
+}
+@media (max-width: 767px) {
+  .stock-list { padding: var(--sp-2); }
+  .stock-row { grid-template-columns: 20px 1fr auto; gap: var(--sp-2) var(--sp-3); padding: var(--sp-3); }
+  .stock-row--head { display: none; }
+  .stock-row__score { grid-column: 2; justify-self: start; }
+  .stock-row__actions { grid-column: 3; grid-row: 2; }
+  .stock-row .avatar { width: 36px; height: 36px; }
+  .toolbar__group { flex: 1 1 100%; }
+  .page-head { align-items: flex-start; }
+}
+
+/* ---------------------------------------------------------------- 종목 상세 */
+.stock-head { display: grid; grid-template-columns: 1fr auto auto; gap: var(--sp-6); align-items: end; }
+.stock-head__id { display: flex; flex-direction: column; gap: var(--sp-2); }
+.stock-head__id .subtle { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+.stock-head__price { text-align: right; display: flex; flex-direction: column; gap: 2px; }
+.stock-head__value { font-size: var(--fs-3xl); font-weight: var(--fw-extra); letter-spacing: -0.02em; line-height: 1.1; }
+.stock-head__actions { display: flex; gap: var(--sp-2); align-items: center; }
+.detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: var(--sp-6); }
+.score-panel { display: flex; gap: var(--sp-6); align-items: center; flex-wrap: wrap; }
+.score-panel__gauge { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
+.score-panel__factors { flex: 1 1 220px; display: flex; flex-direction: column; gap: var(--sp-3); }
+.numeric { display: flex; flex-direction: column; gap: var(--sp-4); }
+@media (max-width: 1023px) {
+  .detail-grid { grid-template-columns: 1fr; }
+  .stock-head { grid-template-columns: 1fr auto; }
+  .stock-head__actions { grid-column: 1 / -1; }
+}
+@media (max-width: 767px) {
+  .stock-head { grid-template-columns: 1fr; gap: var(--sp-3); }
+  .stock-head__price { text-align: left; }
+  .stock-head__value { font-size: var(--fs-2xl); }
+}
+
+/* ---------------------------------------------------------------- 모의 포트폴리오 */
+.pf { display: flex; flex-direction: column; gap: var(--sp-6); }
+.pf-picker { overflow-x: auto; }
+.pf-picker .segmented { white-space: nowrap; }
+.pf-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--sp-4); flex-wrap: wrap; }
+.pf-toolbar__actions { display: flex; gap: var(--sp-2); }
+.pf-summary { display: grid; grid-template-columns: minmax(260px, 1fr) 2fr; gap: var(--sp-4); }
+.pf-summary__hero { display: flex; flex-direction: column; gap: var(--sp-2); justify-content: center; }
+.pf-summary__big { font-size: var(--fs-3xl); font-weight: var(--fw-extra); letter-spacing: -0.02em; line-height: 1.1; }
+.pf-summary__pnl { font-size: var(--fs-lg); }
+.pf-summary .stat__sub { line-height: 1.4; }
+.pf-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
+.pf-weights { display: flex; flex-direction: column; gap: var(--sp-3); }
+.pf-donut { position: relative; height: 220px; }
+.pf-donut__center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+.pf-donut__center strong { font-size: var(--fs-xl); font-weight: var(--fw-extra); }
+.pf-legend { justify-content: center; }
+.pf-item { display: grid; grid-template-columns: minmax(200px, 2fr) repeat(3, minmax(120px, 1fr)) auto; gap: var(--sp-4); align-items: center; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-row); }
+.pf-item:hover { background: var(--card-hover); }
+.pf-item__name { display: flex; gap: var(--sp-3); align-items: center; min-width: 0; }
+.pf-item__name:hover .row__title { text-decoration: underline; text-underline-offset: 3px; }
+.pf-item__col { display: flex; flex-direction: column; text-align: right; font-size: var(--fs-sm); }
+.pf-item__actions { display: flex; gap: var(--sp-1); }
+@media (max-width: 1023px) {
+  .pf-summary, .pf-grid { grid-template-columns: 1fr; }
+  .pf-item { grid-template-columns: 1fr 1fr; }
+  .pf-item__name { grid-column: 1 / -1; }
+  .pf-item__col { text-align: left; }
+  .pf-item__actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+@media (max-width: 767px) {
+  .pf-summary__big { font-size: var(--fs-2xl); }
+}

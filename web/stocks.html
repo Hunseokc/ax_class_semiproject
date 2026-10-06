@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>주식 리스트 · Stock Board</title>
+  <meta name="description" content="국내·미국 25개 종목의 거래량·시가총액 순위와 매력도">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/pages.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" defer></script>
+  <script type="module" src="/static/js/pages/stocks.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="main__inner">
+        <header class="page-head">
+          <div><p class="subtle">Market</p><h1>주식 리스트</h1></div>
+          <div id="market-tabs"></div>
+        </header>
+
+        <section class="section" aria-label="필터">
+          <div class="toolbar">
+            <div id="sort-tabs"></div>
+            <label class="search"><span class="sr-only">종목 검색</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/></svg>
+              <input id="search" class="input" type="search" placeholder="이름·티커 검색" autocomplete="off"></label>
+            <label class="toolbar__group"><span class="sr-only">경쟁 그룹</span>
+              <select id="group" class="select"><option value="">모든 경쟁 그룹</option></select></label>
+          </div>
+          <p class="notice" id="sort-hint" hidden>전체 탭은 시가총액(원화 환산) 순위만 볼 수 있습니다. 거래량 순위는 국내/미국 탭에서 확인하세요.</p>
+        </section>
+
+        <section class="section" aria-labelledby="h-list">
+          <div class="section__head"><h2 id="h-list">순위</h2><p class="subtle" id="list-meta"></p></div>
+          <div id="list"></div>
+        </section>
+
+        <p class="disclaimer">시세는 일봉 기준이며 장중 실시간이 아닙니다. 매력도는 유니버스(25종목) 내 같은 시장끼리의 상대평가이며 투자 권유가 아닙니다.</p>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

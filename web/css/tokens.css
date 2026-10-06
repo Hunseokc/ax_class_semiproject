@@ -1,0 +1,81 @@
+/* 디자인 토큰 — 다크 핀테크 (docs/assets/design_reference.png 기준)
+   면의 명도 차이로 구분하고 그림자는 쓰지 않는다. 파스텔 위 글자는 어두운 색. */
+:root {
+  color-scheme: dark;
+
+  /* 면 */
+  --bg: #141414;            /* 페이지 */
+  --surface: #1e1e1e;       /* 사이드바·큰 패널 */
+  --card: #2a2a2a;          /* 카드·리스트 행 */
+  --card-hover: #333333;
+  --card-active: #3a3a3a;   /* 선택된 행 */
+  --line: #3a3a3a;          /* 점선 기준선·구분선 */
+
+  /* 글자 */
+  --text: #ffffff;
+  --text-2: #b3b3b3;        /* 보조 (대비 9.0:1 on --bg) */
+  --text-3: #8c8c8c;        /* 부제·날짜 (대비 5.6:1 on --bg, 4.6:1 on --card) */
+  --text-on-pastel: #141414;
+  --text-on-pastel-2: #4a4a4a;
+
+  /* 강조 파스텔 */
+  --ice: #e6f4fa;
+  --lavender: #e6ddf2;
+  --ice-strong: #bfe3f2;
+  --lavender-strong: #cbb9e6;
+
+  /* 등락: 국내 상승 빨강·하락 파랑 / 미국 상승 초록·하락 빨강 (어두운 면용) */
+  --kr-up: #ff6b6b;
+  --kr-down: #5ea8ff;
+  --us-up: #3ddc97;
+  --us-down: #ff6b6b;
+  --flat: #b3b3b3;
+  /* 파스텔 면 위에서 쓰는 진한 변형 (대비 4.5:1 이상) */
+  --kr-up-on-pastel: #c0262d;
+  --kr-down-on-pastel: #1d5bbf;
+  --us-up-on-pastel: #0f7a45;
+  --us-down-on-pastel: #c0262d;
+
+  --danger: #ff6b6b;
+  --warning: #f5c26b;
+  --success: #3ddc97;
+
+  /* 모서리 */
+  --r-card: 28px;
+  --r-card-sm: 24px;
+  --r-row: 16px;
+  --r-pill: 999px;
+  --r-input: 14px;
+
+  /* 간격 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  /* 글꼴 */
+  --font: "Plus Jakarta Sans", "Pretendard", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 24px;
+  --fs-2xl: 32px;
+  --fs-3xl: 40px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-extra: 800;
+
+  /* 레이아웃 */
+  --sidebar-w: 248px;
+  --tabbar-h: 72px;
+  --content-max: 1280px;
+  --focus: 0 0 0 3px rgba(230, 221, 242, 0.55);
+  --ease: cubic-bezier(.2, .7, .2, 1);
+}

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>모의 포트폴리오 · Stock Board</title>
+  <meta name="description" content="시드 안에서 국내·미국 종목을 담아 보는 원화 통합 모의 계산기">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/pages.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" defer></script>
+  <script type="module" src="/static/js/pages/portfolio.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="main__inner">
+        <header class="page-head">
+          <div><p class="subtle">Simulator</p><h1>모의 포트폴리오</h1></div>
+          <button class="btn btn--accent" type="button" id="create">+ 새 포트폴리오</button>
+        </header>
+        <div id="picker" class="pf-picker"></div>
+        <p class="notice">모의 계산이며 투자 권유가 아닙니다. 실제 매수·매도 체결이 아니라, 시드 안에서 종목을 담아 원가·비중·평가손익을 계산해 보는 도구입니다.</p>
+        <div id="content"></div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

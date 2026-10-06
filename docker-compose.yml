@@ -1,0 +1,21 @@
+# DB만 컨테이너로 실행한다. API는 로컬 venv에서 uvicorn으로 실행.
+services:
+  db:
+    image: postgres:16
+    container_name: ax_semi_db
+    environment:
+      POSTGRES_USER: stock
+      POSTGRES_PASSWORD: stock
+      POSTGRES_DB: stockdb
+    ports:
+      - "${DB_PORT:-5433}:5432"   # 5432는 다른 로컬 PostgreSQL과 충돌할 수 있어 5433 사용
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro   # 테스트 DB 생성 스크립트
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stock -d stockdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  pgdata:

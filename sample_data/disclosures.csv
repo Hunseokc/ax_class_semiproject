@@ -1,0 +1,105 @@
+market,ticker,rcept_no,title,report_type,filed_at,url,data_source
+KOSPI,000660,20260407800748,[기재정정]최대주주등소유주식변동신고서,거래소공시,2026-04-06 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260407800748,DART
+KOSPI,000660,20260409800781,기업설명회(IR)개최(안내공시),거래소공시,2026-04-08 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260409800781,DART
+KOSPI,000660,20260422000633,주요사항보고서(자기주식처분결정),주요사항보고,2026-04-21 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260422000633,DART
+KOSPI,000660,20260422800748,현금ㆍ현물배당을위한주주명부폐쇄(기준일)결정,거래소공시,2026-04-21 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260422800748,DART
+KOSPI,000660,20260422800788,현금ㆍ현물배당결정,거래소공시,2026-04-21 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260422800788,DART
+KOSPI,000660,20260422800243,장래사업ㆍ경영계획(공정공시),거래소공시,2026-04-21 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260422800243,DART
+KOSPI,000660,20260423800001,연결재무제표기준영업(잠정)실적(공정공시),거래소공시,2026-04-22 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260423800001,DART
+KOSPI,000660,20260428800513,자기교환사채만기전취득결정,거래소공시,2026-04-27 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260428800513,DART
+KOSPI,000660,20260506800689,최대주주등소유주식변동신고서,거래소공시,2026-05-05 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260506800689,DART
+KOSPI,000660,20260507000542,자기주식처분결과보고서,기타공시,2026-05-06 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260507000542,DART
+KOSPI,000660,20260513000549,주요사항보고서(자기주식처분결정),주요사항보고,2026-05-12 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260513000549,DART
+KOSPI,000660,20260515002287,분기보고서 (2026.03),정기공시,2026-05-14 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260515002287,DART
+KOSPI,000660,20260529801972,기업지배구조보고서공시,거래소공시,2026-05-28 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260529801972,DART
+KOSPI,000660,20260616800847,풍문또는보도에대한해명,거래소공시,2026-06-15 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260616800847,DART
+KOSPI,000660,20260625800489,지속가능경영보고서등관련사항(자율공시),거래소공시,2026-06-24 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260625800489,DART
+KOSPI,000660,20260626801398,중대재해발생,거래소공시,2026-06-25 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260626801398,DART
+KOSPI,000660,20260629800981,장래사업ㆍ경영계획(공정공시),거래소공시,2026-06-28 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260629800981,DART
+KOSPI,000660,20260710000012,투자설명서,발행공시,2026-07-09 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260710000012,DART
+KOSPI,000660,20260710000008,[기재정정]주요사항보고서(유상증자결정),주요사항보고,2026-07-09 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260710000008,DART
+KOSPI,000660,20260710000002,[기재정정]주요사항보고서(해외증권시장주권등상장결정),주요사항보고,2026-07-09 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260710000002,DART
+KOSPI,000660,20260710000010,[발행조건확정]증권신고서(지분증권),발행공시,2026-07-09 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260710000010,DART
+KOSPI,000660,20260710800023,[기재정정]증권예탁증권(DR)발행결정,거래소공시,2026-07-09 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260710800023,DART
+KOSPI,000660,20260713000324,주요사항보고서(해외증권시장주권등상장),주요사항보고,2026-07-12 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260713000324,DART
+KOSPI,000660,20260715800045,유상증자또는주식관련사채등의발행결과(자율공시),거래소공시,2026-07-14 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260715800045,DART
+KOSPI,000660,20260715000004,증권발행실적보고서,발행공시,2026-07-14 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260715000004,DART
+KOSPI,000660,20260715800456,기업설명회(IR)개최(안내공시),거래소공시,2026-07-14 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260715800456,DART
+KOSPI,000660,20260722800178,풍문또는보도에대한해명,거래소공시,2026-07-21 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260722800178,DART
+KOSPI,000660,20260722800829,신규시설투자등,거래소공시,2026-07-21 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260722800829,DART
+KOSPI,000660,20260729800013,연결재무제표기준영업(잠정)실적(공정공시),거래소공시,2026-07-28 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260729800013,DART
+KOSPI,000660,20260730800996,최대주주등소유주식변동신고서,거래소공시,2026-07-29 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260730800996,DART
+KOSPI,000660,20260805800806,풍문또는보도에대한해명(미확정),거래소공시,2026-08-04 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260805800806,DART
+KOSPI,000660,20260807800589,현금ㆍ현물배당결정,거래소공시,2026-08-06 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260807800589,DART
+KOSPI,000660,20260807800596,현금ㆍ현물배당을위한주주명부폐쇄(기준일)결정,거래소공시,2026-08-06 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260807800596,DART
+KOSPI,000660,20260807800602,신규시설투자등,거래소공시,2026-08-06 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260807800602,DART
+KOSPI,000660,20260807800613,신규시설투자등,거래소공시,2026-08-06 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260807800613,DART
+KOSPI,000660,20260807000537,주요사항보고서(자기주식처분결정),주요사항보고,2026-08-06 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260807000537,DART
+KOSPI,000660,20260810800434,조회공시요구(풍문또는보도)에대한답변(미확정),거래소공시,2026-08-09 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260810800434,DART
+KOSPI,000660,20260810800101,조회공시요구(풍문또는보도),거래소공시,2026-08-09 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260810800101,DART
+KOSPI,000660,20260814802986,파생상품거래손실발생,거래소공시,2026-08-13 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260814802986,DART
+KOSPI,000660,20260814003509,반기보고서 (2026.06),정기공시,2026-08-13 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260814003509,DART
+KOSPI,000660,20260819800338,수시공시의무관련사항(공정공시),거래소공시,2026-08-18 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260819800338,DART
+KOSPI,000660,20260819000254,주요사항보고서(자기주식취득결정),주요사항보고,2026-08-18 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260819000254,DART
+KOSPI,000660,20260819800340,주식소각결정,거래소공시,2026-08-18 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260819800340,DART
+KOSPI,000660,20260821800617,최대주주등소유주식변동신고서,거래소공시,2026-08-20 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260821800617,DART
+KOSPI,000660,20260821800524,조회공시요구(풍문또는보도)에대한답변(미확정),거래소공시,2026-08-20 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260821800524,DART
+KOSPI,000660,20260821000495,자기주식처분결과보고서,기타공시,2026-08-20 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260821000495,DART
+KOSPI,000660,20260821800214,조회공시요구(풍문또는보도),거래소공시,2026-08-20 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260821800214,DART
+KOSPI,000660,20260904800642,풍문또는보도에대한해명(미확정),거래소공시,2026-09-03 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260904800642,DART
+KOSPI,000660,20260909800559,조회공시요구(풍문또는보도)에대한답변(미확정),거래소공시,2026-09-08 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260909800559,DART
+KOSPI,000660,20260918800583,조회공시요구(풍문또는보도)에대한답변(미확정),거래소공시,2026-09-17 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260918800583,DART
+KOSPI,005930,20260407800120,기업설명회(IR)개최(안내공시),거래소공시,2026-04-06 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260407800120,DART
+KOSPI,005930,20260413800802,최대주주등소유주식변동신고서,거래소공시,2026-04-12 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260413800802,DART
+KOSPI,005930,20260424000778,자기주식취득결과보고서,기타공시,2026-04-23 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260424000778,DART
+KOSPI,005930,20260430800097,[기재정정]연결재무제표기준영업(잠정)실적(공정공시),거래소공시,2026-04-29 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260430800097,DART
+KOSPI,005930,20260430800106,현금ㆍ현물배당결정,거래소공시,2026-04-29 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260430800106,DART
+KOSPI,005930,20260430800083,연결재무제표기준영업(잠정)실적(공정공시),거래소공시,2026-04-29 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260430800083,DART
+KOSPI,005930,20260508801105,최대주주등소유주식변동신고서,거래소공시,2026-05-07 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260508801105,DART
+KOSPI,005930,20260515002181,분기보고서 (2026.03),정기공시,2026-05-14 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260515002181,DART
+KOSPI,005930,20260601800268,기업지배구조보고서공시,거래소공시,2026-05-31 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260601800268,DART
+KOSPI,005930,20260608800918,최대주주등소유주식변동신고서,거래소공시,2026-06-07 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260608800918,DART
+KOSPI,005930,20260624801004,풍문또는보도에대한해명(미확정),거래소공시,2026-06-23 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260624801004,DART
+KOSPI,005930,20260626800871,지속가능경영보고서등관련사항(자율공시),거래소공시,2026-06-25 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260626800871,DART
+KOSPI,005930,20260629801230,[기재정정]장래사업ㆍ경영계획(공정공시),거래소공시,2026-06-28 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260629801230,DART
+KOSPI,005930,20260706800672,최대주주등소유주식변동신고서,거래소공시,2026-07-05 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260706800672,DART
+KOSPI,005930,20260707800015,기업설명회(IR)개최(안내공시),거래소공시,2026-07-06 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260707800015,DART
+KOSPI,005930,20260707000403,주요사항보고서(자기주식처분결정),주요사항보고,2026-07-06 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260707000403,DART
+KOSPI,005930,20260710000585,자기주식처분결과보고서,기타공시,2026-07-09 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260710000585,DART
+KOSPI,005930,20260713000395,주요사항보고서(자기주식처분결정),주요사항보고,2026-07-12 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260713000395,DART
+KOSPI,005930,20260716000796,자기주식처분결과보고서,기타공시,2026-07-15 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260716000796,DART
+KOSPI,005930,20260721801260,최대주주등소유주식변동신고서,거래소공시,2026-07-20 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260721801260,DART
+KOSPI,005930,20260723800875,풍문또는보도에대한해명(미확정),거래소공시,2026-07-22 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260723800875,DART
+KOSPI,005930,20260730800822,기타경영사항(자율공시),거래소공시,2026-07-29 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260730800822,DART
+KOSPI,005930,20260730800825,기타경영사항(자율공시),거래소공시,2026-07-29 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260730800825,DART
+KOSPI,005930,20260730800137,현금ㆍ현물배당결정,거래소공시,2026-07-29 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260730800137,DART
+KOSPI,005930,20260730800103,[기재정정]연결재무제표기준영업(잠정)실적(공정공시),거래소공시,2026-07-29 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260730800103,DART
+KOSPI,005930,20260730800077,연결재무제표기준영업(잠정)실적(공정공시),거래소공시,2026-07-29 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260730800077,DART
+KOSPI,005930,20260731801296,최대주주등소유주식변동신고서,거래소공시,2026-07-30 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260731801296,DART
+KOSPI,005930,20260814003699,반기보고서 (2026.06),정기공시,2026-08-13 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260814003699,DART
+KOSPI,005930,20260821800837,기타경영사항(자율공시),거래소공시,2026-08-20 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260821800837,DART
+KOSPI,005930,20260821000616,주요사항보고서(자기주식취득결정),주요사항보고,2026-08-20 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260821000616,DART
+KOSPI,005930,20260821800763,수시공시의무관련사항(공정공시),거래소공시,2026-08-20 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260821800763,DART
+KOSPI,005930,20260908800624,최대주주등소유주식변동신고서,거래소공시,2026-09-07 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260908800624,DART
+KOSPI,005930,20260918800754,최대주주등소유주식변동신고서,거래소공시,2026-09-17 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260918800754,DART
+KOSPI,005930,20261002800981,최대주주등소유주식변동신고서,거래소공시,2026-10-01 15:00:00+00:00,https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261002800981,DART
+NASDAQ,AAPL,0001140361-26-015711,8-K (Item 5.02),8-K,2026-04-21 01:29:51+00:00,https://www.sec.gov/Archives/edgar/data/320193/000114036126015711/ef20071035_8k.htm,SEC
+NASDAQ,AAPL,0000320193-26-000011,"8-K (Item 2.02,9.01)",8-K,2026-05-01 00:30:41+00:00,https://www.sec.gov/Archives/edgar/data/320193/000032019326000011/aapl-20260430.htm,SEC
+NASDAQ,AAPL,0000320193-26-000013,10-Q,10-Q,2026-05-01 14:01:00+00:00,https://www.sec.gov/Archives/edgar/data/320193/000032019326000013/aapl-20260328.htm,SEC
+NASDAQ,AAPL,0001140361-26-023149,SD,SD,2026-05-29 00:30:18+00:00,https://www.sec.gov/Archives/edgar/data/320193/000114036126023149/ef20073373_sd.htm,SEC
+NASDAQ,AAPL,0000320193-26-000018,"8-K (Item 2.02,9.01)",8-K,2026-07-31 00:30:28+00:00,https://www.sec.gov/Archives/edgar/data/320193/000032019326000018/aapl-20260730.htm,SEC
+NASDAQ,AAPL,0000320193-26-000020,10-Q,10-Q,2026-07-31 14:01:02+00:00,https://www.sec.gov/Archives/edgar/data/320193/000032019326000020/aapl-20260627.htm,SEC
+NASDAQ,AAPL,0001140361-26-035325,8-K/A (Item 5.02),8-K/A,2026-09-02 00:30:35+00:00,https://www.sec.gov/Archives/edgar/data/320193/000114036126035325/ef20081427_8ka.htm,SEC
+NASDAQ,NVDA,0001045810-26-000026,8-K (Item 5.02),8-K,2026-04-27 20:10:30+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000104581026000026/nvda-20260424.htm,SEC
+NASDAQ,NVDA,0001045810-26-000028,8-K (Item 5.02),8-K,2026-05-08 20:35:07+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000104581026000028/nvda-20260507.htm,SEC
+NASDAQ,NVDA,0001045810-26-000036,DEF 14A,DEF 14A,2026-05-12 20:42:13+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000104581026000036/nvda-20260512.htm,SEC
+NASDAQ,NVDA,0001045810-26-000043,SD,SD,2026-05-15 20:17:28+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000104581026000043/a2026formsd.htm,SEC
+NASDAQ,NVDA,0001045810-26-000051,"8-K (Item 2.02,9.01)",8-K,2026-05-20 20:21:19+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000104581026000051/nvda-20260520.htm,SEC
+NASDAQ,NVDA,0001045810-26-000052,10-Q,10-Q,2026-05-20 20:35:52+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000104581026000052/nvda-20260426.htm,SEC
+NASDAQ,NVDA,0001193125-26-275783,"8-K (Item 8.01,9.01)",8-K,2026-06-18 20:00:24+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000119312526275783/d48176d8k.htm,SEC
+NASDAQ,NVDA,0001045810-26-000056,8-K (Item 5.07),8-K,2026-06-30 20:27:26+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000104581026000056/nvda-20260624.htm,SEC
+NASDAQ,NVDA,0001045810-26-000060,8-K (Item 5.02),8-K,2026-07-02 13:23:16+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000104581026000060/nvda-20260628.htm,SEC
+NASDAQ,NVDA,0001045810-26-000069,"8-K (Item 1.01,2.03,7.01)",8-K,2026-08-17 12:41:33+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000104581026000069/nvda-20260817.htm,SEC
+NASDAQ,NVDA,0001045810-26-000073,"8-K (Item 2.02,9.01)",8-K,2026-08-26 20:21:19+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000104581026000073/nvda-20260826.htm,SEC
+NASDAQ,NVDA,0001045810-26-000075,10-Q,10-Q,2026-08-26 20:36:00+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000104581026000075/nvda-20260726.htm,SEC
+NASDAQ,NVDA,0001045810-26-000078,8-K (Item 8.01),8-K,2026-09-03 12:03:56+00:00,https://www.sec.gov/Archives/edgar/data/1045810/000104581026000078/nvda-20260902.htm,SEC

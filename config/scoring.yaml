@@ -1,0 +1,9 @@
+# 매력도 가중치 (합 100). 변경 시 version을 올린다 → stock_scores.weights_version
+version: v1
+weights:
+  valuation: 30       # PER·PBR 낮을수록 ↑ (음수·NULL 제외)
+  growth: 25          # 매출 YoY·영업이익 YoY 높을수록 ↑
+  profitability: 25   # 영업이익률·ROE 높을수록 ↑
+  momentum: 20        # 3개월 수익률·120일선 괴리율 높을수록 ↑
+# 팩터 순위는 같은 country 안에서 PERCENT_RANK()로 계산
+partition_by: country

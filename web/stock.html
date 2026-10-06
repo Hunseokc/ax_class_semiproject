@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>종목 상세 · Stock Board</title>
+  <meta name="description" content="종목 가격 차트, 핵심 지표, 매력도, 수치 분석, 재무 추이, 경쟁 종목 비교, 최근 공시">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/pages.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" defer></script>
+  <script type="module" src="/static/js/pages/stock.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="main__inner">
+        <p><a class="section__link" href="/stocks">← 주식 리스트</a></p>
+        <div id="head"></div>
+
+        <section class="section card detail-section" aria-labelledby="h-price">
+          <div class="section__head"><h2 id="h-price">가격 차트</h2><div id="range-tabs"></div></div>
+          <div id="price-chart"></div>
+        </section>
+
+        <section class="section detail-section" aria-labelledby="h-key">
+          <h2 id="h-key">핵심 지표</h2>
+          <div id="key-metrics"></div>
+        </section>
+
+        <div class="detail-grid detail-section">
+          <section class="section card" aria-labelledby="h-score">
+            <h2 id="h-score">매력도</h2>
+            <div id="score"></div>
+          </section>
+          <section class="section card" aria-labelledby="h-num">
+            <h2 id="h-num">수치 분석</h2>
+            <div id="numeric"></div>
+          </section>
+        </div>
+
+        <section class="section card detail-section" aria-labelledby="h-fin">
+          <h2 id="h-fin">재무 추이 (연간)</h2>
+          <div id="financials"></div>
+        </section>
+
+        <section class="section card detail-section" aria-labelledby="h-peers">
+          <h2 id="h-peers">경쟁 종목 비교</h2>
+          <div id="peers"></div>
+        </section>
+
+        <section class="section detail-section" aria-labelledby="h-disc">
+          <h2 id="h-disc">최근 공시</h2>
+          <div id="disclosures"></div>
+        </section>
+
+        <p class="disclaimer">시세는 일봉 기준이며 장중 실시간이 아닙니다. 매력도는 유니버스(25종목) 내 같은 시장끼리의 상대평가이며, 이 화면의 어떤 정보도 투자 권유가 아닙니다.</p>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

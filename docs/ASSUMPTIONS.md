@@ -1,0 +1,128 @@
+# 가정·결정·미확인 사항
+
+상태: **결정** / **가정**(기본값으로 진행, 변경 가능) / **확인**(실제 호출로 확인) / **미확인** / **결정 필요**
+
+## 데이터 소스
+| ID | 내용 | 상태 | 근거 |
+|---|---|---|---|
+| A-01 | pykrx 1.2.9는 KRX 회원 로그인(`KRX_ID`/`KRX_PW`)이 없으면 일봉·종목명만 동작하고, 시총·펀더멘털은 빈 결과, 지수는 `KeyError: '지수명'`. **로그인하면 일봉·시총·펀더멘털(PER/PBR/EPS/BPS/DIV/DPS)·지수(1001/2001) 모두 동작** | 확인 | smoke test 2026-10-06 (로그인 전/후) |
+| A-02 | 국내 밸류에이션: **pykrx `get_market_fundamental`·`get_market_cap`을 주 소스**(`source='PYKRX'`, 최근 1년 일별)로 쓴다. `PRICE_SOURCE_KR=yfinance`이거나 pykrx 실패 시에만 **DART FY 기반 파생 계산**(EPS=지배주주 순이익/상장주식수, BPS=지배주주 자본/상장주식수, PER·PBR=종가/EPS·BPS, `source='DERIVED'`)으로 대체 | 결정(Gate 1 확인) | 사용자 선택 (a)는 pykrx 불가 전제였음. 로그인 후 pykrx가 직접 제공하므로 명세 원안을 주 경로로, (a)를 폴백으로 둠 |
+| A-03 | `PRICE_SOURCE_KR` 기본값 `pykrx`. 국내 일봉·지수·밸류에이션을 pykrx로 수집하고 `yfinance`(`.KS`/`.KQ`, `^KS11`/`^KQ11`)로 전환 가능 | 결정 | 사용자 결정 |
+| A-04 | pykrx는 import 시점에 `os.environ`의 `KRX_ID`/`KRX_PW`를 읽으므로 `.env` 값을 pykrx import 전에 환경변수로 내보낸다(`export_krx_credentials()`) | 확인 | pykrx `website/comm/auth.py` |
+| A-05 | KRX 로그인 세션 만료 1시간. pykrx `get_auth_session()`이 만료 시 자동 재로그인한다(소스 확인). 전체 적재는 257초라 영향 없음 | 확인 | pykrx `website/comm/auth.py` |
+| A-06 | 일봉은 수정주가(pykrx `adjusted=True`, yfinance `auto_adjust=True`) | 결정 | 명세 |
+| A-07 | 장 마감 전 당일 미확정 봉은 적재하지 않는다(KR 15:30, US 16:00 현지 시각 기준) | 가정 | 일봉 기준 서비스 |
+| A-08 | yfinance `KRW=X` 인덱스 tz는 Europe/London. DAILY 환율의 `rate_at`은 해당 날짜 00:00 Asia/Seoul로 저장 | 가정 | smoke test |
+| A-09 | 미국 종목 9개는 모두 NASDAQ(`NMS`). `NYSE` 시장 행은 S&P 500·Dow 지수의 `market_id` 연결용 | 가정 | smoke test 거래소 확인 |
+| A-10 | yfinance 연간 재무는 4개 기간만 제공 → FY 5개년은 DART/SEC가 주 소스, yfinance는 누락 보완용 | 확인 | smoke test |
+
+## OpenDART
+| ID | 내용 | 상태 | 근거 |
+|---|---|---|---|
+| A-11 | `corpCode.xml`로 국내 16개 종목 corp_code 전부 매핑 | 확인 | smoke test |
+| A-12 | 재무는 `fnlttSinglAcntAll` 사업보고서(`reprt_code=11011`) **연결(CFS)** 기준, 없으면 별도(OFS). `accounting_std='K-IFRS'` | 결정 | 16개 종목 2021~2025 CFS 전부 status=000 |
+| A-13 | 계정 ID가 회사·연도마다 다르다. 2021~2025 확인 결과: 현대차 2021·2022 `ifrs-full_ProfitLoss` 없음, NAVER 2021 지배주주 순이익 ID 없음, 카카오 2021·2022 `ifrs-full_Revenue` 없음, POSCO홀딩스 2022는 "-표준계정코드 미사용-"(계정명 "매출액"). → **account_id 후보 목록 → account_nm 후보(매출액/영업수익/수익(매출액) 등) 순서의 매핑**으로 추출하고, 못 찾은 항목은 NULL + `ingestion_logs` 기록 | 확인 / 대응은 3단계 | DART 계정 probe |
+| A-14 | 사업보고서 1건에 당기·전기·전전기(`thstrm/frmtrm/bfefrmtrm_amount`) 값이 있으므로, 특정 연도 값이 비면 다음 연도 보고서의 전기 값으로 보완할 수 있다 | 가정 | DART 문서 필드 |
+| A-15 | 공시 URL은 `https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}` | 가정 | DART 공시 뷰어 URL 형식 |
+
+## SEC EDGAR
+| ID | 내용 | 상태 | 근거 |
+|---|---|---|---|
+| A-16 | **API 키는 필요 없다.** 대신 `User-Agent` 헤더가 필수. 실측: UA 없음 → 3개 엔드포인트 모두 403. 연락처 없는 UA(`ax-semi student project`) → `data.sec.gov`의 submissions·companyfacts는 200, `www.sec.gov/files/company_tickers.json`은 403 | 확인 | curl 실측 2026-10-06 |
+| A-17 | SEC 공정 접근 정책에 따라 `SEC_USER_AGENT`는 "앱이름 이메일" 형식으로 설정한다. 이메일 UA 설정 후 `company_tickers.json` 200, 미국 9개 종목 CIK 9/9 매핑 | 확인 | 2026-10-06 실측 |
+| A-18 | companyfacts에 `Revenues`, `RevenueFromContractWithCustomerExcludingAssessedTax`, `OperatingIncomeLoss`, `NetIncomeLoss`, `Assets`, `StockholdersEquity`, `LongTermDebt` 존재(AAPL), NetIncomeLoss 10-K FY 2020~2025 존재 | 확인 | smoke test (AAPL만) |
+| A-19 | 나머지 8개 미국 종목의 개념명 차이(예: 매출 개념명)는 3단계 적재 시 확인 | 미확인 | |
+
+## 환경
+| ID | 내용 | 상태 | 근거 |
+|---|---|---|---|
+| A-20 | DB 호스트 포트는 **5433**(`DB_PORT`로 변경 가능). 로컬의 다른 PostgreSQL 컨테이너가 5432 사용 중 | 결정 | 포트 충돌 |
+| A-21 | SQLAlchemy는 설치 시점 최신 2.x(2.1.3) | 결정 | 명세 "2.0(동기 Session)"과 API 호환 |
+| A-22 | 시스템 python3은 3.14이므로 venv는 `python3.12`로 생성 | 결정 | 명세 Python 3.12 |
+| A-23 | 디자인 레퍼런스: `docs/assets/design_reference.png`. 색·라운드·타이포·구성요소만 참고하고 월계관·"1 Million Views"·dribbble 로고·"Thank you"·3D 리본·카드 번호/이름 등 장식·콘텐츠는 따라하지 않는다 | 결정 | 명세 0절 |
+
+## DB 설계 (2단계)
+| ID | 내용 | 상태 | 근거 |
+|---|---|---|---|
+| A-24 | `v_fx_latest`는 "가장 최근 rate_at, 같은 시각이면 SNAPSHOT 우선"으로 고른다. 명세 문구(SNAPSHOT이 있으면 그것)를 그대로 따르면 며칠 전 SNAPSHOT이 더 최근 DAILY보다 우선되는 문제가 있다. FxService의 TTL 판단은 별도로 최신 SNAPSHOT만 본다 | 가정 | 최신성 우선 |
+| A-25 | VIEW의 비율 값은 소수(0.05 = 5%)로 반환하고, % 변환은 API/프론트에서 한다 | 결정 | 계산·표시 분리 |
+| A-26 | YoY = (당기 − 전기) / \|전기\|. 전기 0·NULL이면 NULL. 직전 FY 결산일이 당기 결산일 330~400일 전이 아니면(연도 누락) NULL | 결정 | 적자 전환·누락 연도에서 거짓 값 방지 |
+| A-27 | ROE는 자본 ≤ 0이면 NULL (명세의 "분모 0·NULL"에 음수 자본 추가) | 결정 | 음수 자본 ROE는 해석 불가 |
+| A-28 | 거래량 비율의 20일 평균은 최신일을 제외한 직전 20거래일 평균 | 결정 | 자기 자신 포함 시 비율 희석 |
+| A-29 | 52주 고가·저가는 일중 고가·저가(수정주가) 기준, 기간은 기준일로부터 1년. 1년 전 데이터가 없으면 NULL | 결정 | |
+| A-30 | 변동성은 일수익률 252개, MDD는 252거래일, 이동평균은 N거래일이 모두 있을 때만 계산 | 결정 | 부족 데이터로 거짓 값 방지 |
+| A-31 | `total_debt`는 부채총계(KR `ifrs-full_Liabilities`, US `Liabilities`)로 정의 → 부채비율 = 부채총계/자본 | 결정 | 국가 간 같은 정의 |
+| A-32 | `net_income`·`total_equity`는 지배기업 소유주 귀속 값을 우선 사용(없으면 전체) | 결정 | ROE·EPS 정합성 |
+| A-33 | 명세 DDL에 추가한 것: CHECK(가격 > 0, 통화 KRW/USD, source·data_source·job_type·status 값 목록, 점수 0~100, rows_loaded ≥ 0, finished_at ≥ started_at, 시총·주식수 ≥ 0), `valuation_snapshots.source`에 `DERIVED`, `ingestion_logs.job_type`에 `MASTER`(마스터 적재), `source`에 `INTERNAL`(점수 계산), `updated_at` 트리거, 인덱스 `ix_peer_members_stock` | 결정 | 데이터 무결성 |
+| A-34 | `ix_valuation_stock_asof (stock_id, as_of DESC)`는 PK (stock_id, as_of)의 역방향 스캔과 기능이 겹친다. 명세대로 생성하되 5단계 EXPLAIN 비교 결과로 유지 여부를 결정 | 미확인 | |
+| A-35 | `disclosures.rcept_no`는 명세대로 단독 UNIQUE. 공동 제출 등으로 같은 accession number가 유니버스 내 두 종목에 걸리면 첫 종목에만 적재된다(현재 유니버스에서는 발생 가능성 낮음) | 가정 | |
+
+## 수집·적재 (3단계)
+| ID | 내용 | 상태 | 근거 |
+|---|---|---|---|
+| A-36 | 공시 수집 범위: DART는 공시유형 A(정기)·B(주요사항)·C(발행)·E(기타)·F(외부감사)·I(거래소)만, `last_reprt_at=Y`(최종본). D(지분공시)·G·H·J 제외. SEC는 10-K·10-Q·8-K(각 /A)·DEF 14A·S-3·S-3ASR·S-8·SD·11-K만, Form 4 등 내부자 지분 보고 제외 | 결정 | 삼성전자 1년 2,851건 중 2,730건이 지분공시(D) — 화면의 "최근 공시 5건"이 임원 지분 보고로 채워지는 것을 방지 |
+| A-37 | pykrx PER·PBR이 0 이하면 NULL, EPS·BPS가 0이면 NULL (KRX는 산출 불가를 0으로 표기) | 결정 | 적자 종목(현대제철, LG에너지솔루션 등) PER 0 확인 |
+| A-38 | KRX가 제공하는 EPS의 산정 기준(연결/별도, 기준 연도)은 DART 연결 지배주주 순이익/상장주식수와 다르다(삼성전자 KRX EPS 6,605 vs DART 2025 기준 약 7,571). KRX 원본 값을 그대로 저장하며, ROE 등 재무 지표는 DART 재무로 따로 계산한다 | 미확인 | 적재 결과 비교 |
+| A-39 | 미국 밸류에이션 `as_of`는 적재 시각이 아니라 해당 종목의 최신 거래일(현지) | 결정 | 시세와 기준일 일치 |
+| A-40 | SEC FY 선택: form 10-K/10-K/A, 기간형 항목은 기간 350~380일(52/53주 회계연도 허용), 같은 결산일은 가장 최근 제출값(재작성 반영). 개념 우선순위 매출 `RevenueFromContractWithCustomerExcludingAssessedTax` → `Revenues` → …, 자본 `StockholdersEquity` → 비지배지분 포함 자본. 빈 값은 같은 결산기(±7일)의 yfinance 값으로 보완 | 결정 | GOOGL·NVDA는 `Revenues`, AVGO는 비지배 포함 자본, AMZN·AMD 부채총계는 yfinance로 보완됨 |
+| A-41 | 보완 후에도 남은 NULL 3건: AVGO FY2021 순이익, AMZN·AMD FY2021 부채총계 (yfinance는 최근 4개 연도만 제공). 값을 추정하지 않고 NULL 유지 | 확인 | 적재 결과 |
+| A-42 | 이상 행 격리: 행을 버리지 않고 `data/quarantine/{job}_{날짜}.csv`에 원본 행·사유를 남기고, 해당 작업의 `ingestion_logs.error`에 "격리 N행 {사유: 건수} → 파일" 요약을 기록한다(status는 SUCCESS). 2026-10-06 전체 적재에서 격리 0행 | 결정 | 명세 "이상 행 격리(사유 로그)" |
+| A-43 | `ingestion_logs.error`는 실패 사유 외에 성공 작업의 추적 메모(대체 계정 사용, 수집 구간 등)도 담는다 | 결정 | 별도 컬럼 추가 없이 추적성 확보 |
+| A-44 | yfinance는 요청 시작일 이후 데이터가 없으면 시작일 이전 마지막 봉을 돌려준다 → 요청 구간 밖의 행은 버린다(재적재 시 `rows_loaded` 정확성) | 확인 | AAPL 증분 적재 시 2026-10-05 봉 반환 확인 |
+| A-45 | 환율 DAILY 증분은 마지막 일자부터 다시 받는다(24시간 거래라 당일 값이 계속 바뀜). 주식 일봉은 장 마감 전 당일 봉을 적재하지 않는다 | 결정 | |
+| A-46 | 증분 일봉은 과거 수정주가 소급 조정(배당·분할)을 반영하지 못한다 → 필요 시 `prices --full`로 전체 재수집(upsert라 행 수 불변) | 결정 | 한계로 README에 명시 |
+| A-47 | 샘플 데이터(`sample_data/`)는 반도체 그룹 4종목(삼성전자·SK하이닉스·AAPL·NVDA) × 최근 6개월 + 지수·환율 6개월 + 4종목 FY 재무·공시. CSV는 ID 대신 (market, ticker)로 기록 | 결정 | 그룹 비교가 샘플만으로도 동작 |
+
+## API·서비스 (4단계)
+| ID | 내용 | 상태 | 근거 |
+|---|---|---|---|
+| A-48 | 명세 외 엔드포인트 `GET /market/refresh/status` 추가: 외부 호출 없이 작업별 마지막 성공 시각·다음 갱신 가능 시각을 반환(사이드바 "마지막 갱신 시각"을 페이지 로드 때 표시하기 위함. POST를 부르면 TTL 초과 시 외부 호출이 일어남) | 결정 | 명세 6절 화면 요구 |
+| A-49 | 환율 조회 실패 후 15분 동안은 외부 호출을 다시 하지 않고 마지막 값 + `fx_stale`로 응답(요청마다 재시도·백오프 대기로 응답이 느려지는 것 방지). 실패 기록은 별도 트랜잭션으로 남겨 503이어도 보존 | 결정 | |
+| A-50 | 갱신(FX 작업)은 SNAPSHOT 1회 + DAILY 증분 1회를 함께 수행한다(홈의 30일 스파크라인이 DAILY를 쓰므로) | 결정 | |
+| A-51 | 갱신 TTL 판단은 `ingestion_logs`의 작업 종류별 마지막 SUCCESS 시각. 종목 일부만 실패해도 해당 작업은 성공 시각이 갱신된다(실패 종목은 다음 TTL 이후 재시도). 응답의 작업 상태는 SUCCESS/PARTIAL/FAILED/SKIPPED | 결정 | |
+| A-52 | 실행할 수 없는 작업(점수 계산기 미연결 등)은 `next_refresh_available_at` 계산에서 제외 | 결정 | 4단계 오류 재확인에서 발견 |
+| A-53 | 금액·비율은 서버에서 Decimal로 계산하고 JSON에는 숫자(정수면 int, 아니면 float)로 내보낸다. 비율은 소수(0.58 = 58%) | 결정 | 프론트 표시 편의, 계산 정밀도는 서버에서 보장 |
+| A-54 | 담기 기준가는 `v_latest_price`의 최신 종가, 기준일(`ref_date`)은 그 거래일. USD 종목 기준 환율은 `FxService.get_current_rate()`(TTL 내 DB 값) | 결정 | 명세 7절 |
+| A-55 | 경쟁 그룹별 비중은 종목이 여러 그룹에 속하면 각 그룹에 원가 전체를 반영한다(그룹 비중 합계가 100%를 넘을 수 있음). 현재 유니버스는 종목당 1개 그룹이라 합계 100% | 결정 | N:M 구조 |
+| A-56 | 환 효과 분리: 원화 손익 = 가격 효과 `수량×(현재가−기준가)×기준환율` + 환율 효과 `수량×현재가×(현재환율−기준환율)` (두 항의 합이 손익과 정확히 일치) | 결정 | 명세 시나리오 검증 |
+| A-57 | 사용자 식별은 `user_id` 쿼리/바디 파라미터(기본 1). 없는 사용자는 404 | 결정 | 인증 없음(명세 8절) |
+| A-58 | demo 포트폴리오 2개(`seed-demo`)는 서비스 계층을 거쳐 생성 → 시드 검증·기준가 저장이 실제 경로와 같다. 같은 이름이 있으면 건너뜀 | 결정 | |
+
+## 분석·점수 (5단계)
+| ID | 내용 | 상태 | 근거 |
+|---|---|---|---|
+| A-59 | 팩터 점수 = 하위 지표(각 2개) PERCENT_RANK 평균 × 100. 하위 지표 하나만 있으면 그 하나로 계산 | 결정 | 명세 5절 |
+| A-60 | PERCENT_RANK는 같은 country 안에서 값이 있는 종목끼리만 계산(`PARTITION BY country, 값 IS NULL`). 값이 있는 종목이 2개 미만이면 순위를 매기지 않는다(1개면 PERCENT_RANK가 항상 0이라 무의미) | 결정 | |
+| A-61 | 점수 `as_of`는 계산한 날(서울 기준 오늘). 같은 날 재계산하면 DELETE 후 INSERT | 결정 | 명세 5절 |
+| A-62 | `data_quality` 구조: `{"unavailable": {팩터: 사유}, "missing_inputs": [하위 지표], "partition": "KR"/"US"}` — 3차(LLM 보고서)에서 그대로 쓸 수 있게 JSON 구조화 | 결정 | 명세 13절 |
+| A-63 | 경쟁 비교 순위: 값이 있는 구성원끼리 RANK(동점은 같은 순위). PER·PBR은 양수만, 낮을수록 1위. 그룹 평균은 AVG OVER(NULL 제외) | 결정 | |
+| A-64 | 기준일=100 차트: 구간 끝 = 그룹 구성원의 가장 최근 거래일, 각 종목은 구간 안 자기 첫 거래일 종가 = 100. 날짜는 합집합, 휴장일은 null | 결정 | 명세 8절 |
+| A-65 | `ix_fin_stock_type_end`는 현재 규모(125행)에서 플래너가 사용하지 않음. 데이터 증가 대비로 유지 | 확인 | EXPLAIN |
+| A-34 | (갱신) `ix_valuation_stock_asof`는 PK 역방향 스캔과 실행 시간이 같아(0.005ms) 기능 중복 → Gate 3 이후 **삭제**(명세 인덱스 목록과 다름, DB 품질 우선 원칙). 되돌리려면 indexes.sql에 한 줄 추가 | 결정 | docs/explain_result.md |
+| A-66 | 통계 시장별 밸류에이션의 HAVING 기준은 `min_samples`(기본 3) 쿼리 파라미터. 제외된 시장(KOSDAQ 1종목)은 응답 `excluded`에 표시 | 결정 | 명세 8절 |
+
+## 프론트엔드 (6단계)
+| ID | 내용 | 상태 | 근거 |
+|---|---|---|---|
+| A-67 | 명세 외 엔드포인트 `GET /api/v1/peer-groups` 추가(주식 리스트의 경쟁 그룹 필터 목록용) | 결정 | 명세 9절 화면 요구 |
+| A-68 | 화면 상태(시장 탭·정렬·그룹·검색)는 URL 쿼리와 동기화. 홈의 '거래량 상위 5 → 더 보기'는 `/stocks?country=KR&sort=volume`으로 이동 | 결정 | |
+| A-69 | '전체' 탭에서는 거래량 정렬 탭을 비활성(disabled)하고 안내 문구 표시. URL로 전체+거래량이 들어오면 시총으로 바꾼다(API도 422로 거부) | 결정 | 명세 9절 |
+| A-70 | 담기 모달의 미리보기(예상 수량·원가·잔여)는 화면 계산(참고용). 저장되는 수량·원가·시드 검증은 서버가 Decimal로 다시 계산하며, 서버 오류(409/422)의 안내를 모달에 그대로 표시 | 결정 | |
+| A-71 | 종목 상세(`/stocks/{market}/{ticker}`)·모의 포트폴리오(`/portfolio`)는 7단계 구현 전까지 사이드바만 있는 임시 페이지 | 결정 | 단계 계획 |
+| A-72 | 화면 확인용 스크린샷은 scratchpad(저장소 밖)에 설치한 Playwright Chromium으로 찍었다. 저장소의 테스트·의존성에는 포함하지 않음(명세: 브라우저 E2E 자동화 제외) | 결정 | |
+| A-73 | 등락 색은 어두운 면용과 파스텔 면용(진한 변형)을 따로 둔다: 파스텔 카드 위 KR 상승 #c0262d·하락 #1d5bbf, US 상승 #0f7a45 (대비 4.5:1 이상) | 결정 | 접근성 |
+
+## 화면 (7단계)
+| ID | 내용 | 상태 | 근거 |
+|---|---|---|---|
+| A-74 | 포트폴리오의 원화 평가손익 색은 국내 관례(이익 빨강·손실 파랑)를 쓴다. 종목별 등락은 종목 시장 기준(KR/US) 색 | 결정 | 원화 통합 계산기 |
+| A-75 | 포트폴리오 '총 평가금액' = 담은 종목 평가금액 + 잔여 현금(원가 기준 잔여) | 결정 | 시드 대비 전체 가치 표시 |
+| A-76 | 포트폴리오 화면의 종목 검색은 `<datalist>`(전체 25종목 목록)로 구현. 이미 담은 종목은 "(담김)" 표시 후 수정을 안내 | 결정 | 빌드·라이브러리 없이 접근성 있는 검색 |
+| A-77 | 경쟁 비교 선 색은 등락 의미가 없는 구분색(파랑·호박·청록·분홍…)을 쓰고 현재 종목은 라벤더 굵은 선 | 결정 | 상승/하락 색과 혼동 방지 |
+| A-78 | 종목 상세의 각 섹션은 독립적으로 로딩·빈·오류 상태를 가진다(한 API 실패가 다른 섹션을 막지 않음) | 결정 | |
+
+## 마무리 (8단계)
+| ID | 내용 | 상태 | 근거 |
+|---|---|---|---|
+| A-79 | `seed-demo`는 시세가 없는 종목은 건너뛰고, 담을 종목이 하나도 없는 포트폴리오는 만들지 않으며 그 내역을 출력한다(샘플 데이터 재현 시: 포트폴리오 1개·4종목) | 결정 | 8단계에서 샘플 재현 절차 검증 중 발견 |
+| A-80 | 최종 스크린샷(`docs/screenshots/`)은 운영 DB·실행 중인 서버에서 헤드리스 Chromium으로 촬영(A-72와 같은 방식) | 결정 | |

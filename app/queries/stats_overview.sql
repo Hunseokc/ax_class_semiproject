@@ -1,0 +1,16 @@
+-- 데이터 개요: 테이블별 행 수·데이터 기간·마지막 갱신
+SELECT (SELECT COUNT(*) FROM stocks)                                     AS stocks,
+       (SELECT COUNT(*) FROM peer_groups)                                AS peer_groups,
+       (SELECT COUNT(*) FROM daily_prices)                               AS daily_prices,
+       (SELECT MIN(trade_date) FROM daily_prices)                        AS price_from,
+       (SELECT MAX(trade_date) FROM daily_prices)                        AS price_to,
+       (SELECT COUNT(*) FROM index_daily_prices)                         AS index_daily_prices,
+       (SELECT COUNT(*) FROM fx_rates WHERE granularity = 'DAILY')       AS fx_daily,
+       (SELECT COUNT(*) FROM fx_rates WHERE granularity = 'SNAPSHOT')    AS fx_snapshots,
+       (SELECT COUNT(*) FROM valuation_snapshots)                        AS valuation_snapshots,
+       (SELECT COUNT(*) FROM financial_statements WHERE period_type = 'FY') AS financial_fy,
+       (SELECT COUNT(*) FROM disclosures)                                AS disclosures,
+       (SELECT COUNT(*) FROM stock_scores)                               AS stock_scores,
+       (SELECT MAX(as_of) FROM stock_scores)                             AS scores_as_of,
+       (SELECT MAX(finished_at) FROM ingestion_logs WHERE status = 'SUCCESS') AS last_refreshed_at,
+       (SELECT COUNT(*) FROM ingestion_logs WHERE status = 'FAILED')     AS failed_jobs
