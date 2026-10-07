@@ -127,7 +127,7 @@ export function segmented(options, value, onChange, { label = "", variant = "" }
 export function scoreBadge(score) {
   return score === null || score === undefined
     ? '<span class="score score--none" title="매력도 데이터 부족">–</span>'
-    : `<span class="score" title="매력도 ${score}점 (유니버스 내 상대평가)">${Math.round(score)}</span>`;
+    : `<span class="score" title="매력도 ${score}점 (같은 시장 안 상대적 위치, 투자 권유 아님)">${Math.round(score)}</span>`;
 }
 
 export function marketBadge(market, country) {

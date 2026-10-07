@@ -1,5 +1,5 @@
 // 종목 상세: 헤더·가격 차트·핵심 지표·매력도·수치 분석·재무 추이·경쟁 비교·최근 공시
-import { Stocks } from "../api.js";
+import { Scoring, Stocks, scorePreset } from "../api.js";
 import { DASH, changeHtml, date, esc, krw, num, pct, price, stockUrl, usd } from "../format.js";
 import { openAddToPortfolio } from "../components/add-to-portfolio.js";
 import { color, dashedAxis, draw, plainAxis } from "../components/charts.js";
@@ -116,26 +116,88 @@ function gauge(score) {
     </svg>`;
 }
 
-const FACTOR_LABEL = { valuation: "밸류에이션", growth: "성장성", profitability: "수익성", momentum: "모멘텀" };
+const FACTOR_LABEL = { value: "가치", quality: "퀄리티", growth: "성장", safety: "안정성", momentum: "모멘텀" };
+const SIGNED_METRICS = ["revenue_yoy", "eps_change_yield", "momentum"];
+const rawFmt = (m) => (m.raw_value === null ? DASH
+  : m.metric === "debt_ratio" ? `${num(m.raw_value, 2)}배`
+  : pct(m.raw_value, { digits: 1, sign: SIGNED_METRICS.includes(m.metric) }));
+const zFmt = (v) => {
+  if (v === null) return DASH;
+  const r = Math.round(v * 100) / 100;
+  return r === 0 ? "0.00" : `${r > 0 ? "+" : ""}${num(r, 2)}`;
+};
+let presetList = null;                   // GET /scoring/presets
+let presetCode = scorePreset.get();
+
+function contribRow(k, f, maxAbs) {
+  const name = `<span class="contrib__name">${FACTOR_LABEL[k]} <span class="subtle">${num(f.weight * 100, 0)}%</span></span>`;
+  if (!f.available) return `<div class="contrib contrib--na">${name}<div class="contrib__track"><span class="contrib__axis"></span></div><span class="contrib__value">데이터 없음</span></div>`;
+  if (f.contribution === null) return `<div class="contrib">${name}<div class="contrib__track"><span class="contrib__axis"></span></div><span class="contrib__value num">F ${zFmt(f.score)}</span></div>`;
+  const c = f.contribution, w = (Math.abs(c) / maxAbs) * 50;
+  return `<div class="contrib">${name}
+      <div class="contrib__track" role="img" aria-label="${FACTOR_LABEL[k]} 기여도 ${zFmt(c)} (팩터 점수 ${zFmt(f.score)} × 가중치 ${num(f.effective_weight * 100, 0)}%)">
+        <span class="contrib__axis"></span><span class="contrib__bar ${c < 0 ? "contrib__bar--neg" : ""}" style="${c < 0 ? "right" : "left"}:50%;width:${w.toFixed(1)}%"></span></div>
+      <span class="contrib__value num">${zFmt(c)}</span></div>`;
+}
+
 function renderScore(a) {
   const s = a.attractiveness;
   if (!s.as_of) {
     $("#score").replaceChildren(emptyState({ title: "매력도가 아직 계산되지 않았습니다", body: "사이드바의 새로고침으로 점수를 계산할 수 있습니다." }));
     return;
   }
-  const reasons = s.data_quality?.unavailable || {};
+  const dq = s.data_quality || {};
+  const market = s.rank?.country === "US" ? "미국" : "국내";
+  const factors = Object.entries(s.factors);
+  const maxAbs = Math.max(0.5, ...factors.map(([, f]) => Math.abs(f.contribution ?? 0)));
+  const notes = [dq.score_null_reason, ...(dq.notes || [])].filter(Boolean);
   const el = h(`<div class="score-panel">
-      <div class="score-panel__gauge">${gauge(s.score)}<p class="subtle">${date(s.as_of)} · 가중치 ${esc(s.weights_version)}</p></div>
-      <div class="score-panel__factors">${Object.entries(s.factors).map(([k, f]) => f.available
-        ? `<div class="factor"><span class="factor__name">${FACTOR_LABEL[k]} <span class="subtle">${f.weight}</span></span>
-             <div class="bar" role="img" aria-label="${FACTOR_LABEL[k]} ${num(f.score, 1)}점"><div class="bar__fill ${k === "valuation" || k === "profitability" ? "bar__fill--lavender" : ""}" style="width:${f.score}%"></div></div>
-             <span class="factor__value num">${num(f.score, 0)}</span></div>`
-        : `<div class="factor factor--na" title="${esc(reasons[k] || "")}"><span class="factor__name">${FACTOR_LABEL[k]} <span class="subtle">${f.weight}</span></span>
-             <div class="bar"></div><span class="factor__value">데이터 부족</span></div>`).join("")}
-        ${Object.keys(reasons).length ? `<p class="subtle">계산 불가 팩터는 빼고 나머지 가중치로 다시 계산했습니다.</p>` : ""}
+      <div class="score-panel__gauge">${gauge(s.score)}
+        <p class="score-panel__rank">${s.rank ? `${market} ${s.rank.total}개 중 <strong>${s.rank.position}위</strong>` : "순위 없음"}</p>
+        ${s.rank ? `<p class="subtle">백분위 ${num(s.rank.percentile, 0)}</p>` : ""}
+        <p class="subtle">데이터 충족도 ${s.factor_coverage}/${s.factor_total} 팩터</p>
+        <p class="subtle">${esc(s.preset.name)} · ${date(s.as_of)} 기준</p></div>
+      <div class="score-panel__factors">
+        <h3>팩터 기여도 <span class="subtle">(유효 팩터 가중치 × 팩터 점수, 합 = 종합 ${zFmt(s.composite)})</span></h3>
+        ${factors.map(([k, f]) => contribRow(k, f, maxAbs)).join("")}
+        <p class="subtle">팩터 점수는 같은 시장 안 표준점수(Z) 단위입니다. 0이 시장 중앙, 음수 기여는 왼쪽으로 표시합니다.</p>
       </div></div>`);
+  const rows = s.metrics.map((m) => `<tr title="${esc(dq.missing_metrics?.[m.metric] || "")}">
+      <td>${esc(m.label)}${m.direction < 0 ? ' <span class="subtle">낮을수록 좋음</span>' : ""}</td>
+      <td>${FACTOR_LABEL[m.factor]}</td><td class="num">${rawFmt(m)}</td>
+      <td class="num">${zFmt(m.z_raw)}</td><td class="num">${zFmt(m.z_adj)}</td></tr>`).join("");
+  el.append(h(`<div class="table-wrap"><table class="table table--metrics">
+      <caption class="sr-only">매력도 지표별 원값과 표준점수</caption>
+      <thead><tr><th scope="col">지표</th><th scope="col">팩터</th><th scope="col">원값</th><th scope="col">Z (시장 내)</th><th scope="col">Z (섹터 중립)</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`));
+  if (notes.length || dq.missing_metrics) {
+    const missing = Object.entries(dq.missing_metrics || {}).map(([k, v]) => `${esc(s.metrics.find((m) => m.metric === k)?.label || k)}: ${esc(v)}`);
+    el.append(h(`<ul class="score-notes">${[...notes.map(esc), ...missing].map((t) => `<li>${t}</li>`).join("")}</ul>`));
+  }
+  el.append(h(`<details class="score-method"><summary>계산 방법</summary><p>${esc(s.method)}</p>
+      <p>${esc(s.preset.description || "")} — ${esc(presetList?.note || "")}</p></details>`));
   el.append(h(`<p class="subtle">${esc(a.disclaimer)}</p>`));
   $("#score").replaceChildren(el);
+}
+
+async function loadScore() {
+  $("#score").replaceChildren(skeleton("row", 2));
+  try {
+    renderScore(await Stocks.analysis(MARKET, TICKER, presetCode));
+  } catch (e) {
+    $("#score").replaceChildren(errorState(e, loadScore));
+  }
+}
+
+async function mountPresetTabs() {
+  try {
+    presetList = await Scoring.presets();
+  } catch {
+    return;                               // 탭 없이 기본 프리셋으로 표시
+  }
+  if (!presetList.presets.some((p) => p.code === presetCode)) presetCode = "balanced";
+  $("#preset-tabs").replaceChildren(segmented(presetList.presets.map((p) => ({ value: p.code, label: p.name })), presetCode,
+    (v) => { presetCode = v; scorePreset.set(v); loadScore(); }, { label: "매력도 가중치 프리셋", variant: "segmented--card" }));
 }
 
 function renderNumeric(a) {
@@ -165,7 +227,7 @@ function renderNumeric(a) {
 async function loadAnalysis() {
   for (const id of ["#key-metrics", "#score", "#numeric"]) $(id).replaceChildren(skeleton("row", 2));
   try {
-    const a = await Stocks.analysis(MARKET, TICKER);
+    const a = await Stocks.analysis(MARKET, TICKER, presetCode);
     renderKeyMetrics(a);
     renderScore(a);
     renderNumeric(a);
@@ -220,7 +282,7 @@ const PEER_COLS = [
   { key: "operating_margin", label: "영업이익률", fmt: (v) => pct(v, { digits: 1 }) },
   { key: "revenue_yoy", label: "매출 YoY", fmt: (v) => pct(v, { sign: true, digits: 1 }) },
   { key: "market_cap_krw", label: "시총(원화)", fmt: (v) => krw(v, { compact: true }) },
-  { key: "score", label: "매력도", fmt: (v) => (v === null ? DASH : num(v, 0)) },
+  { key: "score", label: "매력도(균형)", fmt: (v) => (v === null ? DASH : num(v, 0)) },
 ];
 // 경쟁 비교 선 색: 대상 종목은 라벤더 굵은 선, 나머지는 등락 의미가 없는 구분색
 const TARGET_COLOR = "#e6ddf2";
@@ -357,6 +419,7 @@ async function init() {
   }
   renderHeader(stock);
   loadCandles();
+  if (!presetList) await mountPresetTabs();
   loadAnalysis();
   loadFinancials();
   loadPeers();

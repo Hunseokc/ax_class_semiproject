@@ -48,13 +48,26 @@
 .stock-head__price { text-align: right; display: flex; flex-direction: column; gap: 2px; }
 .stock-head__value { font-size: var(--fs-3xl); font-weight: var(--fw-extra); letter-spacing: -0.02em; line-height: 1.1; }
 .stock-head__actions { display: flex; gap: var(--sp-2); align-items: center; }
-.detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: var(--sp-6); }
-.score-panel { display: flex; gap: var(--sp-6); align-items: center; flex-wrap: wrap; }
-.score-panel__gauge { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
-.score-panel__factors { flex: 1 1 220px; display: flex; flex-direction: column; gap: var(--sp-3); }
+.score-panel { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: var(--sp-5) var(--sp-6); align-items: start; }
+.score-panel > :not(.score-panel__gauge):not(.score-panel__factors) { grid-column: 1 / -1; }
+.score-panel__gauge { display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); text-align: center; }
+.score-panel__rank { font-size: var(--fs-md); }
+.score-panel__factors { display: flex; flex-direction: column; gap: var(--sp-3); }
+/* 팩터 기여도: 가운데(0) 기준 양수는 오른쪽, 음수는 왼쪽 */
+.contrib { display: grid; grid-template-columns: 96px 1fr 72px; gap: var(--sp-3); align-items: center; font-size: var(--fs-sm); }
+.contrib__name { color: var(--text-2); font-weight: var(--fw-semibold); }
+.contrib__track { position: relative; height: 12px; border-radius: var(--r-pill); background: var(--card-active); }
+.contrib__axis { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--text-3); }
+.contrib__bar { position: absolute; top: 0; bottom: 0; border-radius: var(--r-pill); background: var(--lavender); }
+.contrib__bar--neg { background: var(--ice); }
+.contrib__value { text-align: right; font-weight: var(--fw-bold); }
+.contrib--na .contrib__value { color: var(--text-3); font-weight: var(--fw-semibold); font-size: var(--fs-xs); }
+.score-notes { margin: 0; padding-left: 1.2em; color: var(--text-3); font-size: var(--fs-sm); }
+.score-method summary { cursor: pointer; color: var(--text-2); font-weight: var(--fw-semibold); font-size: var(--fs-sm); }
+.score-method p { color: var(--text-3); font-size: var(--fs-sm); margin-top: var(--sp-2); }
+@media (max-width: 767px) { .score-panel { grid-template-columns: 1fr; } }
 .numeric { display: flex; flex-direction: column; gap: var(--sp-4); }
 @media (max-width: 1023px) {
-  .detail-grid { grid-template-columns: 1fr; }
   .stock-head { grid-template-columns: 1fr auto; }
   .stock-head__actions { grid-column: 1 / -1; }
 }

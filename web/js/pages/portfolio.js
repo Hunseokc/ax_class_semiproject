@@ -137,7 +137,7 @@ function renderSummary(s) {
         ${tile("시드", krw(s.seed_krw))}
         ${tile("사용 금액(원가)", krw(s.used_krw), `<div class="bar" role="img" aria-label="사용률 ${pct(usage, { digits: 1 })}" style="margin-top:6px"><div class="bar__fill" style="width:${Math.min(100, usage * 100)}%"></div></div>사용률 ${pct(usage, { digits: 1 })}`)}
         ${tile("잔여 현금", krw(s.remaining_krw))}
-        ${tile("가중평균 매력도", s.weighted_score === null ? DASH : num(s.weighted_score, 1), "원가 비중 가중")}
+        ${tile("가중평균 매력도", s.weighted_score === null ? DASH : num(s.weighted_score, 1), "원가 비중 가중 · 균형 프리셋")}
         ${tile("가격 효과", signedKrw(s.price_effect_krw), "종목통화 가격 변화 × 담은 시점 환율")}
         ${tile("환율 효과", signedKrw(s.fx_effect_krw), "현재가 × 환율 변화")}
         ${tile("환율 기준", s.fx_rate ? num(s.fx_rate, 2) : "해당 없음", s.fx_rate_at ? `${dateTime(s.fx_rate_at)}${s.fx_stale ? " · 지연된 환율" : ""}` : "USD 종목 없음")}

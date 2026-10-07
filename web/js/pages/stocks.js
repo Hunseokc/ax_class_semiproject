@@ -1,5 +1,5 @@
 // 주식 리스트: 시장 탭·정렬(거래량/시총)·검색·경쟁 그룹 필터, ★ 관심 토글, 담기
-import { Stocks } from "../api.js";
+import { Scoring, Stocks, scorePreset } from "../api.js";
 import { changeHtml, dateTime, esc, initials, krw, price, stockUrl, volume } from "../format.js";
 import { openAddToPortfolio } from "../components/add-to-portfolio.js";
 import { icons } from "../components/icons.js";
@@ -63,6 +63,24 @@ Stocks.groups().then(({ groups }) => {
 }).catch(() => { groupSel.disabled = true; });
 groupSel.addEventListener("change", () => { state.group = groupSel.value; refresh(); });
 
+// 매력도 프리셋: 브라우저에 기억해 홈 관심종목 카드·종목 상세와 같은 기준으로 보여 준다
+const presetSel = $("#preset");
+let presetNames = {};
+let lastList = null;
+const renderMeta = () => {
+  if (!lastList) return;
+  const { d, sortLabel } = lastList;
+  const preset = presetNames[d.preset] ? ` · 매력도 ${presetNames[d.preset]} 기준` : "";
+  $("#list-meta").textContent = `${d.total}개 종목 · ${sortLabel} 순${preset} · 시총 환산 환율 기준 ${dateTime(d.fx_rate_at)}`;
+};
+Scoring.presets().then(({ presets }) => {
+  presetNames = Object.fromEntries(presets.map((p) => [p.code, p.name]));
+  presetSel.append(...presets.map((p) => h(`<option value="${esc(p.code)}">매력도: ${esc(p.name)}</option>`)));
+  presetSel.value = presetNames[scorePreset.get()] ? scorePreset.get() : "balanced";
+  renderMeta();
+}).catch(() => { presetSel.disabled = true; });
+presetSel.addEventListener("change", () => { scorePreset.set(presetSel.value); refresh(); });
+
 // ---------------------------------------------------------------- 리스트
 function stockRow(s) {
   const li = h(`<li class="stock-row">
@@ -93,7 +111,8 @@ function refresh() {
     fetch: () => Stocks.list({ country: state.country, sort: state.sort, group: state.group, q: state.q }),
     isEmpty: (d) => !d.items.length,
     render: (d) => {
-      $("#list-meta").textContent = `${d.total}개 종목 · ${sortLabel} 순 · 시총 환산 환율 기준 ${dateTime(d.fx_rate_at)}`;
+      lastList = { d, sortLabel };
+      renderMeta();
       const ul = h('<ul class="list stock-list" aria-label="종목 순위"></ul>');
       ul.append(h(`<li class="stock-row stock-row--head" aria-hidden="true"><span>#</span><span>종목</span><span>현재가·등락</span>
         <span class="stock-row__col">거래량</span><span class="stock-row__col">시총(원화)</span><span>매력도</span><span></span></li>`));
