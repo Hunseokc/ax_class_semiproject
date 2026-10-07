@@ -1,6 +1,6 @@
 # 주식 분석 대시보드 (StockMind)
 
-국내(KOSPI·KOSDAQ)·미국(NASDAQ) 25개 종목의 시세·지수·환율·재무·공시를 수집·전처리해 PostgreSQL에 구조화하고, FastAPI 조회·분석 API와 바닐라 HTML/CSS/JS 대시보드로 제공하는 1차 세미프로젝트입니다.
+국내(KOSPI·KOSDAQ)·미국(NASDAQ) 의 주식 시세·지수·환율·재무·공시를 수집·전처리해 PostgreSQL에 구조화하고, FastAPI 조회·분석 API와 바닐라 HTML/CSS/JS 대시보드로 제공하는 1차 세미프로젝트입니다.
 
 > 시세는 **일봉 기준**(장중 실시간 아님)이며, 매력도·모의 포트폴리오를 포함한 모든 정보는 **투자 권유가 아닙니다**.
 
