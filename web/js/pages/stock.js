@@ -153,7 +153,7 @@ function renderScore(a) {
   const notes = [dq.score_null_reason, ...(dq.notes || [])].filter(Boolean);
   const el = h(`<div class="score-panel">
       <div class="score-panel__gauge">${gauge(s.score)}
-        <p class="score-panel__rank">${s.rank ? `${market} ${s.rank.total}개 중 <strong>${s.rank.position}위</strong>` : "순위 없음"}</p>
+        <p class="score-panel__rank">${s.rank ? `${market} 비교군 ${s.rank.total}개 중 <strong>${s.rank.position}위</strong>` : "순위 없음"}</p>
         ${s.rank ? `<p class="subtle">백분위 ${num(s.rank.percentile, 0)}</p>` : ""}
         <p class="subtle">데이터 충족도 ${s.factor_coverage}/${s.factor_total} 팩터</p>
         <p class="subtle">${esc(s.preset.name)} · ${date(s.as_of)} 기준</p></div>
@@ -413,12 +413,41 @@ async function init() {
     return;
   }
   renderHeader(stock);
+  renderDetailNotice(stock.detail_status);
   loadCandles();
   if (!presetList) await mountPresetControl();
   loadAnalysis();
   loadFinancials();
   loadPeers();
   loadDisclosures();
+  if (stock.detail_status === "loading") waitForDetail();
+}
+
+// ---------------------------------------------------------------- 비교군 종목 상세 데이터 (요청 시 수집)
+const DETAIL_NOTICE = {
+  loading: "매력도 비교군 종목이라 공시·2년 시세·5개년 재무를 지금 불러오는 중입니다. 받는 대로 화면이 갱신됩니다.",
+  failed: "공시·재무 상세를 불러오지 못했습니다. 잠시 뒤 다시 열면 다시 시도합니다.",
+};
+
+function renderDetailNotice(status) {
+  const old = $("#detail-notice");
+  if (!DETAIL_NOTICE[status]) { old?.remove(); return; }
+  const el = h(`<p class="notice ${status === "failed" ? "notice--warn" : ""}" id="detail-notice" role="status">${DETAIL_NOTICE[status]}</p>`);
+  if (old) old.replaceWith(el); else $("#head").after(el);
+}
+
+let detailPoll = 0;
+async function waitForDetail() {
+  const token = ++detailPoll;
+  for (let i = 0; i < 30 && token === detailPoll; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    let d;
+    try { d = await Stocks.detail(MARKET, TICKER); } catch { continue; }
+    if (d.detail_status === "loading") continue;
+    renderDetailNotice(d.detail_status);
+    if (d.detail_status === "ready") { loadCandles(); loadFinancials(); loadPeers(); loadDisclosures(); }
+    return;
+  }
 }
 document.addEventListener(REFRESHED_EVENT, init);
 init();

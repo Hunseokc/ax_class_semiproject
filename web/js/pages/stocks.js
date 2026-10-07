@@ -89,7 +89,7 @@ function stockRow(s) {
       <a class="stock-row__name" href="${stockUrl(s.market, s.ticker)}?preset=${encodeURIComponent(getPreset())}">
         <span class="avatar" aria-hidden="true">${esc(initials(s.name))}</span>
         <span class="row__main"><span class="row__title">${esc(s.name)}</span>
-          <span class="row__sub">${esc(s.ticker)} ${marketBadge(s.market, s.country)}</span></span>
+          <span class="row__sub">${esc(s.ticker)} ${marketBadge(s.market, s.country)}${s.coverage === "benchmark" ? ' <span class="badge badge--market" title="매력도 비교 표본 종목 — 검색했을 때만 목록에 나옵니다">비교군</span>' : ""}</span></span>
       </a>
       <span class="stock-row__price num"><strong>${price(s.close, s.currency)}</strong>${changeHtml(s.change_rate, s.country)}</span>
       <span class="stock-row__col num" data-label="거래량">${volume(s.volume)}</span>
