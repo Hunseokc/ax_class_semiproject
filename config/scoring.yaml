@@ -1,9 +1,27 @@
-# 매력도 가중치 (합 100). 변경 시 version을 올린다 → stock_scores.weights_version
-version: v1
-weights:
-  valuation: 30       # PER·PBR 낮을수록 ↑ (음수·NULL 제외)
-  growth: 25          # 매출 YoY·영업이익 YoY 높을수록 ↑
-  profitability: 25   # 영업이익률·ROE 높을수록 ↑
-  momentum: 20        # 3개월 수익률·120일선 괴리율 높을수록 ↑
-# 팩터 순위는 같은 country 안에서 PERCENT_RANK()로 계산
-partition_by: country
+# 매력도 다중 팩터 모델 설정 → scoring_presets·scoring_weights로 적재 (docs/09)
+# 유니버스 안에서의 상대적 위치를 나타내는 팩터 점수이며 수익률 예측·투자 권유가 아니다.
+
+# 섹터 중립화 축소 계수: z_adj = z − n/(n+k) × 주그룹 z 평균 (n = 주 그룹의 유효 표본 수)
+shrinkage_k: 5
+
+default_preset: balanced
+
+# 프리셋별 가중치 합은 정확히 1이어야 한다(적재 시 검증). 소수점 셋째 자리까지(NUMERIC(4,3))
+# 공개된 일반적 투자 스타일을 단순화한 가중치이며 특정 인물의 판단이 아니다.
+presets:
+  - code: balanced
+    name: 균형
+    description: 다섯 팩터를 같은 비중으로 본다
+    weights: {value: 0.20, quality: 0.20, growth: 0.20, safety: 0.20, momentum: 0.20}
+  - code: value
+    name: 가치형
+    description: 이익·자산 대비 싼 종목에 비중을 둔다
+    weights: {value: 0.40, quality: 0.20, growth: 0.10, safety: 0.20, momentum: 0.10}
+  - code: growth
+    name: 성장형
+    description: 매출·이익 성장과 추세에 비중을 둔다
+    weights: {value: 0.10, quality: 0.20, growth: 0.40, safety: 0.05, momentum: 0.25}
+  - code: quality
+    name: 퀄리티형
+    description: 수익성과 재무 안정성에 비중을 둔다
+    weights: {value: 0.15, quality: 0.40, growth: 0.10, safety: 0.30, momentum: 0.05}

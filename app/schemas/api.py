@@ -96,6 +96,7 @@ class StockListOut(Schema):
     offset: int
     sort: str
     order: str
+    preset: str
     fx_rate_at: datetime | None
     items: list[StockRow]
 
@@ -136,6 +137,7 @@ class StockDetailOut(Schema):
     shares_outstanding: int | None
     score: Num | None
     score_as_of: date | None
+    preset: str
     groups: list[GroupRef]
     is_watched: bool
 
@@ -231,6 +233,7 @@ class WatchlistCard(Schema):
 
 class WatchlistOut(Schema):
     user_id: int
+    preset: str
     count: int
     items: list[WatchlistCard]
 

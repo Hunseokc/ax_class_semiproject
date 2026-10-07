@@ -1,4 +1,4 @@
--- 주식 리스트: 현재가·등락률·거래량·시총(원화 환산)·매력도·관심 여부, 정렬 기준별 순위
+-- 주식 리스트: 현재가·등락률·거래량·시총(원화 환산)·매력도(:preset 프리셋)·관심 여부, 정렬 기준별 순위
 -- {order_col}은 서버가 화이트리스트(volume / market_cap_krw)에서만 치환한다
 WITH base AS (
     SELECT s.stock_id, s.ticker, s.name, s.name_en, m.code AS market, m.country, m.currency,
@@ -14,7 +14,8 @@ WITH base AS (
                        WHERE vs.stock_id = s.stock_id ORDER BY vs.as_of DESC LIMIT 1) v ON true
     LEFT JOIN v_fx_latest fx ON true
     LEFT JOIN LATERAL (SELECT st.score FROM stock_scores st
-                       WHERE st.stock_id = s.stock_id ORDER BY st.as_of DESC LIMIT 1) sc ON true
+                       WHERE st.stock_id = s.stock_id AND st.preset_id = (SELECT preset_id FROM scoring_presets WHERE code = :preset)
+                       ORDER BY st.as_of DESC LIMIT 1) sc ON true
     LEFT JOIN watchlist_items w ON w.stock_id = s.stock_id AND w.user_id = :user_id
     WHERE s.is_active
       AND (CAST(:country AS text) IS NULL OR m.country = :country)

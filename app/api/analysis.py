@@ -3,20 +3,28 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_preset
 from app.api.stocks import RANGE_MONTHS, resolve_stock
 from app.core.errors import NotFound
 from app.queries import sql
 from app.schemas.common import Num, Schema
-from app.services.scoring import load_weights
+from app.services.scoring import FACTORS, METRICS, default_preset
 
 router = APIRouter(prefix="/stocks", tags=["analysis"])
 stats_router = APIRouter(prefix="/statistics", tags=["statistics"])
+scoring_router = APIRouter(prefix="/scoring", tags=["analysis"])
 
-SCORE_DISCLAIMER = "유니버스(25종목) 안에서 같은 시장끼리 비교한 상대 평가이며 투자 권유가 아닙니다."
+SCORE_DISCLAIMER = ("매력도는 유니버스(25종목) 안에서 같은 시장끼리 비교한 상대적 위치를 나타내는 팩터 점수이며, "
+                    "수익률 예측이나 투자 권유가 아닙니다.")
+PRESET_NOTE = "공개된 일반적 투자 스타일을 단순화한 가중치이며 특정 인물의 판단이 아닙니다."
+SCORE_METHOD = ("지표별로 같은 시장 안 로버스트 Z(중앙값·MAD)를 구해 ±3으로 자르고, 주 경쟁 그룹 평균을 축소 추정으로 빼 섹터 중립화한 뒤 "
+                "팩터 평균 → 프리셋 가중 평균 → 시장 안에서 다시 표준화해 100·Φ(z)로 0~100 변환합니다.")
 ACCOUNTING_NOTE = ("국내 종목 재무는 K-IFRS 연결(DART), 미국 종목은 US-GAAP(SEC)이며 PER·PBR은 각각 KRX·Yahoo 제공값입니다. "
                    "회계기준·산정 방식이 달라 국가 간 수치 비교에는 한계가 있습니다.")
 PEER_METRICS = ["return_1m", "return_3m", "return_1y", "per", "pbr", "roe", "operating_margin", "revenue_yoy",
@@ -28,18 +36,59 @@ METRIC_FIELDS = ["return_1w", "return_1m", "return_3m", "return_6m", "return_1y"
 
 
 # ------------------------------------------------------------------ 스키마 (Swagger 문서용)
+class PresetRef(Schema):
+    code: str
+    name: str
+    description: str | None
+
+
 class FactorOut(Schema):
-    score: Num | None
-    weight: int
+    score: Num | None                 # 유효 지표 z_adj 평균 (Z 단위)
+    weight: Num                       # 프리셋 가중치
+    effective_weight: Num | None      # 유효 팩터만으로 재정규화한 가중치
+    contribution: Num | None          # effective_weight × score (합 = composite)
     available: bool
+
+
+class MetricOut(Schema):
+    metric: str
+    label: str
+    factor: str
+    direction: int
+    raw_value: Num | None
+    z_raw: Num | None
+    z_adj: Num | None
+
+
+class RankOut(Schema):
+    country: str
+    position: int
+    total: int
+    percentile: Num
 
 
 class ScoreOut(Schema):
     as_of: Any = None
+    preset: PresetRef
     score: Num | None = None
+    composite: Num | None = None
+    factor_coverage: int = 0
+    factor_total: int = len(FACTORS)
+    rank: RankOut | None = None
     factors: dict[str, FactorOut] = {}
+    metrics: list[MetricOut] = []
     data_quality: dict = {}
-    weights_version: str | None = None
+    method: str = SCORE_METHOD
+
+
+class PresetOut(PresetRef):
+    is_default: bool
+    weights: dict[str, Num]
+
+
+class PresetsOut(Schema):
+    note: str
+    presets: list[PresetOut]
 
 
 class AnalysisOut(Schema):
@@ -111,27 +160,64 @@ class PeersChartOut(Schema):
 
 
 # ------------------------------------------------------------------ 종목 분석
+def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row) -> dict:
+    out = {"preset": {k: preset[k] for k in ("code", "name", "description")}}
+    if row["score_as_of"] is None:
+        return out
+    weights = dict(db.execute(text("SELECT factor, weight FROM scoring_weights WHERE preset_id = :p"),
+                              {"p": preset["preset_id"]}).all())
+    scores = {f: row[f"{f}_score"] for f in FACTORS}
+    valid_w = sum((weights[f] for f in FACTORS if scores[f] is not None), Decimal(0))
+    use = row["composite"] is not None and valid_w > 0
+    factors = {}
+    for f in FACTORS:
+        ew = (weights[f] / valid_w).quantize(Decimal("0.0001")) if use and scores[f] is not None else None
+        factors[f] = {"score": scores[f], "weight": weights[f], "effective_weight": ew,
+                      "contribution": (weights[f] / valid_w * scores[f]).quantize(Decimal("0.0001")) if ew is not None else None,
+                      "available": scores[f] is not None}
+    mv = db.execute(text("SELECT metric, raw_value, z_raw, z_adj FROM stock_metric_values WHERE stock_id = :s AND as_of = :d"),
+                    {"s": stock_id, "d": row["score_as_of"]}).mappings().all()
+    by_metric = {m["metric"]: m for m in mv}
+    metrics = [{"metric": k, "label": d.label, "factor": d.factor, "direction": d.direction,
+                **{c: by_metric[k][c] if k in by_metric else None for c in ("raw_value", "z_raw", "z_adj")}}
+               for k, d in METRICS.items()]
+    rank = ({"country": country, "position": row["rank_position"], "total": row["rank_total"],
+             "percentile": row["percentile"]} if row["rank_position"] is not None else None)
+    return {**out, "as_of": row["score_as_of"], "score": row["score"], "composite": row["composite"],
+            "factor_coverage": row["factor_coverage"], "rank": rank, "factors": factors, "metrics": metrics,
+            "data_quality": row["data_quality"] or {}}
+
+
 @router.get("/{market}/{ticker}/analysis", response_model=AnalysisOut,
-            summary="수치 분석(v_stock_metrics) + 매력도(팩터별·data_quality)")
-def analysis(market: str, ticker: str, db: Session = Depends(get_db)):
+            summary="수치 분석(v_stock_metrics) + 매력도(프리셋별 점수·팩터 기여도·지표 원값/Z·국가 내 순위)")
+def analysis(market: str, ticker: str, preset: dict = Depends(get_preset), db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
-    row = db.execute(sql("analysis"), {"stock_id": s["stock_id"]}).mappings().first()
+    row = db.execute(sql("analysis"), {"stock_id": s["stock_id"], "preset_id": preset["preset_id"]}).mappings().first()
     if row is None:
         raise NotFound("시세가 없어 분석할 수 없습니다", code="NO_PRICE")
-    w = load_weights()
-    weights = {"valuation": w["w_val"], "growth": w["w_gro"], "profitability": w["w_pro"], "momentum": w["w_mom"]}
-    factors = {k: {"score": row[f"{k}_score"], "weight": v, "available": row[f"{k}_score"] is not None}
-               for k, v in weights.items()}
     return {
         "market": s["market"], "ticker": s["ticker"], "currency": s["currency"], "as_of": row["as_of"],
         "valuation_as_of": row["valuation_as_of"], "fin_period_end": row["fin_period_end"],
         "accounting_std": row["accounting_std"], "fx_usd_krw": row["fx_usd_krw"], "fx_rate_at": row["fx_rate_at"],
         "metrics": {k: row[k] for k in METRIC_FIELDS},
-        "attractiveness": {"as_of": row["score_as_of"], "score": row["score"],
-                           "factors": factors if row["score_as_of"] else {},
-                           "data_quality": row["data_quality"] or {}, "weights_version": row["weights_version"]},
+        "attractiveness": _attractiveness(db, s["stock_id"], s["country"], preset, row),
         "disclaimer": SCORE_DISCLAIMER,
     }
+
+
+@scoring_router.get("/presets", response_model=PresetsOut, summary="매력도 가중치 프리셋과 팩터별 가중치")
+def presets(db: Session = Depends(get_db)):
+    rows = db.execute(text("""SELECT p.preset_id, p.code, p.name, p.description, w.factor, w.weight
+                              FROM scoring_presets p JOIN scoring_weights w ON w.preset_id = p.preset_id
+                              ORDER BY p.preset_id""")).mappings().all()
+    out: dict[int, dict] = {}
+    for r in rows:
+        p = out.setdefault(r["preset_id"], {"code": r["code"], "name": r["name"], "description": r["description"],
+                                            "is_default": r["code"] == default_preset(), "weights": {}})
+        p["weights"][r["factor"]] = r["weight"]
+    for p in out.values():
+        p["weights"] = {f: p["weights"][f] for f in FACTORS}
+    return {"note": PRESET_NOTE, "presets": list(out.values())}
 
 
 # ------------------------------------------------------------------ 경쟁 비교
@@ -139,7 +225,7 @@ def analysis(market: str, ticker: str, db: Session = Depends(get_db)):
             summary="경쟁 그룹별 비교 표 (그룹 내 RANK·AVG, 구성원 1명 그룹은 비교 대상 없음)")
 def peers(market: str, ticker: str, db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
-    rows = db.execute(sql("peers"), {"stock_id": s["stock_id"]}).mappings().all()
+    rows = db.execute(sql("peers"), {"stock_id": s["stock_id"], "preset": default_preset()}).mappings().all()
     groups: dict[int, dict] = {}
     for r in rows:
         g = groups.setdefault(r["group_id"], {

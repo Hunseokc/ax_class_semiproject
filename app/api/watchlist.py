@@ -6,12 +6,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user_id, get_db
+from app.api.deps import get_current_user_id, get_db, get_preset
 from app.api.stocks import resolve_stock
 from app.core.errors import Conflict, NotFound
 from app.models import User, WatchlistItem
 from app.queries import sql
 from app.schemas.api import WatchlistCard, WatchlistCreate, WatchlistOrder, WatchlistOut
+from app.services.scoring import default_preset
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 
@@ -21,15 +22,17 @@ def _require_user(db: Session, user_id: int) -> None:
         raise NotFound(f"사용자(ID {user_id})를 찾을 수 없습니다", code="USER_NOT_FOUND")
 
 
-def _cards(db: Session, user_id: int) -> list[dict]:
-    return [dict(r) for r in db.execute(sql("watchlist"), {"user_id": user_id}).mappings().all()]
+def _cards(db: Session, user_id: int, preset: str | None = None) -> list[dict]:
+    params = {"user_id": user_id, "preset": preset or default_preset()}
+    return [dict(r) for r in db.execute(sql("watchlist"), params).mappings().all()]
 
 
 @router.get("", response_model=WatchlistOut, summary="관심종목 카드 목록 (정렬순)")
-def list_watchlist(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def list_watchlist(user_id: int = Depends(get_current_user_id), preset: dict = Depends(get_preset),
+                   db: Session = Depends(get_db)):
     _require_user(db, user_id)
-    items = _cards(db, user_id)
-    return {"user_id": user_id, "count": len(items), "items": items}
+    items = _cards(db, user_id, preset["code"])
+    return {"user_id": user_id, "preset": preset["code"], "count": len(items), "items": items}
 
 
 @router.post("", response_model=WatchlistCard, status_code=201, summary="관심종목 추가")
@@ -60,7 +63,7 @@ def reorder_watchlist(body: WatchlistOrder, user_id: int = Depends(get_current_u
         w.sort_order = it.sort_order
     db.commit()
     items = _cards(db, user_id)
-    return {"user_id": user_id, "count": len(items), "items": items}
+    return {"user_id": user_id, "preset": default_preset(), "count": len(items), "items": items}
 
 
 @router.delete("/{market}/{ticker}", status_code=204, summary="관심종목 삭제")

@@ -24,7 +24,7 @@ def test_orm_matches_schema(engine):
             if d["nullable"] != c.nullable and not c.primary_key:
                 diffs.append(f"{t.name}.{c.name} NULL 허용 불일치")
         diffs += [f"{t.name}.{x} ORM에 없음" for x in db_cols]
-    assert len(Base.metadata.tables) == 17
+    assert len(Base.metadata.tables) == 20
     assert diffs == []
 
 
@@ -68,7 +68,12 @@ def test_generated_cost_and_updated_at_trigger(engine, portfolio):
     ("잘못된 granularity", "INSERT INTO fx_rates (rate_at, usd_krw, granularity) VALUES (now(), 1, 'HOURLY')", IntegrityError),
     ("환율 0", "INSERT INTO fx_rates (rate_at, usd_krw, granularity) VALUES (now(), 0, 'DAILY')", IntegrityError),
     ("잘못된 period_type", "INSERT INTO financial_statements (stock_id, period_end, period_type, data_source) VALUES (1, '2020-12-31', 'H1', 'DART')", IntegrityError),
-    ("점수 101", "INSERT INTO stock_scores (stock_id, as_of, score, weights_version) VALUES (1, '2026-01-01', 101, 'v1')", IntegrityError),
+    ("점수 101", "INSERT INTO stock_scores (stock_id, as_of, preset_id, score, factor_coverage) VALUES (1, '2026-01-01', 1, 101, 5)", IntegrityError),
+    ("유효 팩터 6개", "INSERT INTO stock_scores (stock_id, as_of, preset_id, factor_coverage) VALUES (1, '2026-01-01', 1, 6)", IntegrityError),
+    ("가중치 1 초과", "WITH p AS (INSERT INTO scoring_presets (code, name) VALUES ('t', 't') RETURNING preset_id) "
+                    "INSERT INTO scoring_weights SELECT preset_id, 'value', 1.5 FROM p", IntegrityError),
+    ("없는 팩터", "INSERT INTO stock_metric_values (stock_id, as_of, metric, factor) VALUES (1, '2026-01-01', 'x', 'size')", IntegrityError),
+    ("주 그룹 2개", "INSERT INTO peer_group_members VALUES (2, 1, true)", IntegrityError),
     ("같은 시장 같은 티커", "INSERT INTO stocks (market_id, ticker, name) VALUES (1, '005930', '중복')", IntegrityError),
     ("생성 컬럼 직접 쓰기", "UPDATE portfolio_items SET cost_krw = 1", ProgrammingError),
 ])

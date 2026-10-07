@@ -1,6 +1,7 @@
 """수집·적재 CLI.
 
-    python -m app.ingest init-db [--reset]   # db/schema.sql → indexes.sql → views.sql
+    python -m app.ingest init-db [--reset]   # db/schema.sql → indexes.sql → views.sql (+ 매력도 프리셋)
+    python -m app.ingest migrate 001_scoring_v2   # db/migrations/<이름>.sql을 기존 DB에 적용
     python -m app.ingest master [--offline]  # universe.yaml → 마스터, DART corp_code·SEC CIK 매핑, demo 사용자
     python -m app.ingest prices [--full] [--tickers 005930 AAPL]
     python -m app.ingest indices [--full]
@@ -69,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m app.ingest")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init-db").add_argument("--reset", action="store_true", help="스키마를 지우고 다시 만든다")
+    sub.add_parser("migrate").add_argument("name", help="db/migrations/<name>.sql")
     sub.add_parser("master").add_argument("--offline", action="store_true", help="DART/SEC 매핑 생략")
     for name in ("prices", "valuation"):
         p = sub.add_parser(name)
@@ -96,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "init-db":
         jobs.init_db(engine, reset=args.reset)
+    elif args.cmd == "migrate":
+        jobs.migrate(engine, args.name)
     elif args.cmd == "master":
         jobs.load_master(engine, offline=args.offline)
     elif args.cmd == "prices":

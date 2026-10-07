@@ -1,4 +1,4 @@
-"""분석 SQL을 손계산(파이썬)과 비교: v_stock_metrics, 매력도(PERCENT_RANK·가중 재정규화), 경쟁 비교, 통계."""
+"""분석 SQL을 손계산(파이썬)과 비교: v_stock_metrics, 경쟁 비교, 통계. (매력도는 test_scoring.py)"""
 from __future__ import annotations
 
 import math
@@ -9,14 +9,9 @@ from decimal import Decimal as Dec
 import pytest
 from sqlalchemy import text
 
-from app.services.fx import FxService
-from app.services.refresh import RefreshService
-from app.services.scoring import compute_scores
 from tests.conftest import D
-from tests.fakes import make_providers
 
 API = "/api/v1"
-WEIGHTS = {"version": "test", "w_val": 30, "w_gro": 25, "w_pro": 25, "w_mom": 20}
 
 
 # ------------------------------------------------------------------ v_stock_metrics 손계산
@@ -103,112 +98,6 @@ def test_yoy_requires_consecutive_fiscal_years(engine):
         m = conn.execute(text("SELECT revenue_yoy, roe, operating_margin FROM v_stock_metrics WHERE stock_id = 2")).one()
     assert m.revenue_yoy is None and m.roe is None              # 2023 누락 → YoY NULL, 자본 ≤ 0 → ROE NULL
     assert float(m.operating_margin) == pytest.approx(20 / 150, abs=1e-6)
-
-
-# ------------------------------------------------------------------ 매력도 손계산
-@pytest.fixture
-def scoring_data(engine):
-    """KR 3종목(1, 2, 5) · US 2종목(3, 4), 130일 시세, 일부 팩터 계산 불가."""
-    with engine.begin() as conn:
-        conn.execute(text("INSERT INTO stocks (stock_id, market_id, ticker, name) VALUES (5, 1, '035420', 'NAVER')"))
-        conn.execute(text("DELETE FROM valuation_snapshots"))
-        conn.execute(text("""INSERT INTO valuation_snapshots (stock_id, as_of, per, pbr, market_cap, source) VALUES
-            (1, :d, 12, 1.2, 4e14, 'PYKRX'), (2, :d, -5, 1.5, 1e14, 'PYKRX'), (5, :d, NULL, NULL, 3e13, 'PYKRX'),
-            (3, :d, 30, 40, 3e12, 'YFINANCE'), (4, :d, 50, 30, 1e12, 'YFINANCE')"""), {"d": D})
-        conn.execute(text("""INSERT INTO financial_statements (stock_id, period_end, period_type, revenue, operating_income,
-                             net_income, total_equity, data_source) VALUES
-            (1, '2023-12-31', 'FY', 100, 10, 8, 100, 'DART'), (1, '2024-12-31', 'FY', 120, 15, 12, 110, 'DART'),
-            (2, '2023-12-31', 'FY', 200, 40, 30, 150, 'DART'), (2, '2024-12-31', 'FY', 210, 30, 20, 160, 'DART'),
-            (3, '2023-09-30', 'FY', 300, 90, 80, 60, 'SEC'),   (3, '2024-09-30', 'FY', 330, 99, 90, 70, 'SEC'),
-            (4, '2024-01-31', 'FY', 50, 20, 15, 40, 'SEC'),    (4, '2025-01-31', 'FY', 120, 70, 60, 80, 'SEC')"""))
-    for sid, (phase, slope) in {1: (0, .1), 2: (1, -.05), 5: (2, .02), 3: (.5, .2), 4: (3, .3)}.items():
-        _replace_prices(engine, sid, _path(130, phase, slope), D)
-
-
-def _pr(values: dict[int, float | None], sid: int, lower_is_better: bool) -> float | None:
-    vals = {k: v for k, v in values.items() if v is not None}
-    if sid not in vals or len(vals) < 2:
-        return None
-    x = vals[sid]
-    better = sum(1 for v in vals.values() if (v > x if lower_is_better else v < x))
-    return better / (len(vals) - 1)
-
-
-def test_scores_match_hand_calculation(engine, scoring_data):
-    with engine.connect() as conn:
-        rows = {r["stock_id"]: r for r in conn.execute(text("SELECT * FROM v_stock_metrics")).mappings()}
-    n = compute_scores(engine, as_of=D, weights=WEIGHTS)
-    assert n == 5
-    with engine.connect() as conn:
-        got = {r["stock_id"]: r for r in conn.execute(text("SELECT * FROM stock_scores WHERE as_of = :d"), {"d": D}).mappings()}
-
-    def f(v):
-        return float(v) if v is not None else None
-
-    inputs = {sid: {"per": f(r["per"]) if r["per"] and r["per"] > 0 else None,
-                    "pbr": f(r["pbr"]) if r["pbr"] and r["pbr"] > 0 else None,
-                    "rev": f(r["revenue_yoy"]), "op": f(r["operating_income_yoy"]), "opm": f(r["operating_margin"]),
-                    "roe": f(r["roe"]), "r3": f(r["return_3m"]), "gap": f(r["ma120_gap"]), "country": r["country"]}
-              for sid, r in rows.items()}
-    factors = {"valuation": [("per", True), ("pbr", True)], "growth": [("rev", False), ("op", False)],
-               "profitability": [("opm", False), ("roe", False)], "momentum": [("r3", False), ("gap", False)]}
-    weights = {"valuation": 30, "growth": 25, "profitability": 25, "momentum": 20}
-    for sid, inp in inputs.items():
-        same = {k: v for k, v in inputs.items() if v["country"] == inp["country"]}
-        fac = {}
-        for name, subs in factors.items():
-            ranks = [_pr({k: v[key] for k, v in same.items()}, sid, low) for key, low in subs]
-            ranks = [x for x in ranks if x is not None]
-            fac[name] = sum(ranks) / len(ranks) * 100 if ranks else None
-            assert (got[sid][f"{name}_score"] is None) == (fac[name] is None), (sid, name)
-            if fac[name] is not None:
-                assert float(got[sid][f"{name}_score"]) == pytest.approx(fac[name], abs=0.01), (sid, name)
-        avail = {k: v for k, v in fac.items() if v is not None}
-        expected = sum(weights[k] * v for k, v in avail.items()) / sum(weights[k] for k in avail) if avail else None
-        assert float(got[sid]["score"]) == pytest.approx(expected, abs=0.01), sid
-
-    # NAVER(5): PER·PBR·재무 없음 → valuation·growth·profitability 불가, momentum만으로 재정규화
-    naver = got[5]
-    assert set(naver["data_quality"]["unavailable"]) == {"valuation", "growth", "profitability"}
-    assert naver["score"] == naver["momentum_score"]
-    # SK하이닉스(2): 음수 PER은 제외되고 PBR만으로 valuation 계산
-    assert "per" in got[2]["data_quality"]["missing_inputs"] and got[2]["valuation_score"] is not None
-    assert {r["weights_version"] for r in got.values()} == {"test"}
-
-
-def test_scores_are_regenerated_for_same_as_of(engine, scoring_data):
-    compute_scores(engine, as_of=D, weights=WEIGHTS)
-    compute_scores(engine, as_of=D, weights={**WEIGHTS, "version": "v2"})
-    with engine.connect() as conn:
-        rows = conn.execute(text("SELECT count(*), max(weights_version) FROM stock_scores")).one()
-    assert tuple(rows) == (5, "v2")                                  # DELETE 후 INSERT → 중복 없음
-
-
-def test_all_factors_unavailable_gives_null_score(engine):
-    compute_scores(engine, as_of=D, weights=WEIGHTS)                  # 기본 픽스처: 3일 시세, 재무 없음
-    with engine.connect() as conn:
-        aapl = conn.execute(text("SELECT score, valuation_score, data_quality FROM stock_scores WHERE stock_id = 3")).one()
-    # US 2종목 PER·PBR은 있으므로 valuation만 계산되고 나머지는 불가
-    assert aapl.valuation_score is not None and aapl.score == aapl.valuation_score
-    with engine.begin() as conn:
-        conn.execute(text("UPDATE valuation_snapshots SET per = NULL, pbr = NULL"))
-    compute_scores(engine, as_of=D, weights=WEIGHTS)
-    with engine.connect() as conn:
-        aapl = conn.execute(text("SELECT score, data_quality FROM stock_scores WHERE stock_id = 3")).one()
-    assert aapl.score is None and len(aapl.data_quality["unavailable"]) == 4
-
-
-def test_refresh_runs_scorer_and_analysis_api(client, engine, scoring_data):
-    p = make_providers()
-    svc = RefreshService(engine, p, FxService(engine, p.fx, 4), 4, scorer=lambda e: compute_scores(e, weights=WEIGHTS))
-    scores_job = next(j for j in svc.refresh().jobs if j.job_type == "SCORES")
-    assert scores_job.status == "SUCCESS"
-    body = client.get(f"{API}/stocks/KOSPI/035420/analysis").json()
-    assert body["attractiveness"]["score"] is not None
-    # 갱신의 VALUATION 작업이 fake PER·PBR을 넣으므로 valuation은 계산되고, 재무가 없는 growth는 불가
-    assert body["attractiveness"]["factors"]["growth"] == {"score": None, "weight": 25, "available": False}
-    assert body["attractiveness"]["factors"]["valuation"]["available"] is True
-    assert body["metrics"]["return_3m"] is not None and "투자 권유가 아닙니다" in body["disclaimer"]
 
 
 # ------------------------------------------------------------------ 경쟁 비교

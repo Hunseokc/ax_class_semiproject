@@ -51,6 +51,7 @@ class PeerGroupMember(Base):
     __tablename__ = "peer_group_members"
     group_id: Mapped[int] = mapped_column(ForeignKey("peer_groups.group_id", ondelete="CASCADE"), primary_key=True)
     stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
 
 # ------------------------------------------------------------------ 종목별 사실
@@ -191,17 +192,53 @@ class PortfolioItem(Base):
 
 
 # ------------------------------------------------------------------ 파생·운영
+FACTOR_CHECK = "factor IN ('value','quality','growth','safety','momentum')"
+
+
+class ScoringPreset(Base):
+    __tablename__ = "scoring_presets"
+    preset_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True)
+    name: Mapped[str] = mapped_column(String(50))
+    description: Mapped[str | None] = mapped_column(Text)
+
+
+class ScoringWeight(Base):
+    __tablename__ = "scoring_weights"
+    preset_id: Mapped[int] = mapped_column(ForeignKey("scoring_presets.preset_id", ondelete="CASCADE"),
+                                           primary_key=True)
+    factor: Mapped[str] = mapped_column(String(12), primary_key=True)
+    weight: Mapped[Decimal] = mapped_column(Numeric(4, 3))
+    __table_args__ = (CheckConstraint(FACTOR_CHECK), CheckConstraint("weight >= 0 AND weight <= 1"))
+
+
+class StockMetricValue(Base):
+    __tablename__ = "stock_metric_values"
+    stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
+    as_of: Mapped[date] = mapped_column(Date, primary_key=True)
+    metric: Mapped[str] = mapped_column(String(24), primary_key=True)
+    factor: Mapped[str] = mapped_column(String(12))
+    raw_value: Mapped[Decimal | None] = mapped_column(Numeric)
+    z_raw: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    z_adj: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    __table_args__ = (CheckConstraint(FACTOR_CHECK),)
+
+
 class StockScore(Base):
     __tablename__ = "stock_scores"
     stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
     as_of: Mapped[date] = mapped_column(Date, primary_key=True)
+    preset_id: Mapped[int] = mapped_column(ForeignKey("scoring_presets.preset_id"), primary_key=True)
+    value_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    quality_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    growth_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    safety_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    momentum_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    composite: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
     score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
-    valuation_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
-    growth_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
-    profitability_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
-    momentum_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    factor_coverage: Mapped[int] = mapped_column(SmallInteger)
     data_quality: Mapped[dict] = mapped_column(JSONB, server_default="{}")
-    weights_version: Mapped[str] = mapped_column(String(20))
+    __table_args__ = (CheckConstraint("score BETWEEN 0 AND 100"), CheckConstraint("factor_coverage BETWEEN 0 AND 5"))
 
 
 class IngestionLog(Base):

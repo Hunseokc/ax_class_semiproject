@@ -14,6 +14,7 @@ from app.ingest.store import job_log, upsert
 from app.ingest.universe import index_refs, load_universe, stock_refs
 from app.providers.base import Financial, ProviderError
 from app.providers.factory import Providers
+from app.services.scoring import sync_presets
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,15 @@ def init_db(engine: Engine, reset: bool = False) -> None:
         for name in ("schema.sql", "indexes.sql", "views.sql"):
             raw.execute((ROOT_DIR / "db" / name).read_text(encoding="utf-8"))
             log.info("적용: db/%s", name)
+        sync_presets(conn)
+
+
+def migrate(engine: Engine, name: str) -> None:
+    path = ROOT_DIR / "db" / "migrations" / f"{name}.sql"
+    with engine.begin() as conn:
+        conn.connection.driver_connection.execute(path.read_text(encoding="utf-8"))
+        sync_presets(conn)
+    log.info("적용: %s", path.relative_to(ROOT_DIR))
 
 
 # ---------------------------------------------------------------- 마스터
@@ -55,8 +65,16 @@ def load_master(engine: Engine, providers: Providers | None = None, offline: boo
             res.rows += upsert(conn, "peer_groups", [{"name": g["name"]} for g in u["peer_groups"]], ["name"])
             gid = dict(conn.execute(text("SELECT name, group_id FROM peer_groups")).all())
             sid = {t: i for t, i in conn.execute(text("SELECT ticker, stock_id FROM stocks")).all()}
-            members = [{"group_id": gid[g["name"]], "stock_id": sid[str(t)]} for g in u["peer_groups"] for t in g["members"]]
-            res.rows += upsert(conn, "peer_group_members", members, ["group_id", "stock_id"], update=[])
+            # 주 그룹(섹터 중립화 기준) = universe.yaml에서 종목이 처음 나오는 그룹
+            seen: set[int] = set()
+            members = []
+            for g in u["peer_groups"]:
+                for t in g["members"]:
+                    s_id = sid[str(t)]
+                    members.append({"group_id": gid[g["name"]], "stock_id": s_id, "is_primary": s_id not in seen})
+                    seen.add(s_id)
+            conn.execute(text("UPDATE peer_group_members SET is_primary = false WHERE is_primary"))
+            res.rows += upsert(conn, "peer_group_members", members, ["group_id", "stock_id"], update=["is_primary"])
             conn.execute(text("INSERT INTO users (nickname) VALUES ('demo') ON CONFLICT (nickname) DO NOTHING"))
     if offline:
         return

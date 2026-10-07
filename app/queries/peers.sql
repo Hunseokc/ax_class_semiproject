@@ -26,6 +26,7 @@ base AS (
     JOIN markets mk ON mk.market_id = s.market_id
     LEFT JOIN v_stock_metrics vm ON vm.stock_id = s.stock_id
     LEFT JOIN LATERAL (SELECT st.score FROM stock_scores st WHERE st.stock_id = s.stock_id
+                         AND st.preset_id = (SELECT preset_id FROM scoring_presets WHERE code = :preset)
                        ORDER BY st.as_of DESC LIMIT 1) sc ON true
 )
 SELECT b.*,

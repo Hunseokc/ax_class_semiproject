@@ -38,11 +38,14 @@ CREATE TABLE peer_groups (
 );
 
 -- 종목 ↔ 경쟁 그룹 N:M 교차 테이블 (국내·해외 종목 혼합 가능)
+-- is_primary: 매력도 섹터 중립화에 쓰는 주 그룹. 종목당 최대 1개(부분 UNIQUE 인덱스)
 CREATE TABLE peer_group_members (
-  group_id INT NOT NULL REFERENCES peer_groups ON DELETE CASCADE,
-  stock_id INT NOT NULL REFERENCES stocks      ON DELETE CASCADE,
+  group_id   INT     NOT NULL REFERENCES peer_groups ON DELETE CASCADE,
+  stock_id   INT     NOT NULL REFERENCES stocks      ON DELETE CASCADE,
+  is_primary BOOLEAN NOT NULL DEFAULT false,
   PRIMARY KEY (group_id, stock_id)
 );
+CREATE UNIQUE INDEX ux_pgm_primary ON peer_group_members (stock_id) WHERE is_primary;
 
 -- ---------------------------------------------------------------------
 -- 2. 종목별 시계열·재무·공시 (Stock 1─N)
@@ -192,19 +195,52 @@ CREATE TABLE portfolio_items (
 -- 5. 파생 결과·운영 로그
 -- ---------------------------------------------------------------------
 
--- [의도적 비정규화 2] 유니버스 전체 PERCENT_RANK를 매번 계산하지 않도록 결과를 as_of별로 저장하는
---   재생성 가능한 파생 테이블. 같은 as_of는 DELETE 후 INSERT로 재생성한다.
+-- 매력도 가중치 프리셋 (config/scoring.yaml에서 적재). "프리셋별 가중치 합 = 1"은 행 간 제약이라
+--   CHECK로 걸 수 없다 → 적재 시 검증(app/services/scoring.py)하고 테스트로 보장한다.
+CREATE TABLE scoring_presets (
+  preset_id   SMALLSERIAL PRIMARY KEY,
+  code        VARCHAR(20) NOT NULL UNIQUE,                       -- balanced / value / growth / quality
+  name        VARCHAR(50) NOT NULL,
+  description TEXT
+);
+
+CREATE TABLE scoring_weights (
+  preset_id SMALLINT     NOT NULL REFERENCES scoring_presets ON DELETE CASCADE,
+  factor    VARCHAR(12)  NOT NULL CHECK (factor IN ('value','quality','growth','safety','momentum')),
+  weight    NUMERIC(4,3) NOT NULL CHECK (weight >= 0 AND weight <= 1),
+  PRIMARY KEY (preset_id, factor)
+);
+
+-- [의도적 비정규화 2] 매력도 계산 결과를 as_of별로 저장하는 재생성 가능한 파생 테이블 2개.
+--   국가별 중앙값·MAD·그룹 평균을 화면 요청마다 다시 계산하지 않고, 점수의 근거(지표 원값·Z)를 설명하기 위해 저장한다.
+--   같은 as_of는 DELETE 후 INSERT로 재생성한다(python -m app.ingest scores, POST /market/refresh).
+-- 지표별 원값과 Z — 프리셋과 무관하므로 as_of당 한 번만 계산
+CREATE TABLE stock_metric_values (
+  stock_id  INT          NOT NULL REFERENCES stocks ON DELETE CASCADE,
+  as_of     DATE         NOT NULL,
+  metric    VARCHAR(24)  NOT NULL,                                -- earnings_yield, book_yield, roe …
+  factor    VARCHAR(12)  NOT NULL CHECK (factor IN ('value','quality','growth','safety','momentum')),
+  raw_value NUMERIC,                                              -- 계산 불가면 NULL
+  z_raw     NUMERIC(8,4),                                         -- 국가 내 로버스트 Z(방향 반영, ±3 클리핑)
+  z_adj     NUMERIC(8,4),                                         -- 주 그룹 축소 추정으로 섹터 중립화한 Z
+  PRIMARY KEY (stock_id, as_of, metric)
+);
+
+-- 프리셋별 팩터 점수·종합 점수
 CREATE TABLE stock_scores (
-  stock_id            INT          NOT NULL REFERENCES stocks ON DELETE CASCADE,
-  as_of               DATE         NOT NULL,
-  score               NUMERIC(5,2) CHECK (score BETWEEN 0 AND 100),     -- 유니버스 내 상대평가, 전부 계산 불가면 NULL
-  valuation_score     NUMERIC(5,2) CHECK (valuation_score BETWEEN 0 AND 100),
-  growth_score        NUMERIC(5,2) CHECK (growth_score BETWEEN 0 AND 100),
-  profitability_score NUMERIC(5,2) CHECK (profitability_score BETWEEN 0 AND 100),
-  momentum_score      NUMERIC(5,2) CHECK (momentum_score BETWEEN 0 AND 100),
-  data_quality        JSONB        NOT NULL DEFAULT '{}',                -- 계산 불가 팩터와 사유
-  weights_version     VARCHAR(20)  NOT NULL,                             -- config/scoring.yaml version
-  PRIMARY KEY (stock_id, as_of)
+  stock_id        INT          NOT NULL REFERENCES stocks ON DELETE CASCADE,
+  as_of           DATE         NOT NULL,
+  preset_id       SMALLINT     NOT NULL REFERENCES scoring_presets,
+  value_score     NUMERIC(8,4),                                   -- 팩터 점수 = 유효 지표 z_adj 평균 (Z 단위)
+  quality_score   NUMERIC(8,4),
+  growth_score    NUMERIC(8,4),
+  safety_score    NUMERIC(8,4),
+  momentum_score  NUMERIC(8,4),
+  composite       NUMERIC(8,4),                                   -- 유효 팩터 가중 평균(가중치 재정규화), 유효 팩터 < 3이면 NULL
+  score           NUMERIC(5,2) CHECK (score BETWEEN 0 AND 100),   -- 100·Φ(국가 내 표준화한 composite)
+  factor_coverage SMALLINT     NOT NULL CHECK (factor_coverage BETWEEN 0 AND 5),
+  data_quality    JSONB        NOT NULL DEFAULT '{}',             -- 계산 불가 지표·팩터와 사유
+  PRIMARY KEY (stock_id, as_of, preset_id)
 );
 
 -- 수집·갱신 작업 로그. 갱신 TTL 판단(작업별 마지막 성공 시각)에도 사용

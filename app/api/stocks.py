@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user_id, get_db, get_fx_service
+from app.api.deps import get_current_user_id, get_db, get_fx_service, get_preset
 from app.core.errors import NotFound, Unprocessable
 from app.queries import raw, sql
 from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, StockDetailOut, StockListOut
@@ -39,28 +39,31 @@ def list_stocks(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user_id: int = Depends(get_current_user_id),
+    preset: dict = Depends(get_preset),
     db: Session = Depends(get_db),
 ):
     if sort == "volume" and country is None:
         raise Unprocessable("시장마다 거래량 단위가 달라 '전체'에서는 거래량 정렬을 할 수 없습니다. 국내/미국 탭을 선택하세요",
                             detail={"allowed_sort_for_all": ["market_cap"]}, code="VOLUME_SORT_REQUIRES_MARKET")
     stmt = text(raw("stock_list").format(order_col=SORT_COLUMNS[sort], order_dir=order.upper()))
-    rows = db.execute(stmt, {"user_id": user_id, "country": country, "grp": group, "q": q,
+    rows = db.execute(stmt, {"user_id": user_id, "country": country, "grp": group, "q": q, "preset": preset["code"],
                              "limit": limit, "offset": offset}).mappings().all()
     fx_at = db.execute(text("SELECT rate_at FROM v_fx_latest")).scalar()
     return {"total": rows[0]["total"] if rows else 0, "limit": limit, "offset": offset, "sort": sort, "order": order,
-            "fx_rate_at": fx_at, "items": [dict(r) for r in rows]}
+            "preset": preset["code"], "fx_rate_at": fx_at, "items": [dict(r) for r in rows]}
 
 
 @router.get("/{market}/{ticker}", response_model=StockDetailOut, summary="종목 기본 정보 + 최신 시세·밸류에이션·매력도")
-def stock_detail(market: str, ticker: str, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db),
+def stock_detail(market: str, ticker: str, user_id: int = Depends(get_current_user_id),
+                 preset: dict = Depends(get_preset), db: Session = Depends(get_db),
                  fx_service: FxService = Depends(get_fx_service)):
     row = db.execute(sql("stock_detail"), {"market": market.upper(), "ticker": ticker.upper(),
-                                           "user_id": user_id}).mappings().first()
+                                           "user_id": user_id, "preset": preset["code"]}).mappings().first()
     if row is None:
         raise NotFound(f"종목 {market}/{ticker}을(를) 찾을 수 없습니다", code="STOCK_NOT_FOUND")
     out = dict(row)
     out["groups"] = out["groups"] or []
+    out["preset"] = preset["code"]
     if out["currency"] == "USD":
         fx = fx_service.get_current_rate()
         out.update(fx_rate=fx.usd_krw, fx_rate_at=fx.rate_at, fx_stale=fx.stale,

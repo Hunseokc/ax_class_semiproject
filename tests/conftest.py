@@ -6,7 +6,8 @@
         2 SK하이닉스 000660 종가 150,000 (3일)              거래량 3,000   시총 100조원
         3 AAPL                종가 195 → 198 → 200          거래량 500     시총 3조 달러
         4 NVDA                종가 100 → 105 → 110          거래량 800     시총 1조 달러
-  그룹  반도체(1,2,4), 빅테크(3)
+  그룹  반도체(1,2,4), 빅테크(3) — 모두 주 그룹
+  프리셋 init_db가 config/scoring.yaml로 적재(테스트마다 비우지 않음)
   환율  DAILY 1,300 (3일), SNAPSHOT 1,300 (지금 → TTL 이내)
   지수  KOSPI 3일
   사용자 demo(1), other(2)
@@ -25,7 +26,8 @@ from app.ingest.jobs import init_db
 from app.main import app
 from tests.fakes import FakeFx, make_providers
 
-TABLES = ["portfolio_items", "portfolios", "watchlist_items", "users", "stock_scores", "ingestion_logs", "fx_rates",
+TABLES = ["portfolio_items", "portfolios", "watchlist_items", "users", "stock_scores", "stock_metric_values",
+          "ingestion_logs", "fx_rates",
           "index_daily_prices", "indices", "disclosures", "financial_statements", "valuation_snapshots",
           "daily_prices", "peer_group_members", "peer_groups", "stocks", "markets"]
 
@@ -52,7 +54,7 @@ def load_fixture(conn) -> None:
           (1, 1, '005930', '삼성전자', 'Samsung Electronics'), (2, 1, '000660', 'SK하이닉스', 'SK hynix'),
           (3, 2, 'AAPL', 'Apple', 'Apple'), (4, 2, 'NVDA', 'NVIDIA', 'NVIDIA');
         INSERT INTO peer_groups (group_id, name) VALUES (1, '반도체'), (2, '빅테크');
-        INSERT INTO peer_group_members VALUES (1, 1), (1, 2), (1, 4), (2, 3);
+        INSERT INTO peer_group_members VALUES (1, 1, true), (1, 2, true), (1, 4, true), (2, 3, true);
         INSERT INTO users (user_id, nickname) VALUES (1, 'demo'), (2, 'other');
         INSERT INTO indices (index_id, code, name, market_id, source_symbol, display_order)
           VALUES (1, 'KOSPI', 'KOSPI', 1, '1001', 1);

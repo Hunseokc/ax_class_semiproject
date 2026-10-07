@@ -53,6 +53,7 @@ if importlib.util.find_spec("app.api.analysis"):     # 5단계: 분석·경쟁 �
     from app.api import analysis
     api.include_router(analysis.router)
     api.include_router(analysis.stats_router)
+    api.include_router(analysis.scoring_router)
 app.include_router(api)
 
 # ------------------------------------------------------------------ 화면 (6단계)

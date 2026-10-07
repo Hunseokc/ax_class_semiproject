@@ -1,4 +1,4 @@
--- 종목 상세: 기본 정보 + 최신 시세·밸류에이션·매력도·소속 그룹·관심 여부
+-- 종목 상세: 기본 정보 + 최신 시세·밸류에이션·매력도(:preset 프리셋)·소속 그룹·관심 여부
 SELECT s.stock_id, s.ticker, s.name, s.name_en, s.corp_code, s.cik,
        m.code AS market, m.country, m.currency, m.timezone,
        lp.trade_date AS as_of, lp.close, lp.prev_close, lp.change, lp.change_rate, lp.volume,
@@ -16,5 +16,6 @@ LEFT JOIN LATERAL (SELECT * FROM valuation_snapshots vs WHERE vs.stock_id = s.st
                    ORDER BY vs.as_of DESC LIMIT 1) v ON true
 LEFT JOIN v_fx_latest fx ON true
 LEFT JOIN LATERAL (SELECT st.as_of, st.score FROM stock_scores st WHERE st.stock_id = s.stock_id
+                     AND st.preset_id = (SELECT preset_id FROM scoring_presets WHERE code = :preset)
                    ORDER BY st.as_of DESC LIMIT 1) sc ON true
 WHERE m.code = :market AND s.ticker = :ticker

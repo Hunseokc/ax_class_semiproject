@@ -5,16 +5,18 @@ import importlib.util
 from collections.abc import Iterator
 from functools import lru_cache
 
-from fastapi import Depends
-from sqlalchemy import Engine
+from fastapi import Depends, Query
+from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import get_engine, session_factory
+from app.core.errors import Unprocessable
 from app.providers.factory import Providers, default_providers
 from app.services.fx import FxService
 from app.services.portfolio import PortfolioService
 from app.services.refresh import RefreshService
+from app.services.scoring import default_preset
 
 
 def get_engine_dep() -> Engine:
@@ -32,6 +34,17 @@ def get_db(engine: Engine = Depends(get_engine_dep)) -> Iterator[Session]:
         yield db
     finally:
         db.close()
+
+
+def get_preset(preset: str | None = Query(None, description="매력도 가중치 프리셋 코드(balanced·value·growth·quality). 비우면 balanced"),
+               db: Session = Depends(get_db)) -> dict:
+    code = preset or default_preset()
+    row = db.execute(text("SELECT preset_id, code, name, description FROM scoring_presets WHERE code = :c"),
+                     {"c": code}).mappings().first()
+    if row is None:
+        codes = list(db.execute(text("SELECT code FROM scoring_presets ORDER BY preset_id")).scalars())
+        raise Unprocessable(f"알 수 없는 매력도 프리셋입니다: {code}", detail={"presets": codes}, code="UNKNOWN_PRESET")
+    return dict(row)
 
 
 @lru_cache

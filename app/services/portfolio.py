@@ -19,6 +19,7 @@ from app.core.errors import Conflict, NotFound, Unprocessable
 from app.models import Market, Portfolio, PortfolioItem, Stock, User
 from app.queries import sql
 from app.services.fx import FxQuote, FxService
+from app.services.scoring import default_preset
 
 CENT = Decimal("0.01")
 WON = Decimal("1")
@@ -220,7 +221,7 @@ class PortfolioService:
         return self._valued_items(portfolio_id)
 
     def _valued_items(self, portfolio_id: int) -> tuple[list[dict], FxQuote | None]:
-        rows = self.db.execute(sql("portfolio_items_valued"), {"pid": portfolio_id}).mappings().all()
+        rows = self.db.execute(sql("portfolio_items_valued"), {"pid": portfolio_id, "preset": default_preset()}).mappings().all()
         fx = self.fx.get_current_rate() if any(r["currency"] == "USD" for r in rows) else None
         out = []
         for r in rows:
