@@ -105,6 +105,21 @@ def test_shrinkage_uses_primary_group_mean_including_self(engine):
     assert adj[9] == z[9]                                                # 주 그룹 표본 n = 1
 
 
+def test_shrinkage_does_not_mix_countries(engine):
+    """같은 주 그룹이라도 국가가 다르면 평균에 넣지 않는다(z는 국가 안에서 표준화한 값)."""
+    with engine.begin() as conn:
+        add_kr_stocks(conn, [5, 6, 7])
+        conn.execute(text("INSERT INTO peer_group_members VALUES (1, 5, true), (1, 6, true), (1, 7, true)"))
+        put_raw(conn, "roe", {1: 0.10, 2: 0.12, 5: 0.08, 6: 0.11, 7: 0.50, 3: 0.1, 4: 0.9})   # 반도체: KR 1·2·5·6·7, US 4
+        normalize(conn, D, K)
+        z, adj = read(conn, "z_raw", "roe"), read(conn, "z_adj", "roe")
+    kr = [1, 2, 5, 6, 7]
+    kr_mean = sum(z[s] for s in kr) / len(kr)
+    for s in kr:
+        assert adj[s] == pytest.approx(z[s] - 5 / (5 + K) * kr_mean, abs=2e-4)
+    assert adj[4] == z[4]                                                # US 반도체는 4 혼자 → n = 1
+
+
 # ------------------------------------------------------------------ 3단계: 합산·Φ 변환
 def put_z(conn, sid: int, z_by_metric: dict[str, float], as_of=D):
     conn.execute(text("""INSERT INTO stock_metric_values (stock_id, as_of, metric, factor, raw_value, z_raw, z_adj)
@@ -246,7 +261,7 @@ def reference_scores(raw):
             if metric not in z_raw[s]:
                 continue
             g = PRIMARY.get(s)
-            mates = [t for t in raw if g is not None and PRIMARY.get(t) == g and metric in z_raw[t]]
+            mates = [t for t in raw if g is not None and PRIMARY.get(t) == g and COUNTRY[t] == COUNTRY[s] and metric in z_raw[t]]
             n = len(mates)
             z = z_raw[s][metric]
             z_adj[s][metric] = round(z - n / (n + K) * sum(z_raw[t][metric] for t in mates) / n if n > 1 else z, 4)
