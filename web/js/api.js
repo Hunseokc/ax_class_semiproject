@@ -1,6 +1,5 @@
 // API 클라이언트 — 오류는 {error: {code, message, detail}}를 ApiError로 바꿔 던진다.
 const BASE = "/api/v1";
-export const USER_ID = 1; // 인증 없음: demo 사용자
 
 export class ApiError extends Error {
   constructor(status, code, message, detail) {
@@ -52,9 +51,9 @@ export const Market = {
 };
 
 export const Stocks = {
-  list: (params) => api.get("/stocks", { user_id: USER_ID, limit: 100, ...params }),
+  list: (params) => api.get("/stocks", { limit: 100, ...params }),
   groups: () => api.get("/peer-groups"),
-  detail: (m, t) => api.get(`/stocks/${m}/${t}`, { user_id: USER_ID }),
+  detail: (m, t) => api.get(`/stocks/${m}/${t}`),
   candles: (m, t, range) => api.get(`/stocks/${m}/${t}/candles`, { range }),
   analysis: (m, t) => api.get(`/stocks/${m}/${t}/analysis`),
   financials: (m, t) => api.get(`/stocks/${m}/${t}/financials`, { limit: 5 }),
@@ -64,14 +63,14 @@ export const Stocks = {
 };
 
 export const Watchlist = {
-  list: () => api.get("/watchlist", { user_id: USER_ID }),
-  add: (market, ticker) => api.post("/watchlist", { user_id: USER_ID, market, ticker }),
-  remove: (market, ticker) => api.del(`/watchlist/${market}/${ticker}`, { user_id: USER_ID }),
+  list: () => api.get("/watchlist"),
+  add: (market, ticker) => api.post("/watchlist", { market, ticker }),
+  remove: (market, ticker) => api.del(`/watchlist/${market}/${ticker}`),
 };
 
 export const Portfolios = {
-  list: () => api.get("/portfolios", { user_id: USER_ID }),
-  create: (name, seed) => api.post("/portfolios", { user_id: USER_ID, name, seed_krw: seed }),
+  list: () => api.get("/portfolios"),
+  create: (name, seed) => api.post("/portfolios", { name, seed_krw: seed }),
   update: (id, name, seed) => api.put(`/portfolios/${id}`, { name, seed_krw: seed }),
   remove: (id) => api.del(`/portfolios/${id}`),
   summary: (id) => api.get(`/portfolios/${id}/summary`),
