@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     sec_user_agent: str = ""
     log_level: str = "INFO"
     default_user_id: int = Field(default=1, ge=1)
+    scheduler_enabled: bool = True                       # 앱 안 스케줄러(4시간 갱신·비교군 1일 갱신)
+    scheduler_check_minutes: int = Field(default=5, ge=1)
 
 
 @lru_cache

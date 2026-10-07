@@ -7,7 +7,7 @@ WITH m AS (
     FROM peer_groups g
     JOIN peer_group_members gm ON gm.group_id = g.group_id
     JOIN v_stock_metrics vm    ON vm.stock_id = gm.stock_id
-    JOIN stocks s              ON s.stock_id = gm.stock_id
+    JOIN stocks s              ON s.stock_id = gm.stock_id AND s.coverage = 'featured'   -- 노출 종목 기준
     JOIN markets mk            ON mk.market_id = s.market_id
 )
 SELECT group_id, group_name,

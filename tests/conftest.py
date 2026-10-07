@@ -14,7 +14,11 @@
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+import os
+
+os.environ["SCHEDULER_ENABLED"] = "false"      # 테스트 중에는 앱 안 스케줄러를 돌리지 않는다
+
+from datetime import date, timedelta  # noqa: E402
 
 import pytest
 from fastapi.testclient import TestClient
@@ -94,11 +98,30 @@ def providers(fake_fx):
     return make_providers(fake_fx)
 
 
+class RecordingHydrator:
+    """상세 데이터 수집 요청만 기록한다(실제 수집은 test_benchmark에서 hydrate를 직접 검증)."""
+
+    def __init__(self):
+        self.requests: list[int] = []
+
+    def request(self, stock_id, coverage, synced_at):
+        if coverage != "benchmark":
+            return "ready"
+        self.requests.append(stock_id)
+        return "loading"
+
+
 @pytest.fixture
-def client(engine, providers):
+def hydrator():
+    return RecordingHydrator()
+
+
+@pytest.fixture
+def client(engine, providers, hydrator):
     app.dependency_overrides[deps.get_engine_dep] = lambda: engine
     app.dependency_overrides[deps.get_providers] = lambda: providers
     app.dependency_overrides[deps.get_scorer] = lambda: None
+    app.dependency_overrides[deps.get_hydrator] = lambda: hydrator
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

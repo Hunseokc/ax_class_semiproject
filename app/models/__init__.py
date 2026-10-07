@@ -36,8 +36,10 @@ class Stock(Base):
     corp_code: Mapped[str | None] = mapped_column(String(16))
     cik: Mapped[str | None] = mapped_column(String(10))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    coverage: Mapped[str] = mapped_column(String(10), server_default="featured")
+    detail_synced_at: Mapped[datetime | None] = mapped_column()
     market: Mapped[Market] = relationship(lazy="joined")
-    __table_args__ = (UniqueConstraint("market_id", "ticker"),)
+    __table_args__ = (UniqueConstraint("market_id", "ticker"), CheckConstraint("coverage IN ('featured','benchmark')"))
 
 
 class PeerGroup(Base):

@@ -39,6 +39,11 @@ class Providers:
     def disclosure(self, country: str) -> base.DisclosureProvider | None:
         return self.kr_disclosure if country == "KR" else self.us_disclosure
 
+    def market_caps(self, country: str, stocks: list[base.StockRef], as_of) -> dict:
+        """비교군 선정용 시가총액 {ticker: 금액}. 국내 밸류에이션 provider가 없으면 yfinance(.KS/.KQ)로 조회."""
+        provider = self.valuation(country) or self.us_valuation
+        return provider.get_market_caps(stocks, as_of) if stocks else {}
+
 
 class _Lazy:
     """API 키가 없으면 생성 시점에 실패하므로 처음 쓸 때 만든다."""

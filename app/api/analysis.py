@@ -257,7 +257,7 @@ def peers_chart(market: str, ticker: str, range: Literal["1m", "3m", "6m", "1y"]
     target = next((g for g in my_groups if g["group_id"] == group_id), None) if group_id else my_groups[0]
     if target is None:
         raise NotFound(f"이 종목은 그룹(ID {group_id})에 속해 있지 않습니다", code="GROUP_NOT_FOUND")
-    rows = db.execute(sql("peers_chart"), {"group_id": target["group_id"],
+    rows = db.execute(sql("peers_chart"), {"group_id": target["group_id"], "stock_id": s["stock_id"],
                                            "months": RANGE_MONTHS[range]}).mappings().all()
     dates = sorted({r["trade_date"] for r in rows})
     pos = {d: i for i, d in enumerate(dates)}

@@ -5,7 +5,9 @@ import logging
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from app.providers.base import Bar, Financial, FxPoint, IndexRef, StockRef, Valuation
+from decimal import Decimal
+
+from app.providers.base import Bar, Financial, FxPoint, IndexRef, ProviderError, StockRef, Valuation
 from app.providers.convert import positive_or_none, to_dec, to_int
 from app.providers.http import Throttle, call_with_retry
 
@@ -81,6 +83,19 @@ class YahooProvider:
             market_cap=to_dec(info.get("marketCap"), 0),
             shares_outstanding=to_int(info.get("sharesOutstanding")),
         )]
+
+    def get_market_caps(self, stocks: list[StockRef], as_of: date) -> dict[str, Decimal]:
+        """종목별 현재 시가총액(종목 통화). 조회에 실패한 종목은 빠진다."""
+        out = {}
+        for st in stocks:
+            try:
+                cap = self.get_valuations(st, as_of, as_of)[0].market_cap
+            except ProviderError as e:
+                log.warning("시가총액 조회 실패 %s: %s", st.yf_symbol, e)
+                continue
+            if cap:
+                out[st.ticker] = cap
+        return out
 
     # --- 재무 보완 (연간 4개 기간)
     def get_annual_financials(self, stock: StockRef, years: int) -> list[Financial]:

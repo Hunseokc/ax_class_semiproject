@@ -5,7 +5,8 @@ pykrx 1.2.x는 시총·펀더멘털·지수 조회에 KRX 로그인이 필요하
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
+from decimal import Decimal
 
 from app.core.config import export_krx_credentials
 from app.providers.base import Bar, IndexRef, StockRef, Valuation
@@ -54,6 +55,18 @@ class KrxProvider:
             lambda: s.get_index_ohlcv(_ymd(start), _ymd(end), index.pykrx_code),
             throttle=_throttle, what=f"pykrx index {index.code}")
         return _bars(df, has_volume=False)
+
+    def get_market_caps(self, stocks: list[StockRef], as_of: date) -> dict[str, Decimal]:
+        """as_of 이전 가장 가까운 거래일의 시가총액(원) — 전 종목 1회 조회 후 필요한 티커만."""
+        s = _stock()
+        for back in range(8):
+            d = as_of - timedelta(days=back)
+            df = call_with_retry(lambda: s.get_market_cap_by_ticker(_ymd(d), market="ALL"),
+                                 throttle=_throttle, what=f"pykrx market_cap {d}")
+            if len(df):
+                want = {x.ticker for x in stocks}
+                return {t: to_dec(r.get("시가총액")) for t, r in df.iterrows() if t in want and to_dec(r.get("시가총액"))}
+        return {}
 
     def get_valuations(self, stock: StockRef, start: date, end: date) -> list[Valuation]:
         s = _stock()

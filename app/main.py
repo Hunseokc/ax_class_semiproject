@@ -4,26 +4,52 @@
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import importlib.util
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import market, portfolios, stocks, watchlist
+from app.api import deps, market, portfolios, stocks, watchlist
 from app.core.config import ROOT_DIR, get_settings
+from app.core.db import get_engine
 from app.core.errors import NotFound, install_error_handlers
 from app.core.logging import request_id_var, setup_logging
 from app.schemas.api import ErrorOut
+from app.services.fx import FxService
+from app.services.scheduler import Scheduler
 
 setup_logging(get_settings().log_level)
 log = logging.getLogger("app.request")
 WEB_DIR = ROOT_DIR / "web"
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """SCHEDULER_ENABLED면 앱 안 스케줄러(4시간 갱신·비교군 1일 갱신)를 백그라운드로 돌린다."""
+    task = None
+    if get_settings().scheduler_enabled:
+        engine, ttl = get_engine(), get_settings().refresh_ttl_hours
+
+        def refresh_service():
+            pv = deps.get_providers()
+            return deps.RefreshService(engine, pv, FxService(engine, pv.fx, ttl), ttl, scorer=deps.get_scorer())
+
+        task = asyncio.create_task(Scheduler(engine, refresh_service, deps.get_providers, deps.get_scorer()).run_forever())
+    yield
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="주식 분석 대시보드 API",
     version="1.0.0",
     description="국내·미국 주식 일봉·지수·환율·재무·공시 기반 조회·분석 API. 일봉 기준이며 투자 권유가 아닙니다.",

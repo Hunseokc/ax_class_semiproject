@@ -6,7 +6,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from app.providers.base import Bar, FxPoint, IndexRef, StockRef, Valuation
+from app.providers.base import Bar, Disclosure, Financial, FxPoint, IndexRef, StockRef, Valuation
 from app.providers.factory import Providers
 
 SAFE_LAG = timedelta(days=2)    # 어느 시장 기준으로도 '오늘(미확정 봉)'이 되지 않도록 이틀 전까지만 돌려준다
@@ -74,15 +74,58 @@ class FakeFx:
 class FakeValuation(CallLog):
     source = "YFINANCE"          # valuation_snapshots.source CHECK 허용값
 
+    def __init__(self, caps: dict[str, int] | None = None):
+        super().__init__()
+        self.caps = caps or {}
+
+    def get_market_caps(self, stocks: list[StockRef], as_of: date) -> dict[str, Decimal]:
+        self.record("caps", tuple(s.ticker for s in stocks))
+        return {s.ticker: Decimal(self.caps[s.ticker]) for s in stocks if s.ticker in self.caps}
+
     def get_valuations(self, stock: StockRef, start: date, end: date) -> list[Valuation]:
         self.record(stock.ticker, start, end)
         return [Valuation(as_of=min(end, date.today() - SAFE_LAG), per=Decimal(10), pbr=Decimal(1), market_cap=Decimal(10**12),
                           shares_outstanding=10**9)]
 
 
-def make_providers(fx: FakeFx | None = None) -> Providers:
-    price, index, val = FakePrice(), FakeIndex(), FakeValuation()
+class FakeFinancial(CallLog):
+    """직전 연도·그 전 연도 FY 2개. 고유번호(corp_codes)·CIK(ciks) 매핑도 흉내 낸다."""
+
+    def __init__(self, source: str):
+        super().__init__()
+        self.source = source
+
+    def get_annual_financials(self, stock: StockRef, years: int) -> list[Financial]:
+        self.record(stock.ticker, years)
+        y = date.today().year - 1
+        return [Financial(date(yy, 12, 31), "FY", revenue=Decimal(100 + i * 10), operating_income=Decimal(10),
+                          net_income=Decimal(8 + i), total_assets=Decimal(300), total_equity=Decimal(100),
+                          total_debt=Decimal(50), data_source=self.source) for i, yy in enumerate((y - 1, y))]
+
+    def corp_codes(self, codes: set[str]) -> dict[str, str]:
+        return {c: f"C{c}" for c in codes}
+
+    def ciks(self, tickers: set[str]) -> dict[str, str]:
+        return {t: f"{abs(hash(t)) % 10**10:010d}" for t in tickers}
+
+
+class FakeDisclosure(CallLog):
+    def __init__(self, source: str):
+        super().__init__()
+        self.source = source
+
+    def get_disclosures(self, stock: StockRef, start: date, end: date) -> list[Disclosure]:
+        self.record(stock.ticker, start, end)
+        return [Disclosure(rcept_no=f"{stock.ticker}-1", title="사업보고서", report_type="정기공시",
+                           filed_at=datetime.now(timezone.utc), url=None)]
+
+
+def make_providers(fx: FakeFx | None = None, *, caps: dict[str, int] | None = None, with_fundamentals: bool = False) -> Providers:
+    price, index, val = FakePrice(), FakeIndex(), FakeValuation(caps)
     fx = fx or FakeFx()
+    fin = {"kr_financial": None, "us_financial": None, "kr_disclosure": None, "us_disclosure": None}
+    if with_fundamentals:
+        fin = {"kr_financial": FakeFinancial("DART"), "us_financial": FakeFinancial("SEC"),
+               "kr_disclosure": FakeDisclosure("DART"), "us_disclosure": FakeDisclosure("SEC")}
     return Providers(kr_price=price, us_price=price, kr_index=index, us_index=index, fx=fx,
-                     kr_valuation=val, us_valuation=val, kr_financial=None, us_financial=None,
-                     us_financial_supplement=None, kr_disclosure=None, us_disclosure=None)
+                     kr_valuation=val, us_valuation=val, us_financial_supplement=None, **fin)

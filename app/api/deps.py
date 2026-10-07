@@ -12,8 +12,10 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.db import get_engine, session_factory
 from app.core.errors import Unprocessable
+from app.ingest.benchmark import config as benchmark_config
 from app.providers.factory import Providers, default_providers
 from app.services.fx import FxService
+from app.services.hydration import Hydrator
 from app.services.portfolio import PortfolioService
 from app.services.refresh import RefreshService
 from app.services.scoring import default_preset
@@ -71,6 +73,12 @@ def get_scorer():
 def get_refresh_service(engine: Engine = Depends(get_engine_dep), providers: Providers = Depends(get_providers),
                         fx: FxService = Depends(get_fx_service), scorer=Depends(get_scorer)) -> RefreshService:
     return RefreshService(engine, providers, fx, get_settings().refresh_ttl_hours, scorer=scorer)
+
+
+@lru_cache
+def get_hydrator() -> Hydrator:
+    """비교군 종목 상세 데이터를 요청 시 받는 작업자 (프로세스당 1개)."""
+    return Hydrator(get_engine, _providers, benchmark_config()["detail_ttl_hours"])
 
 
 def get_portfolio_service(db: Session = Depends(get_db), fx: FxService = Depends(get_fx_service),

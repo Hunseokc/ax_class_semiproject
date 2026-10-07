@@ -3,7 +3,8 @@
 작업: FX(SNAPSHOT + DAILY 증분) → INDICES → PRICES(증분) → VALUATION → SCORES
 - 작업별 마지막 성공 시각(ingestion_logs)이 TTL 이내면 외부 호출 없이 SKIPPED로 기록
 - 동시에 여러 갱신 요청이 와도 advisory lock으로 직렬화 → 뒤 요청은 앞 요청 결과를 보고 SKIPPED
-- 앱 내부 스케줄러는 두지 않는다(주기 실행은 README의 cron 예시)
+- 대상 종목: 노출 종목 + 관심종목·포트폴리오에 담긴 종목(매력도 비교군은 app/ingest/benchmark.py가 1일 1회)
+- 주기 실행: 앱 안 스케줄러(app/services/scheduler.py) 또는 cron의 python -m app.ingest refresh
 """
 from __future__ import annotations
 

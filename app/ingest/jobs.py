@@ -10,7 +10,7 @@ from sqlalchemy import Engine, text
 
 from app.core.config import ROOT_DIR, get_settings
 from app.ingest.preprocess import clean_bars, clean_fx
-from app.ingest.store import job_log, upsert
+from app.ingest.store import DART_LOCK_KEY, advisory_lock, job_log, upsert
 from app.ingest.universe import index_refs, load_universe, stock_refs
 from app.providers.base import Financial, ProviderError
 from app.providers.factory import Providers
@@ -117,17 +117,18 @@ def _start_date(last: date | None, full: bool, history_days: int, today: date) -
 
 
 def load_prices(engine: Engine, providers: Providers, *, full: bool = False,
-                tickers: list[str] | None = None, today: date | None = None) -> dict[str, str]:
-    """종목 일봉. 기본은 증분(저장된 마지막 날짜 다음 날부터), --full이면 2년 전체 재수집."""
+                tickers: list[str] | None = None, today: date | None = None, scope: str = "frequent",
+                stock_ids: list[int] | None = None, history_days: int = PRICE_HISTORY_DAYS) -> dict[str, str]:
+    """종목 일봉. 기본은 증분(저장된 마지막 날짜 다음 날부터), --full이면 history_days(기본 2년) 전체 재수집."""
     today = today or date.today()
     statuses = {}
     with engine.connect() as conn:
-        refs = stock_refs(conn, tickers)
+        refs = stock_refs(conn, tickers, scope=scope, stock_ids=stock_ids)
         last = dict(conn.execute(text("SELECT stock_id, MAX(trade_date) FROM daily_prices GROUP BY stock_id")).all())
     for ref in refs:
         p = providers.price(ref.country)
         with job_log(engine, source=p.source, job_type="PRICES", stock_id=ref.stock_id, label=ref.ticker) as res:
-            start = _start_date(last.get(ref.stock_id), full, PRICE_HISTORY_DAYS, today)
+            start = _start_date(last.get(ref.stock_id), full, history_days, today)
             if start > today:
                 res.notes.append("최신 상태")
             else:
@@ -215,13 +216,14 @@ ON CONFLICT (stock_id, as_of) DO UPDATE SET
 
 
 def load_valuations(engine: Engine, providers: Providers, *, full: bool = False,
-                    tickers: list[str] | None = None, today: date | None = None) -> dict[str, str]:
+                    tickers: list[str] | None = None, today: date | None = None, scope: str = "frequent",
+                    stock_ids: list[int] | None = None, history_days: int = VALUATION_HISTORY_DAYS) -> dict[str, str]:
     """KR: pykrx 일별(증분) / US: yfinance 스냅샷(as_of = 해당 종목 최신 거래일).
     KR provider가 없거나 실패하면 DART FY 기반 파생값(DERIVED)으로 대체한다(ASSUMPTIONS A-02)."""
     today = today or date.today()
     statuses = {}
     with engine.connect() as conn:
-        refs = stock_refs(conn, tickers)
+        refs = stock_refs(conn, tickers, scope=scope, stock_ids=stock_ids)
         last = dict(conn.execute(text(
             "SELECT stock_id, MAX(as_of) FROM valuation_snapshots WHERE source <> 'DERIVED' GROUP BY stock_id")).all())
         last_trade = dict(conn.execute(text("SELECT stock_id, MAX(trade_date) FROM daily_prices GROUP BY stock_id")).all())
@@ -234,7 +236,7 @@ def load_valuations(engine: Engine, providers: Providers, *, full: bool = False,
                 as_of = last_trade.get(ref.stock_id) or today
                 vals = p.get_valuations(ref, as_of, as_of)
             elif p is not None:
-                start = _start_date(last.get(ref.stock_id), full, VALUATION_HISTORY_DAYS, today)
+                start = _start_date(last.get(ref.stock_id), full, history_days, today)
                 if start > today:
                     res.notes.append("최신 상태")
                     vals = []
@@ -293,10 +295,16 @@ def merge_supplement(primary: list[Financial], supplement: list[Financial], tole
 
 
 def load_financials(engine: Engine, providers: Providers, *, years: int = FIN_YEARS,
-                    tickers: list[str] | None = None) -> dict[str, str]:
-    statuses = {}
+                    tickers: list[str] | None = None, scope: str = "frequent",
+                    stock_ids: list[int] | None = None) -> dict[str, str]:
     with engine.connect() as conn:
-        refs = stock_refs(conn, tickers)
+        refs = stock_refs(conn, tickers, scope=scope, stock_ids=stock_ids)
+    with advisory_lock(engine, DART_LOCK_KEY):
+        return _load_financials(engine, providers, refs, years)
+
+
+def _load_financials(engine: Engine, providers: Providers, refs: list, years: int) -> dict[str, str]:
+    statuses = {}
     for ref in refs:
         p = providers.financial(ref.country)
         source = p.source if p else ("DART" if ref.country == "KR" else "SEC")
@@ -330,11 +338,17 @@ def load_financials(engine: Engine, providers: Providers, *, years: int = FIN_YE
 
 # ---------------------------------------------------------------- 공시
 def load_disclosures(engine: Engine, providers: Providers, *, days: int = DISCLOSURE_DAYS,
-                     tickers: list[str] | None = None, today: date | None = None) -> dict[str, str]:
+                     tickers: list[str] | None = None, today: date | None = None, scope: str = "frequent",
+                     stock_ids: list[int] | None = None) -> dict[str, str]:
     today = today or date.today()
-    statuses = {}
     with engine.connect() as conn:
-        refs = stock_refs(conn, tickers)
+        refs = stock_refs(conn, tickers, scope=scope, stock_ids=stock_ids)
+    with advisory_lock(engine, DART_LOCK_KEY):
+        return _load_disclosures(engine, providers, refs, days, today)
+
+
+def _load_disclosures(engine: Engine, providers: Providers, refs: list, days: int, today: date) -> dict[str, str]:
+    statuses = {}
     for ref in refs:
         p = providers.disclosure(ref.country)
         source = p.source if p else ("DART" if ref.country == "KR" else "SEC")

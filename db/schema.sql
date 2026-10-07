@@ -26,7 +26,10 @@ CREATE TABLE stocks (
   name_en   VARCHAR(128),
   corp_code VARCHAR(16),                                         -- OpenDART 고유번호 (KR)
   cik       VARCHAR(10),                                         -- SEC CIK 10자리 (US)
-  is_active BOOLEAN      NOT NULL DEFAULT true,
+  is_active BOOLEAN      NOT NULL DEFAULT true,                  -- false: 수집·점수 계산 대상에서 제외(데이터는 보존)
+  -- featured: 화면에 노출하는 종목(4시간 갱신) / benchmark: 매력도 비교군(1일 갱신, 필수 데이터만 저장)
+  coverage  VARCHAR(10)  NOT NULL DEFAULT 'featured' CHECK (coverage IN ('featured','benchmark')),
+  detail_synced_at TIMESTAMPTZ,                                  -- benchmark 종목의 상세(공시·2년 일봉·5개년 재무)를 마지막으로 받은 시각
   UNIQUE (market_id, ticker)
 );
 
@@ -249,7 +252,7 @@ CREATE TABLE ingestion_logs (
   log_id      SERIAL PRIMARY KEY,
   source      VARCHAR(20) NOT NULL,                              -- PYKRX / YFINANCE / DART / SEC / INTERNAL
   job_type    VARCHAR(30) NOT NULL CHECK (job_type IN
-                ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','SCORES','MASTER')),
+                ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','SCORES','MASTER','BENCHMARK','HYDRATE')),
   stock_id    INT         REFERENCES stocks ON DELETE SET NULL,  -- 종목 단위 작업일 때만
   status      VARCHAR(10) NOT NULL CHECK (status IN ('SUCCESS','FAILED','SKIPPED')),
   rows_loaded INT         NOT NULL DEFAULT 0 CHECK (rows_loaded >= 0),

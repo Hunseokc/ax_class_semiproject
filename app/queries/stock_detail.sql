@@ -1,5 +1,5 @@
 -- 종목 상세: 기본 정보 + 최신 시세·밸류에이션·매력도(:preset 프리셋)·소속 그룹·관심 여부
-SELECT s.stock_id, s.ticker, s.name, s.name_en, s.corp_code, s.cik,
+SELECT s.stock_id, s.ticker, s.name, s.name_en, s.corp_code, s.cik, s.coverage, s.detail_synced_at,
        m.code AS market, m.country, m.currency, m.timezone,
        lp.trade_date AS as_of, lp.close, lp.prev_close, lp.change, lp.change_rate, lp.volume,
        v.as_of AS valuation_as_of, v.per, v.pbr, v.eps, v.bps, v.market_cap, v.shares_outstanding, v.source AS valuation_source,

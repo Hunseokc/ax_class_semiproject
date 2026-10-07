@@ -11,7 +11,7 @@ SELECT mk.code AS market, mk.country, mk.currency,
 FROM v_stock_metrics vm
 JOIN stocks s   ON s.stock_id = vm.stock_id
 JOIN markets mk ON mk.market_id = s.market_id
-WHERE s.is_active
+WHERE s.is_active AND s.coverage = 'featured'      -- 통계는 노출 종목 기준
 GROUP BY mk.code, mk.country, mk.currency
 HAVING COUNT(*) >= :min_samples
 ORDER BY total_market_cap_krw DESC NULLS LAST

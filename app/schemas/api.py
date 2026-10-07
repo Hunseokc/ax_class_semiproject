@@ -88,6 +88,7 @@ class StockRow(Schema):
     market_cap_krw: Num | None
     score: Num | None
     is_watched: bool
+    coverage: str                    # featured(노출) / benchmark(매력도 비교군 — 검색 시에만 목록에 나옴)
 
 
 class StockListOut(Schema):
@@ -140,6 +141,8 @@ class StockDetailOut(Schema):
     preset: str
     groups: list[GroupRef]
     is_watched: bool
+    coverage: str
+    detail_status: str               # ready / loading(비교군 상세 데이터 받는 중) / failed
 
 
 class Candle(Schema):

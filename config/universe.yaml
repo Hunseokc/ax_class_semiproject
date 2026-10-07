@@ -52,3 +52,187 @@ peer_groups:
   - {name: 바이오,        members: ["207940", "068270"]}
   - {name: 철강,          members: ["005490", "004020"]}
   - {name: 방산,          members: ["012450", "047810", "064350"]}
+
+# ---------------------------------------------------------------------
+# 매력도 비교군(benchmark) — 화면 노출 종목(위 stocks)과 함께 점수의 비교 표본이 된다 (docs/09 9절)
+# 국가별·섹터별 비교군 = 그 섹터의 노출 종목 + 아래 후보 중 시가총액 상위 (per_sector − 노출 종목 수)개
+# 섹터 정의(2차전지·방산·빅테크 등)가 KRX 업종·GICS와 1:1로 맞지 않아 후보 풀은 직접 정하고,
+# 선정은 적재 시점의 실제 시가총액으로 자동으로 한다. 금융 섹터는 지표 구조가 달라 넣지 않는다.
+benchmark:
+  per_sector: 10          # 국가별 섹터당 최대 종목 수(노출 종목 포함)
+  price_days: 400         # 일봉 보관 기간(달력일) — 변동성·12-1개월 모멘텀에 거래일 253개 필요
+  fin_years: 3            # FY 재무 연수
+  fin_refresh_days: 455   # 최신 FY 결산일이 이보다 오래되면 새 사업보고서를 확인
+  fin_retry_days: 7       # 확인했는데 아직 없으면 이 기간 동안 다시 확인하지 않음
+  reselect_days: 30       # 시가총액 순위로 다시 고르는 주기(매일 고르면 경계 종목이 들락날락)
+  daily_at_kst: "07:00"   # 매일 이 시각 이후 1회 갱신(미국 장 마감 후)
+  detail_ttl_hours: 24    # 상세 화면을 열면 공시·2년 일봉·5개년 재무를 받고, 이 시간 동안은 다시 받지 않음
+
+benchmark_candidates:
+  반도체:
+    KR:
+      - {market: KOSPI,  ticker: "042700", name: 한미반도체}
+      - {market: KOSPI,  ticker: "000990", name: DB하이텍}
+      - {market: KOSDAQ, ticker: "403870", name: HPSP}
+      - {market: KOSDAQ, ticker: "058470", name: 리노공업}
+      - {market: KOSDAQ, ticker: "039030", name: 이오테크닉스}
+      - {market: KOSDAQ, ticker: "240810", name: 원익IPS}
+      - {market: KOSDAQ, ticker: "357780", name: 솔브레인}
+      - {market: KOSDAQ, ticker: "095340", name: ISC}
+      - {market: KOSDAQ, ticker: "036930", name: 주성엔지니어링}
+      - {market: KOSDAQ, ticker: "166090", name: 하나머티리얼즈}
+      - {market: KOSDAQ, ticker: "140860", name: 파크시스템스}
+    US:
+      - {market: NASDAQ, ticker: QCOM, name: Qualcomm}
+      - {market: NASDAQ, ticker: TXN,  name: Texas Instruments}
+      - {market: NASDAQ, ticker: INTC, name: Intel}
+      - {market: NASDAQ, ticker: MU,   name: Micron Technology}
+      - {market: NASDAQ, ticker: AMAT, name: Applied Materials}
+      - {market: NASDAQ, ticker: LRCX, name: Lam Research}
+      - {market: NASDAQ, ticker: KLAC, name: KLA}
+      - {market: NASDAQ, ticker: ADI,  name: Analog Devices}
+      - {market: NASDAQ, ticker: MRVL, name: Marvell Technology}
+      - {market: NASDAQ, ticker: MCHP, name: Microchip Technology}
+      - {market: NASDAQ, ticker: "ON", name: ON Semiconductor}
+  자동차:
+    KR:
+      - {market: KOSPI, ticker: "012330", name: 현대모비스}
+      - {market: KOSPI, ticker: "018880", name: 한온시스템}
+      - {market: KOSPI, ticker: "204320", name: HL만도}
+      - {market: KOSPI, ticker: "161390", name: 한국타이어앤테크놀로지}
+      - {market: KOSPI, ticker: "011210", name: 현대위아}
+      - {market: KOSPI, ticker: "073240", name: 금호타이어}
+      - {market: KOSPI, ticker: "005850", name: 에스엘}
+      - {market: KOSPI, ticker: "002350", name: 넥센타이어}
+      - {market: KOSPI, ticker: "064960", name: SNT모티브}
+    US:
+      - {market: NYSE,   ticker: GM,   name: General Motors}
+      - {market: NYSE,   ticker: F,    name: Ford Motor}
+      - {market: NASDAQ, ticker: RIVN, name: Rivian Automotive}
+      - {market: NASDAQ, ticker: LCID, name: Lucid Group}
+      - {market: NYSE,   ticker: APTV, name: Aptiv}
+      - {market: NYSE,   ticker: BWA,  name: BorgWarner}
+      - {market: NYSE,   ticker: LEA,  name: Lear}
+      - {market: NASDAQ, ticker: GT,   name: Goodyear Tire and Rubber}
+      - {market: NYSE,   ticker: ALV,  name: Autoliv}
+      - {market: NASDAQ, ticker: LKQ,  name: LKQ}
+  인터넷·플랫폼:
+    KR:
+      - {market: KOSPI,  ticker: "259960", name: 크래프톤}
+      - {market: KOSPI,  ticker: "036570", name: 엔씨소프트}
+      - {market: KOSPI,  ticker: "251270", name: 넷마블}
+      - {market: KOSPI,  ticker: "377300", name: 카카오페이}
+      - {market: KOSPI,  ticker: "018260", name: 삼성에스디에스}
+      - {market: KOSPI,  ticker: "012510", name: 더존비즈온}
+      - {market: KOSPI,  ticker: "181710", name: NHN}
+      - {market: KOSDAQ, ticker: "263750", name: 펄어비스}
+      - {market: KOSDAQ, ticker: "293490", name: 카카오게임즈}
+      - {market: KOSDAQ, ticker: "112040", name: 위메이드}
+    US:
+      - {market: NASDAQ, ticker: NFLX, name: Netflix}
+      - {market: NASDAQ, ticker: BKNG, name: Booking Holdings}
+      - {market: NYSE,   ticker: UBER, name: Uber Technologies}
+      - {market: NASDAQ, ticker: ABNB, name: Airbnb}
+      - {market: NASDAQ, ticker: DASH, name: DoorDash}
+      - {market: NASDAQ, ticker: EBAY, name: eBay}
+      - {market: NASDAQ, ticker: PYPL, name: PayPal}
+      - {market: NASDAQ, ticker: EXPE, name: Expedia Group}
+      - {market: NYSE,   ticker: PINS, name: Pinterest}
+      - {market: NYSE,   ticker: SNAP, name: Snap}
+  빅테크:
+    US:
+      - {market: NYSE,   ticker: ORCL, name: Oracle}
+      - {market: NYSE,   ticker: CRM,  name: Salesforce}
+      - {market: NASDAQ, ticker: ADBE, name: Adobe}
+      - {market: NYSE,   ticker: IBM,  name: IBM}
+      - {market: NASDAQ, ticker: CSCO, name: Cisco Systems}
+      - {market: NYSE,   ticker: NOW,  name: ServiceNow}
+      - {market: NASDAQ, ticker: INTU, name: Intuit}
+      - {market: NASDAQ, ticker: PLTR, name: Palantir Technologies}
+  2차전지:
+    KR:
+      - {market: KOSDAQ, ticker: "086520", name: 에코프로}
+      - {market: KOSPI,  ticker: "003670", name: 포스코퓨처엠}
+      - {market: KOSDAQ, ticker: "066970", name: 엘앤에프}
+      - {market: KOSPI,  ticker: "005070", name: 코스모신소재}
+      - {market: KOSPI,  ticker: "450080", name: 에코프로머티}
+      - {market: KOSPI,  ticker: "361610", name: SK아이이테크놀로지}
+      - {market: KOSPI,  ticker: "020150", name: 롯데에너지머티리얼즈}
+      - {market: KOSDAQ, ticker: "278280", name: 천보}
+      - {market: KOSPI,  ticker: "096770", name: SK이노베이션}
+    US:
+      - {market: NYSE,   ticker: ALB,  name: Albemarle}
+      - {market: NYSE,   ticker: QS,   name: QuantumScape}
+      - {market: NASDAQ, ticker: FLNC, name: Fluence Energy}
+      - {market: NASDAQ, ticker: ENVX, name: Enovix}
+      - {market: NASDAQ, ticker: EOSE, name: Eos Energy Enterprises}
+      - {market: NASDAQ, ticker: SLDP, name: Solid Power}
+      - {market: NASDAQ, ticker: MVST, name: Microvast}
+  바이오:
+    KR:
+      - {market: KOSDAQ, ticker: "196170", name: 알테오젠}
+      - {market: KOSPI,  ticker: "000100", name: 유한양행}
+      - {market: KOSPI,  ticker: "128940", name: 한미약품}
+      - {market: KOSPI,  ticker: "326030", name: SK바이오팜}
+      - {market: KOSPI,  ticker: "302440", name: SK바이오사이언스}
+      - {market: KOSDAQ, ticker: "028300", name: HLB}
+      - {market: KOSDAQ, ticker: "141080", name: 리가켐바이오}
+      - {market: KOSDAQ, ticker: "145020", name: 휴젤}
+      - {market: KOSPI,  ticker: "185750", name: 종근당}
+      - {market: KOSPI,  ticker: "006280", name: 녹십자}
+    US:
+      - {market: NYSE,   ticker: LLY,  name: Eli Lilly}
+      - {market: NYSE,   ticker: JNJ,  name: Johnson and Johnson}
+      - {market: NYSE,   ticker: ABBV, name: AbbVie}
+      - {market: NYSE,   ticker: MRK,  name: Merck}
+      - {market: NYSE,   ticker: PFE,  name: Pfizer}
+      - {market: NASDAQ, ticker: AMGN, name: Amgen}
+      - {market: NASDAQ, ticker: GILD, name: Gilead Sciences}
+      - {market: NASDAQ, ticker: VRTX, name: Vertex Pharmaceuticals}
+      - {market: NASDAQ, ticker: REGN, name: Regeneron Pharmaceuticals}
+      - {market: NYSE,   ticker: BMY,  name: Bristol-Myers Squibb}
+      - {market: NASDAQ, ticker: BIIB, name: Biogen}
+      - {market: NASDAQ, ticker: MRNA, name: Moderna}
+  철강:
+    KR:
+      - {market: KOSPI, ticker: "460860", name: 동국제강}
+      - {market: KOSPI, ticker: "001230", name: 동국홀딩스}
+      - {market: KOSPI, ticker: "001430", name: 세아베스틸지주}
+      - {market: KOSPI, ticker: "306200", name: 세아제강}
+      - {market: KOSPI, ticker: "104700", name: 한국철강}
+      - {market: KOSPI, ticker: "058430", name: 포스코스틸리온}
+      - {market: KOSPI, ticker: "016380", name: KG스틸}
+      - {market: KOSPI, ticker: "010130", name: 고려아연}
+      - {market: KOSPI, ticker: "084010", name: 대한제강}
+    US:
+      - {market: NYSE,   ticker: NUE,  name: Nucor}
+      - {market: NASDAQ, ticker: STLD, name: Steel Dynamics}
+      - {market: NYSE,   ticker: RS,   name: Reliance}
+      - {market: NYSE,   ticker: CLF,  name: Cleveland-Cliffs}
+      - {market: NYSE,   ticker: CMC,  name: Commercial Metals}
+      - {market: NYSE,   ticker: ATI,  name: ATI}
+      - {market: NYSE,   ticker: CRS,  name: Carpenter Technology}
+      - {market: NYSE,   ticker: AA,   name: Alcoa}
+      - {market: NASDAQ, ticker: CENX, name: Century Aluminum}
+  방산:
+    KR:
+      - {market: KOSPI,  ticker: "079550", name: LIG넥스원}
+      - {market: KOSPI,  ticker: "272210", name: 한화시스템}
+      - {market: KOSPI,  ticker: "103140", name: 풍산}
+      - {market: KOSPI,  ticker: "042660", name: 한화오션}
+      - {market: KOSPI,  ticker: "329180", name: HD현대중공업}
+      - {market: KOSPI,  ticker: "010820", name: 퍼스텍}
+      - {market: KOSDAQ, ticker: "013810", name: 스페코}
+    US:
+      - {market: NYSE,   ticker: LMT,  name: Lockheed Martin}
+      - {market: NYSE,   ticker: RTX,  name: RTX}
+      - {market: NYSE,   ticker: NOC,  name: Northrop Grumman}
+      - {market: NYSE,   ticker: GD,   name: General Dynamics}
+      - {market: NYSE,   ticker: LHX,  name: L3Harris Technologies}
+      - {market: NYSE,   ticker: BA,   name: Boeing}
+      - {market: NYSE,   ticker: HII,  name: Huntington Ingalls Industries}
+      - {market: NYSE,   ticker: TDG,  name: TransDigm Group}
+      - {market: NYSE,   ticker: HWM,  name: Howmet Aerospace}
+      - {market: NASDAQ, ticker: AXON, name: Axon Enterprise}
+      - {market: NYSE,   ticker: LDOS, name: Leidos}
+      - {market: NASDAQ, ticker: KTOS, name: Kratos Defense and Security Solutions}

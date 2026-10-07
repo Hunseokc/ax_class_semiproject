@@ -7,11 +7,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user_id, get_db, get_fx_service, get_preset
+from app.api.deps import get_current_user_id, get_db, get_fx_service, get_hydrator, get_preset
 from app.core.errors import NotFound, Unprocessable
 from app.queries import raw, sql
 from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, StockDetailOut, StockListOut
 from app.services.fx import FxService
+from app.services.hydration import Hydrator
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -56,7 +57,7 @@ def list_stocks(
 @router.get("/{market}/{ticker}", response_model=StockDetailOut, summary="종목 기본 정보 + 최신 시세·밸류에이션·매력도")
 def stock_detail(market: str, ticker: str, user_id: int = Depends(get_current_user_id),
                  preset: dict = Depends(get_preset), db: Session = Depends(get_db),
-                 fx_service: FxService = Depends(get_fx_service)):
+                 fx_service: FxService = Depends(get_fx_service), hydrator: Hydrator = Depends(get_hydrator)):
     row = db.execute(sql("stock_detail"), {"market": market.upper(), "ticker": ticker.upper(),
                                            "user_id": user_id, "preset": preset["code"]}).mappings().first()
     if row is None:
@@ -64,6 +65,8 @@ def stock_detail(market: str, ticker: str, user_id: int = Depends(get_current_us
     out = dict(row)
     out["groups"] = out["groups"] or []
     out["preset"] = preset["code"]
+    # 매력도 비교군 종목은 상세를 열 때 공시·2년 일봉·5개년 재무를 받는다(백그라운드)
+    out["detail_status"] = hydrator.request(out["stock_id"], out["coverage"], out.pop("detail_synced_at"))
     if out["currency"] == "USD":
         fx = fx_service.get_current_rate()
         out.update(fx_rate=fx.usd_krw, fx_rate_at=fx.rate_at, fx_stale=fx.stale,

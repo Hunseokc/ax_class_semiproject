@@ -1,9 +1,11 @@
 -- 매력도 1단계: 종목별 지표 원값 (기준: 종목별 최신 거래일 종가·최신 밸류에이션·최신 FY 재무)
+-- 대상: 활성 종목 전체 = 노출 종목 + 매력도 비교군(benchmark)
 -- 지표 정의·NULL 사유는 docs/09 1절. 한 종목당 9행(값이 없으면 raw_value NULL)
 -- z_fixed: 정규화 없이 Z를 고정하는 경우(자본 ≤ 0인 부채비율 → −3). note: 대체 계산·고정 사유
 WITH base AS (
     SELECT vm.stock_id, vm.close, vm.eps, vm.bps, vm.volatility_1y, vm.market_cap, vs.shares_outstanding
     FROM v_stock_metrics vm
+    JOIN stocks st ON st.stock_id = vm.stock_id AND st.is_active
     LEFT JOIN LATERAL (SELECT x.shares_outstanding FROM valuation_snapshots x
                        WHERE x.stock_id = vm.stock_id ORDER BY x.as_of DESC LIMIT 1) vs ON true
 ),

@@ -21,12 +21,14 @@ import httpx
 from app.core.config import get_settings
 from app.providers.base import Disclosure, Financial, ProviderError, StockRef
 from app.providers.convert import to_dec
-from app.providers.http import Throttle, call_with_retry
+from app.providers.http import Throttle, WindowLimiter, call_with_retry
 
 log = logging.getLogger(__name__)
 BASE = "https://opendart.fss.or.kr/api"
 SEOUL = ZoneInfo("Asia/Seoul")
 _throttle = Throttle(0.6)
+# OpenDART는 분당 100회 이상 호출하면 이용이 제한될 수 있다 → 재시도를 포함해 60초에 90회 이하로 막는다
+_limiter = WindowLimiter(90, 60.0)
 
 STATUS_OK, STATUS_NO_DATA = "000", "013"
 
@@ -69,7 +71,7 @@ class DartClient:
             r = self.http.get(f"{BASE}/{path}", params={"crtfc_key": self.key, **params})
             r.raise_for_status()
             return r.json()
-        data = call_with_retry(call, throttle=_throttle, what=f"DART {path}",
+        data = call_with_retry(call, throttle=_throttle, what=f"DART {path}", limiter=_limiter,
                                retry_if=lambda d: d.get("status") == "020")  # 020: 요청 제한 초과
         if data.get("status") not in (STATUS_OK, STATUS_NO_DATA):
             raise ProviderError(f"DART {path} status={data.get('status')} {data.get('message')}")
@@ -81,7 +83,7 @@ class DartClient:
             r = self.http.get(f"{BASE}/corpCode.xml", params={"crtfc_key": self.key})
             r.raise_for_status()
             return r.content
-        content = call_with_retry(call, throttle=_throttle, what="DART corpCode.xml")
+        content = call_with_retry(call, throttle=_throttle, what="DART corpCode.xml", limiter=_limiter)
         z = zipfile.ZipFile(io.BytesIO(content))
         root = ElementTree.fromstring(z.read(z.namelist()[0]))
         out = {}

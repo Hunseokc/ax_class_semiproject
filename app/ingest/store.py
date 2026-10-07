@@ -34,6 +34,28 @@ def upsert(conn: Connection, table: str, rows: list[dict], conflict: list[str],
     return len(rows)
 
 
+DART_LOCK_KEY = 7_301_010       # DART 호출 작업(재무·공시)은 프로세스가 여러 개여도 한 번에 하나만 → 분당 호출 제한 보호
+BENCHMARK_LOCK_KEY = 7_301_011  # 비교군 갱신
+
+
+@contextmanager
+def advisory_lock(engine: Engine, key: int, *, wait: bool = True) -> Iterator[bool]:
+    """세션 수준 PostgreSQL advisory lock. wait=False면 이미 잡혀 있을 때 False를 돌려주고 기다리지 않는다."""
+    with engine.connect() as conn:
+        if wait:
+            conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": key})
+            got = True
+        else:
+            got = bool(conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": key}).scalar())
+        conn.commit()
+        try:
+            yield got
+        finally:
+            if got:
+                conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
+                conn.commit()
+
+
 @dataclass
 class JobResult:
     rows: int = 0

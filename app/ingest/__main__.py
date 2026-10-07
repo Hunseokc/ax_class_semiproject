@@ -11,6 +11,8 @@
     python -m app.ingest disclosures [--days 365]
     python -m app.ingest all                 # master → prices → indices → fx → financials → valuation → disclosures
     python -m app.ingest scores              # 매력도 점수 재생성 (오늘 as_of, DELETE 후 INSERT)
+    python -m app.ingest benchmark [--reselect]   # 매력도 비교군: 선정(30일마다/강제) → 평시 데이터 → 점수
+    python -m app.ingest hydrate 042700      # 비교군 종목 상세(공시·2년 일봉·5개년 재무) 받기
     python -m app.ingest explain             # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
     python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용)
     python -m app.ingest seed-demo           # demo 관심종목 8건 + 모의 포트폴리오 2개
@@ -86,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tickers", nargs="*")
     for name in ("all", "refresh", "scores", "explain", "seed-demo", "status", "export-sample", "import-sample"):
         sub.add_parser(name)
+    sub.add_parser("benchmark").add_argument("--reselect", action="store_true", help="시가총액 순위로 지금 다시 고른다")
+    sub.add_parser("hydrate").add_argument("tickers", nargs="+")
     args = ap.parse_args(argv)
 
     setup_logging(get_settings().log_level)
@@ -137,6 +141,23 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "scores":
         from app.services.scoring import compute_scores
         print("stock_scores rows:", compute_scores(engine))
+    elif args.cmd == "benchmark":
+        from app.ingest.benchmark import run_benchmark
+        from app.services.scoring import compute_scores
+        out = run_benchmark(engine, providers(), compute_scores, reselect=args.reselect)
+        if out is None:
+            print("다른 프로세스가 비교군 갱신 중 — 건너뜀")
+        else:
+            if "select" in out:
+                print("선정:", out["select"]["by_group"])
+                print("시가총액 없음(제외):", out["select"]["no_market_cap"] or "-")
+            print({k: v for k, v in out.items() if k in ("stocks", "pruned", "scores")})
+    elif args.cmd == "hydrate":
+        from app.services.hydration import hydrate
+        with engine.connect() as conn:
+            ids = conn.execute(text("SELECT stock_id FROM stocks WHERE ticker = ANY(:t)"), {"t": args.tickers}).scalars().all()
+        for sid in ids:
+            print(sid, hydrate(engine, providers(), sid))
     elif args.cmd == "explain":
         from app.ingest import explain
         print(explain.run(engine))
