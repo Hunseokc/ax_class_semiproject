@@ -7,7 +7,8 @@
 | 항목 | 내용 |
 |---|---|
 | Base URL | `/api/v1` |
-| 인증 | 없음. 사용자는 `user_id` 쿼리/본문 파라미터(기본 1 = demo). 없는 사용자는 404 |
+| 인증 | 없음 — **1차는 로컬·시연 전용 단일 사용자(데모) 모드**. 요청 사용자는 서버 의존성 `get_current_user_id()`가 정하며, 1차는 설정값 `DEFAULT_USER_ID`(기본 1 = demo)를 반환한다. 클라이언트는 `user_id`를 보내지 않으며 보내도 무시된다. 설정된 사용자가 DB에 없으면 404 `USER_NOT_FOUND`. 2차에서 이 함수를 JWT 검증으로 교체한다 |
+| 소유권 | 포트폴리오·담은 항목·관심종목은 요청 사용자 소유만 조회·변경. 다른 사용자의 리소스는 존재 여부를 드러내지 않도록 없는 리소스와 같은 404(`PORTFOLIO_NOT_FOUND`·`ITEM_NOT_FOUND`·`WATCHLIST_ITEM_NOT_FOUND`) |
 | 오류 형식 | `{"error": {"code", "message", "detail"}}` — 404 NOT_FOUND 계열, 409 CONFLICT 계열, 422 VALIDATION_ERROR·업무 검증, 503 FX_UNAVAILABLE |
 | 숫자 | 금액·가격은 서버에서 Decimal로 계산, JSON에는 숫자. 비율은 소수(0.0523 = 5.23%) |
 | 기준 시각 | 시세 응답은 `as_of`(거래일), 환율은 `rate_at`, 통화는 `currency` |
@@ -23,17 +24,17 @@
 | 시장·갱신 | POST | `/market/refresh` | 환율·지수·증분 일봉·밸류에이션·점수 갱신 (작업별 TTL 이내면 SKIPPED) | - | 200 · 404/409/422 |
 | 시장·갱신 | GET | `/market/refresh/status` | 갱신 상태 조회 — 외부 호출 없음 (사이드바 '마지막 갱신 시각' 표시용) | - | 200 · 404/409/422 |
 | 종목 | GET | `/peer-groups` | 경쟁 그룹 목록 (리스트 필터용) | - | 200 · 404/409/422 |
-| 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 검색) | country, sort, order, group, q, limit, offset, user_id | 200 · 404/409/422 |
-| 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도 | user_id | 200 · 404/409/422 |
+| 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 검색) | country, sort, order, group, q, limit, offset | 200 · 404/409/422 |
+| 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도 | - | 200 · 404/409/422 |
 | 종목 | GET | `/stocks/{market}/{ticker}/candles` | 기간 일봉 | range | 200 · 404/409/422 |
 | 종목 | GET | `/stocks/{market}/{ticker}/financials` | FY 재무 추이 | limit | 200 · 404/409/422 |
 | 종목 | GET | `/stocks/{market}/{ticker}/disclosures` | 최근 공시 | limit | 200 · 404/409/422 |
-| 관심종목 | GET | `/watchlist` | 관심종목 카드 목록 (정렬순) | user_id | 200 · 404/409/422 |
-| 관심종목 | POST | `/watchlist` | 관심종목 추가 | body: user_id, market, ticker | 201 · 404/409/422 |
-| 관심종목 | PATCH | `/watchlist/order` | 관심종목 정렬 순서 변경 | body: user_id, items | 200 · 404/409/422 |
-| 관심종목 | DELETE | `/watchlist/{market}/{ticker}` | 관심종목 삭제 | user_id | 204 · 404/409/422 |
-| 모의 포트폴리오 | POST | `/portfolios` | 포트폴리오 생성 | body: user_id, name, seed_krw | 201 · 404/409/422 |
-| 모의 포트폴리오 | GET | `/portfolios` | 사용자의 포트폴리오 목록 | user_id | 200 · 404/409/422 |
+| 관심종목 | GET | `/watchlist` | 관심종목 카드 목록 (정렬순) | - | 200 · 404/409/422 |
+| 관심종목 | POST | `/watchlist` | 관심종목 추가 | body: market, ticker | 201 · 404/409/422 |
+| 관심종목 | PATCH | `/watchlist/order` | 관심종목 정렬 순서 변경 | body: items | 200 · 404/409/422 |
+| 관심종목 | DELETE | `/watchlist/{market}/{ticker}` | 관심종목 삭제 | - | 204 · 404/409/422 |
+| 모의 포트폴리오 | POST | `/portfolios` | 포트폴리오 생성 | body: name, seed_krw | 201 · 404/409/422 |
+| 모의 포트폴리오 | GET | `/portfolios` | 사용자의 포트폴리오 목록 | - | 200 · 404/409/422 |
 | 모의 포트폴리오 | GET | `/portfolios/{portfolio_id}` | 포트폴리오 단건 | - | 200 · 404/409/422 |
 | 모의 포트폴리오 | PUT | `/portfolios/{portfolio_id}` | 이름·시드 수정 (원가 합계 미만 시드는 409) | body: name, seed_krw | 200 · 404/409/422 |
 | 모의 포트폴리오 | DELETE | `/portfolios/{portfolio_id}` | 포트폴리오 삭제 (담은 항목 함께 삭제) | - | 204 · 404/409/422 |
@@ -672,7 +673,6 @@
 요청 본문:
 ```json
 {
-  "user_id": 1,
   "market": "NASDAQ",
   "ticker": "AMD"
 }
@@ -699,7 +699,6 @@
 요청 본문:
 ```json
 {
-  "user_id": 1,
   "market": "NASDAQ",
   "ticker": "AMD"
 }
@@ -721,7 +720,6 @@
 요청 본문:
 ```json
 {
-  "user_id": 1,
   "items": [
     {
       "market": "NASDAQ",
@@ -771,7 +769,7 @@
   ]
 }
 ```
-#### `DELETE /api/v1/watchlist/NASDAQ/AMD?user_id=1`
+#### `DELETE /api/v1/watchlist/NASDAQ/AMD`
 응답 `204`:
 ```json
 (본문 없음)
@@ -781,7 +779,6 @@
 요청 본문:
 ```json
 {
-  "user_id": 1,
   "name": "API 예시",
   "seed_krw": 10000000
 }

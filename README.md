@@ -3,6 +3,8 @@
 국내(KOSPI·KOSDAQ)·미국(NASDAQ) 25개 종목의 시세·지수·환율·재무·공시를 수집·전처리해 PostgreSQL에 구조화하고, FastAPI 조회·분석 API와 바닐라 HTML/CSS/JS 대시보드로 제공하는 1차 세미프로젝트입니다.
 
 > 시세는 **일봉 기준**(장중 실시간 아님)이며, 매력도·모의 포트폴리오를 포함한 모든 정보는 **투자 권유가 아닙니다**.
+>
+> 1차는 **로그인 없는 단일 사용자(데모) 모드**로, **로컬·시연 전용**입니다. 인증이 없으므로 외부에 공개된 서버로 배포하지 마세요.
 
 ![대시보드 홈](docs/screenshots/01_home.png)
 
@@ -35,6 +37,7 @@ docker compose up -d db       # PostgreSQL 16 → localhost:5433 (stockdb, stock
 | `DART_API_KEY` | OpenDART 인증키 |
 | `SEC_USER_AGENT` | `"앱이름 이메일"` 형식 (SEC는 API 키가 없고 연락처 포함 User-Agent 필수) |
 | `LOG_LEVEL` | 기본 INFO |
+| `DEFAULT_USER_ID` | 단일 사용자 모드에서 모든 요청을 처리할 사용자 (기본 1 = demo) |
 
 ## 3. 데이터 적재
 ```bash
@@ -76,7 +79,8 @@ python -m app.ingest export-sample    # (전체 적재된 DB에서) 샘플 다�
 uvicorn app.main:app --reload
 ```
 - 화면: http://localhost:8000/ · `/stocks` · `/stocks/KOSPI/005930` · `/portfolio`
-- API 문서(Swagger): http://localhost:8000/docs — API는 `/api/v1` 아래, 인증 없음(`user_id` 기본 1 = demo)
+- API 문서(Swagger): http://localhost:8000/docs — API는 `/api/v1` 아래
+- 사용자: 인증 없음(단일 사용자·데모 모드). 요청 사용자는 서버의 `get_current_user_id()`가 `DEFAULT_USER_ID`로 정하며, API는 `user_id`를 받지 않습니다. 포트폴리오·관심종목은 소유자만 접근할 수 있고 남의 리소스는 404입니다. 로그인은 2차에서 이 함수를 JWT 검증으로 교체해 도입합니다
 - 오류 응답은 `{"error": {"code", "message", "detail"}}`, 모든 응답에 `X-Request-ID` 헤더
 
 ### 갱신 정책 (앱 내부 스케줄러 없음)
@@ -90,7 +94,7 @@ uvicorn app.main:app --reload
 
 ## 5. 테스트
 ```bash
-pytest -q                              # 88 passed — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
+pytest -q                              # 103 passed — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
 python -m app.ingest explain           # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
 ```
 DB 제약·전처리·TTL 갱신(외부 호출 횟수)·분석 SQL 손계산·포트폴리오 명세 시나리오·동시성·화면 흐름을 검증합니다. 결과는 [docs/07](docs/07_테스트_결과서.md).
@@ -138,6 +142,7 @@ tests/        pytest
 pykrx·yfinance는 비공식 라이브러리로 사이트 변경 시 동작하지 않을 수 있으며, 데이터 이용 조건은 각 원 사이트(KRX, Yahoo) 약관을 따릅니다. 저장소에는 소량 샘플만 커밋하고 전체 데이터는 적재 스크립트로 생성합니다.
 
 ## 9. 한계
+- 인증 없음: 1차는 단일 사용자(데모) 모드로 로컬·시연 전용. 로그인은 2차 범위
 - 시세는 일봉 기준(장중 실시간 아님). 장 마감 전 당일 봉은 적재하지 않음
 - 증분 적재는 과거 수정주가의 소급 조정(배당·분할)을 반영하지 못함 → 필요 시 `prices --full`
 - 재무는 KR K-IFRS 연결·US US-GAAP로 회계기준이 다름. 일부 연도·항목은 원천에 값이 없어 NULL(ASSUMPTIONS A-41)
