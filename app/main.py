@@ -65,6 +65,9 @@ async def request_context(request: Request, call_next):
     try:
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id_var.get()
+        if not request.url.path.startswith("/api/"):
+            # 화면·정적 파일은 매번 ETag/Last-Modified로 변경 여부를 확인(바뀌지 않았으면 304) → 수정한 CSS·JS가 바로 반영
+            response.headers.setdefault("Cache-Control", "no-cache")
         log.info("%s %s → %d (%.0fms)", request.method, request.url.path, response.status_code,
                  (time.perf_counter() - t0) * 1000)
         return response

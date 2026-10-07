@@ -24,8 +24,8 @@
 .wl-card__name { font-weight: var(--fw-bold); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wl-card__foot { margin-top: auto; display: flex; align-items: center; min-width: 0; }
 
-/* 가격 (등락률) — 길면 등락률이 다음 줄로 */
-.pwc { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; row-gap: 2px; }
+/* 가격 (등락률) — 가격 길이와 관계없이 등락률은 항상 가격 아래 줄 */
+.pwc { display: flex; flex-direction: column; align-items: flex-start; row-gap: 2px; }
 .pwc__chg { font-size: 14px; font-weight: var(--fw-bold); letter-spacing: 0; }
 .pwc__chg--up { color: var(--price-up); }
 .pwc__chg--down { color: var(--price-down); }
