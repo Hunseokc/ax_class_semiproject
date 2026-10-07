@@ -36,6 +36,23 @@
   --us-up-on-pastel: #0f7a45;
   --us-down-on-pastel: #c0262d;
 
+  /* 관심종목 카드(파스텔 면) 가격 등락: 국내·해외 같은 규칙 — 상승 빨강·하락 파랑 */
+  --price-up: #C62D2D;
+  --price-down: #1F5BC4;
+
+  /* 투자 성향 프리셋 색 (code → 토큰 매핑은 js/components/preset-menu.js 한 곳) */
+  --preset-aggressive: #E5484D; /* 위험: 빨강 */
+  --preset-growth:     #F2832A; /* 성장: 주황 */
+  --preset-balanced:   #F5C431; /* 균형: 노랑 */
+  --preset-value:      #30A46C; /* 가치: 초록 */
+
+  /* 매력도 게이지 5구간 (매우 낮음 → 매우 높음, 테라코타 ~ 청록) */
+  --gauge-1: #C8553D;
+  --gauge-2: #E39B3A;
+  --gauge-3: #9AA5A8;
+  --gauge-4: #2A9D8F;
+  --gauge-5: #1E6B57;
+
   --danger: #ff6b6b;
   --warning: #f5c26b;
   --success: #3ddc97;

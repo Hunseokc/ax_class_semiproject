@@ -1,7 +1,8 @@
 // 주식 리스트: 시장 탭·정렬(거래량/시총)·검색·경쟁 그룹 필터, ★ 관심 토글, 담기
-import { Scoring, Stocks, scorePreset } from "../api.js";
+import { PRESET_EVENT, Stocks, getPreset } from "../api.js";
 import { changeHtml, dateTime, esc, initials, krw, price, stockUrl, volume } from "../format.js";
 import { openAddToPortfolio } from "../components/add-to-portfolio.js";
+import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";
 import { icons } from "../components/icons.js";
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";
 import { emptyState, h, load, marketBadge, scoreBadge, segmented, skeleton } from "../components/ui.js";
@@ -24,6 +25,8 @@ if (!state.country && state.sort === "volume") state.sort = "market_cap";
 function syncUrl() {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(state)) if (v) p.set(k, v);
+  const preset = new URLSearchParams(location.search).get("preset");   // 투자 성향은 preset-menu가 관리
+  if (preset) p.set("preset", preset);
   history.replaceState(null, "", `${location.pathname}${p.size ? `?${p}` : ""}`);
 }
 
@@ -63,8 +66,7 @@ Stocks.groups().then(({ groups }) => {
 }).catch(() => { groupSel.disabled = true; });
 groupSel.addEventListener("change", () => { state.group = groupSel.value; refresh(); });
 
-// 매력도 프리셋: 브라우저에 기억해 홈 관심종목 카드·종목 상세와 같은 기준으로 보여 준다
-const presetSel = $("#preset");
+// 투자 성향: 대시보드·종목 상세와 같은 값 (헤더 오른쪽 펼침 메뉴)
 let presetNames = {};
 let lastList = null;
 const renderMeta = () => {
@@ -73,19 +75,18 @@ const renderMeta = () => {
   const preset = presetNames[d.preset] ? ` · 매력도 ${presetNames[d.preset]} 기준` : "";
   $("#list-meta").textContent = `${d.total}개 종목 · ${sortLabel} 순${preset} · 시총 환산 환율 기준 ${dateTime(d.fx_rate_at)}`;
 };
-Scoring.presets().then(({ presets }) => {
+loadPresets().then(({ presets }) => {
   presetNames = Object.fromEntries(presets.map((p) => [p.code, p.name]));
-  presetSel.append(...presets.map((p) => h(`<option value="${esc(p.code)}">매력도: ${esc(p.name)}</option>`)));
-  presetSel.value = presetNames[scorePreset.get()] ? scorePreset.get() : "balanced";
   renderMeta();
-}).catch(() => { presetSel.disabled = true; });
-presetSel.addEventListener("change", () => { scorePreset.set(presetSel.value); refresh(); });
+});
+mountPresetMenu($("#preset-menu"));
+document.addEventListener(PRESET_EVENT, () => refresh());
 
 // ---------------------------------------------------------------- 리스트
 function stockRow(s) {
   const li = h(`<li class="stock-row">
       <span class="rank">${s.rank}</span>
-      <a class="stock-row__name" href="${stockUrl(s.market, s.ticker)}">
+      <a class="stock-row__name" href="${stockUrl(s.market, s.ticker)}?preset=${encodeURIComponent(getPreset())}">
         <span class="avatar" aria-hidden="true">${esc(initials(s.name))}</span>
         <span class="row__main"><span class="row__title">${esc(s.name)}</span>
           <span class="row__sub">${esc(s.ticker)} ${marketBadge(s.market, s.country)}</span></span>

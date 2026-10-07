@@ -1,9 +1,10 @@
 // 대시보드 홈: 지수·환율 카드, 내 관심종목, 거래량 상위 5
-import { Market, Stocks, Watchlist } from "../api.js";
-import { changeHtml, date, dateTime, esc, initials, num, price, shortDate, stockUrl, volume } from "../format.js";
+import { Market, PRESET_EVENT, Stocks, Watchlist, getPreset } from "../api.js";
+import { changeHtml, changeLabel, date, dateTime, esc, formatPriceWithChange, initials, num, price, shortDate, stockUrl, volume } from "../format.js";
 import { color, sparkline } from "../components/charts.js";
+import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";
-import { emptyState, h, load, marketBadge, scoreBadge, segmented, skeleton } from "../components/ui.js";
+import { emptyState, h, load, marketBadge, scoreBand, scoreGauge, segmented, skeleton } from "../components/ui.js";
 
 mountSidebar("home");
 
@@ -60,13 +61,40 @@ async function loadMarket() {
 
 // ---------------------------------------------------------------- 관심종목
 function watchCard(w, i) {
-  return h(`<a class="wl-card card--link ${i % 2 ? "card--lavender" : "card--ice"}" href="${stockUrl(w.market, w.ticker)}"
-        aria-label="${esc(w.name)} 상세 보기">
-      <div class="wl-card__top"><span class="wl-card__dots" aria-hidden="true"><i></i><i></i></span>${scoreBadge(w.score)}</div>
-      <div><div class="wl-card__ticker">${esc(w.ticker)} · ${esc(w.market)}</div>
-        <div class="wl-card__price num">${price(w.close, w.currency)}</div></div>
-      <div class="wl-card__foot"><span class="wl-card__name">${esc(w.name)}</span>${changeHtml(w.change_rate, w.country)}</div>
+  const band = scoreBand(w.score);
+  const label = `${w.name}, ${price(w.close, w.currency)}, ${changeLabel(w.change_rate)}, `
+    + (band ? `매력도 ${Math.round(w.score)}점 ${band.label}` : "매력도 데이터 부족");
+  // 상세 화면이 같은 투자 성향 탭이 선택된 상태로 열리도록 preset을 링크에 싣는다
+  return h(`<a class="wl-card card--link ${i % 2 ? "card--lavender" : "card--ice"}"
+        href="${stockUrl(w.market, w.ticker)}?preset=${encodeURIComponent(getPreset())}" aria-label="${esc(label)}">
+      <div class="wl-card__gauge">${scoreGauge(w.score)}</div>
+      <div class="wl-card__ticker">${esc(w.ticker)} · ${esc(w.market)}</div>
+      <div class="wl-card__price">${formatPriceWithChange(w.close, w.currency, w.change_rate)}</div>
+      <div class="wl-card__foot"><span class="wl-card__name">${esc(w.name)}</span></div>
     </a>`);
+}
+
+async function renderWatchBasis() {
+  const { presets } = await loadPresets();
+  const p = presets.find((x) => x.code === getPreset());
+  $("#watch-basis").textContent = p ? `· ${p.name}형 기준` : "";
+}
+
+// .wl-grid의 미디어 쿼리(768/1024/1440px)와 맞춘 열 수 — 항상 2줄만 보이도록 자른다
+function watchCols() {
+  const w = window.innerWidth;
+  if (w >= 1440) return 5;
+  if (w >= 1024) return 4;
+  if (w >= 768) return 3;
+  return 2;
+}
+
+let watchItems = null;
+
+function renderWatchGrid(items) {
+  const grid = h('<div class="wl-grid"></div>');
+  grid.append(...items.slice(0, watchCols() * 2).map(watchCard));
+  return grid;
 }
 
 function loadWatchlist() {
@@ -74,13 +102,24 @@ function loadWatchlist() {
     skeleton: skeleton("card", 4),
     fetch: async () => (await Watchlist.list()).items,
     render: (items) => {
-      const grid = h('<div class="wl-grid"></div>');
-      grid.append(...items.map(watchCard));
-      return grid;
+      watchItems = items;
+      return renderWatchGrid(items);
     },
     empty: emptyState({ title: "관심종목이 없습니다", body: "주식 리스트에서 ★로 추가하세요.", action: '<a class="btn btn--primary" href="/stocks">주식 리스트로 가기</a>' }),
   });
 }
+
+let watchCols_last = watchCols();
+let watchResizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(watchResizeTimer);
+  watchResizeTimer = setTimeout(() => {
+    const cols = watchCols();
+    if (cols === watchCols_last || !watchItems || !watchItems.length) return;
+    watchCols_last = cols;
+    $("#watchlist").replaceChildren(renderWatchGrid(watchItems));
+  }, 150);
+});
 
 // ---------------------------------------------------------------- 거래량 상위 5
 let topCountry = "KR";
@@ -115,5 +154,9 @@ function loadAll() {
   loadWatchlist();
   loadTopVolume();
 }
+
+mountPresetMenu($("#preset-menu"));
+renderWatchBasis();
+document.addEventListener(PRESET_EVENT, () => { renderWatchBasis(); loadWatchlist(); });
 document.addEventListener(REFRESHED_EVENT, loadAll);
 loadAll();

@@ -13,5 +13,7 @@ export const icons = {
   close: svg('<path d="M6 6l12 12M18 6 6 18"/>', 20),
   plus: svg('<path d="M12 5v14M5 12h14"/>', 18),
   alert: svg('<path d="M12 8v5M12 16.5h.01"/><circle cx="12" cy="12" r="9"/>', 22),
+  chevronDown: svg('<path d="m6 9 6 6 6-6"/>', 16),
+  check: svg('<path d="m5 12.5 4.5 4.5L19 7.5"/>', 16),
   inbox: svg('<path d="M4 13h4l1.5 2.5h5L16 13h4"/><path d="M5.5 6h13L20 13v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-5z"/>', 22),
 };

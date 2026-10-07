@@ -1,7 +1,8 @@
 // 종목 상세: 헤더·가격 차트·핵심 지표·매력도·수치 분석·재무 추이·경쟁 비교·최근 공시
-import { Scoring, Stocks, scorePreset } from "../api.js";
+import { PRESET_EVENT, Stocks, getPreset } from "../api.js";
 import { DASH, changeHtml, date, esc, krw, num, pct, price, stockUrl, usd } from "../format.js";
 import { openAddToPortfolio } from "../components/add-to-portfolio.js";
+import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";
 import { color, dashedAxis, draw, plainAxis } from "../components/charts.js";
 import { icons } from "../components/icons.js";
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";
@@ -126,8 +127,7 @@ const zFmt = (v) => {
   const r = Math.round(v * 100) / 100;
   return r === 0 ? "0.00" : `${r > 0 ? "+" : ""}${num(r, 2)}`;
 };
-let presetList = null;                   // GET /scoring/presets
-let presetCode = scorePreset.get();
+let presetList = null;                   // { note, presets } — 투자 성향 메뉴와 같은 데이터
 
 function contribRow(k, f, maxAbs) {
   const name = `<span class="contrib__name">${FACTOR_LABEL[k]} <span class="subtle">${num(f.weight * 100, 0)}%</span></span>`;
@@ -183,21 +183,16 @@ function renderScore(a) {
 async function loadScore() {
   $("#score").replaceChildren(skeleton("row", 2));
   try {
-    renderScore(await Stocks.analysis(MARKET, TICKER, presetCode));
+    renderScore(await Stocks.analysis(MARKET, TICKER, getPreset()));
   } catch (e) {
     $("#score").replaceChildren(errorState(e, loadScore));
   }
 }
 
-async function mountPresetTabs() {
-  try {
-    presetList = await Scoring.presets();
-  } catch {
-    return;                               // 탭 없이 기본 프리셋으로 표시
-  }
-  if (!presetList.presets.some((p) => p.code === presetCode)) presetCode = "balanced";
-  $("#preset-tabs").replaceChildren(segmented(presetList.presets.map((p) => ({ value: p.code, label: p.name })), presetCode,
-    (v) => { presetCode = v; scorePreset.set(v); loadScore(); }, { label: "매력도 가중치 프리셋", variant: "segmented--card" }));
+async function mountPresetControl() {
+  presetList = await loadPresets();
+  await mountPresetMenu($("#preset-menu"));
+  document.addEventListener(PRESET_EVENT, loadScore);
 }
 
 function renderNumeric(a) {
@@ -227,7 +222,7 @@ function renderNumeric(a) {
 async function loadAnalysis() {
   for (const id of ["#key-metrics", "#score", "#numeric"]) $(id).replaceChildren(skeleton("row", 2));
   try {
-    const a = await Stocks.analysis(MARKET, TICKER, presetCode);
+    const a = await Stocks.analysis(MARKET, TICKER, getPreset());
     renderKeyMetrics(a);
     renderScore(a);
     renderNumeric(a);
@@ -419,7 +414,7 @@ async function init() {
   }
   renderHeader(stock);
   loadCandles();
-  if (!presetList) await mountPresetTabs();
+  if (!presetList) await mountPresetControl();
   loadAnalysis();
   loadFinancials();
   loadPeers();

@@ -130,6 +130,41 @@ export function scoreBadge(score) {
     : `<span class="score" title="매력도 ${score}점 (같은 시장 안 상대적 위치, 투자 권유 아님)">${Math.round(score)}</span>`;
 }
 
+// ---------------------------------------------------------------- 매력도 미니 게이지 (관심종목 카드)
+const BANDS = ["매우 낮음", "낮음", "보통", "높음", "매우 높음"];
+
+/** 0~100 점수 → 5구간 {index 1~5, label}. 점수가 없으면 null */
+export function scoreBand(score) {
+  if (score === null || score === undefined) return null;
+  const i = Math.min(4, Math.floor(Math.max(0, score) / 20));
+  return { index: i + 1, label: BANDS[i] };
+}
+
+const GX = 46, GY = 48, GR = 36;
+const gp = (deg) => `${(GX + GR * Math.cos((deg * Math.PI) / 180)).toFixed(2)} ${(GY - GR * Math.sin((deg * Math.PI) / 180)).toFixed(2)}`;
+const garc = (from, to) => `M ${gp(from)} A ${GR} ${GR} 0 0 1 ${gp(to)}`;
+
+/** 반원 게이지: 5구간(테라코타~청록, 현재 구간만 진하게) + 바늘 + 점수·구간 라벨. 점수 없으면 점선 + '데이터 부족' */
+export function scoreGauge(score) {
+  const band = scoreBand(score);
+  if (!band) {
+    return `<div class="gauge-mini gauge-mini--na">
+        <svg viewBox="0 0 92 54" aria-hidden="true"><path class="gauge-mini__ticks" d="${garc(180, 0)}"/></svg>
+        <div class="gauge-mini__value"><strong>–</strong><span class="gauge-mini__band"><i class="gauge-mini__ring"></i>데이터 부족</span></div>
+      </div>`;
+  }
+  const segs = BANDS.map((_, i) => `<path d="${garc(180 - i * 36 - 1.5, 180 - (i + 1) * 36 + 1.5)}"
+      stroke="var(--gauge-${i + 1})" opacity="${i + 1 === band.index ? 1 : 0.3}"/>`).join("");
+  const angle = Math.max(0, Math.min(100, score)) * 1.8 - 90;
+  return `<div class="gauge-mini">
+      <svg viewBox="0 0 92 54" aria-hidden="true"><g class="gauge-mini__arc">${segs}</g>
+        <g class="gauge-mini__needle" style="transform:rotate(${angle.toFixed(1)}deg)">
+          <line x1="${GX}" y1="${GY}" x2="${GX}" y2="${GY - 29}"/><circle cx="${GX}" cy="${GY}" r="3.5"/></g></svg>
+      <div class="gauge-mini__value"><strong class="num">${Math.round(score)}</strong>
+        <span class="gauge-mini__band"><i style="background:var(--gauge-${band.index})"></i>${band.label}</span></div>
+    </div>`;
+}
+
 export function marketBadge(market, country) {
   return `<span class="badge ${country === "US" ? "badge--us" : "badge--kr"}">${esc(market)}</span>`;
 }

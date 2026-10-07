@@ -11,18 +11,40 @@
 .card--link { display: block; transition: transform .15s var(--ease), filter .15s var(--ease); }
 .card--link:hover { transform: translateY(-2px); filter: brightness(1.03); }
 
-/* 관심종목 카드 (레퍼런스의 파스텔 카드) */
-.wl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-4); }
-.wl-card { display: flex; flex-direction: column; gap: var(--sp-5); min-height: 196px; padding: var(--sp-6); border-radius: var(--r-card); }
-.wl-card__top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-2); }
-.wl-card__dots { display: flex; }
-.wl-card__dots i { width: 22px; height: 22px; border-radius: 50%; display: block; }
-.wl-card__dots i:first-child { background: var(--text-on-pastel); }
-.wl-card__dots i:last-child { background: #9b9b9b; margin-left: -8px; }
-.wl-card__ticker { font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: .06em; text-transform: uppercase; color: var(--text-on-pastel-2); }
+/* 관심종목 카드 (레퍼런스의 파스텔 카드) — 항상 2줄: 2열→3열→4열→5열 */
+.wl-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-4); }
+@media (min-width: 768px)  { .wl-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 1024px) { .wl-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 1440px) { .wl-grid { grid-template-columns: repeat(5, 1fr); } }
+/* 위에서 아래로: 게이지(가운데) → 티커 → 가격(등락률) → 종목명 */
+.wl-card { display: flex; flex-direction: column; gap: var(--sp-2); min-height: 196px; padding: var(--sp-5) var(--sp-6) var(--sp-6); border-radius: var(--r-card); }
+.wl-card__gauge { display: flex; justify-content: center; margin-bottom: var(--sp-2); }
+.wl-card__ticker { font-size: calc(var(--fs-xs) - 1pt); font-weight: var(--fw-semibold); letter-spacing: .06em; text-transform: uppercase; color: var(--text-on-pastel-2); }
 .wl-card__price { font-size: var(--fs-xl); font-weight: var(--fw-extra); letter-spacing: .01em; }
-.wl-card__name { font-weight: var(--fw-bold); }
-.wl-card__foot { margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
+.wl-card__name { font-weight: var(--fw-bold); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wl-card__foot { margin-top: auto; display: flex; align-items: center; min-width: 0; }
+
+/* 가격 (등락률) — 길면 등락률이 다음 줄로 */
+.pwc { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; row-gap: 2px; }
+.pwc__chg { font-size: 14px; font-weight: var(--fw-bold); letter-spacing: 0; }
+.pwc__chg--up { color: var(--price-up); }
+.pwc__chg--down { color: var(--price-down); }
+.pwc__chg--flat { color: var(--text-on-pastel-2); }
+
+/* 매력도 미니 게이지 (색 구간·바늘·데이터 부족) */
+.gauge-mini { width: 92px; display: flex; flex-direction: column; align-items: center; }
+.gauge-mini svg { width: 92px; height: 54px; display: block; overflow: visible; }
+.gauge-mini__arc path { fill: none; stroke-width: 8; }
+.gauge-mini__ticks { fill: none; stroke: var(--text-on-pastel-2); stroke-width: 7; stroke-dasharray: 2 5; opacity: .45; }
+.gauge-mini__needle { transform-box: view-box; transform-origin: 46px 48px; animation: needle-sweep .9s var(--ease) both; }
+.gauge-mini__needle line { stroke: var(--text-on-pastel); stroke-width: 2.5; stroke-linecap: round; }
+.gauge-mini__needle circle { fill: var(--text-on-pastel); }
+@keyframes needle-sweep { from { transform: rotate(-90deg); } }
+.gauge-mini__value { display: flex; align-items: center; gap: 6px; margin-top: 2px; white-space: nowrap; }
+.gauge-mini__value strong { font-size: var(--fs-lg); font-weight: var(--fw-extra); line-height: 1; }
+.gauge-mini__band { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: var(--fw-semibold); color: var(--text-on-pastel-2); }
+.gauge-mini__band i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+.gauge-mini__band .gauge-mini__ring { background: none; border: 1.5px dashed var(--text-on-pastel-2); }
 
 /* 지수·환율 카드 (라벨–스파크라인–큰 숫자) */
 .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--sp-4); }
@@ -195,3 +217,36 @@
 .metric-select { max-width: 240px; }
 .metric-select .select { border-radius: var(--r-pill); }
 @media (max-width: 767px) { .stat--wide { grid-column: 1 / -1; } }
+
+/* ---------------------------------------------------------------- 투자 성향 펼침 메뉴 */
+.preset-menu { position: relative; }
+.preset-menu__trigger {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  padding: 8px 14px 8px 16px; border-radius: var(--r-pill);
+  background: var(--surface); border: 1px solid var(--line); color: var(--text);
+}
+.preset-menu__trigger:hover { background: var(--card); }
+.preset-menu__label { color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.preset-menu__current { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); }
+.preset-menu__trigger svg { color: var(--text-2); transition: transform .15s var(--ease); }
+.preset-menu__trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
+.preset-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; display: inline-block; }
+.preset-menu__list {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: 230px;
+  margin: 0; padding: 6px; list-style: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+}
+.preset-menu__list--fixed { position: fixed; left: var(--sp-4); right: var(--sp-4); width: auto; }
+.preset-menu__option {
+  display: grid; grid-template-columns: 10px 1fr 16px; align-items: center; gap: var(--sp-3);
+  padding: 10px 12px; border-radius: 10px; cursor: pointer;
+}
+.preset-menu__option:hover { background: var(--card); }
+.preset-menu__option[aria-selected="true"] { background: var(--card-active); }
+.preset-menu__option:focus-visible { outline: none; box-shadow: var(--focus); }
+.preset-menu__text { display: flex; flex-direction: column; min-width: 0; }
+.preset-menu__text strong { font-size: var(--fs-sm); }
+.preset-menu__text small { color: var(--text-3); font-size: var(--fs-xs); }
+.preset-menu__check { color: var(--text); visibility: hidden; display: flex; }
+.preset-menu__option[aria-selected="true"] .preset-menu__check { visibility: visible; }
+.page-head__actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }

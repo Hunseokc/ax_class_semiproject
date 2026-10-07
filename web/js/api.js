@@ -38,9 +38,9 @@ async function getWithPreset(path, params) {
   try {
     return await request("GET", path, { params });
   } catch (e) {
-    if (e.code !== "UNKNOWN_PRESET" || !params?.preset || params.preset === "balanced") throw e;
-    scorePreset.set("balanced");                     // 기억해 둔 프리셋이 없어졌으면 기본값으로 다시 요청
-    return request("GET", path, { params: { ...params, preset: "balanced" } });
+    if (e.code !== "UNKNOWN_PRESET" || !params?.preset || params.preset === DEFAULT_PRESET) throw e;
+    setPreset(DEFAULT_PRESET, { silent: true });     // 기억해 둔 프리셋이 없어졌으면 기본값으로 다시 요청
+    return request("GET", path, { params: { ...params, preset: DEFAULT_PRESET } });
   }
 }
 
@@ -52,16 +52,39 @@ export const api = {
   del: (path, params) => request("DELETE", path, { params }),
 };
 
-// 매력도 프리셋 선택 — 리스트·홈 카드·상세가 같은 프리셋을 쓰도록 브라우저에 기억 (서버 기본값: balanced)
+// 투자 성향(매력도 프리셋) — 대시보드·리스트·상세가 같은 값을 쓴다.
+// 우선순위: URL ?preset= → 브라우저 저장값 → balanced. 바꾸면 저장값·URL을 갱신하고 preset-change 이벤트를 보낸다.
 const PRESET_KEY = "scorePreset";
-export const scorePreset = {
-  get() {
-    try { return localStorage.getItem(PRESET_KEY) || "balanced"; } catch { return "balanced"; }
-  },
-  set(code) {
-    try { localStorage.setItem(PRESET_KEY, code); } catch { /* 저장 불가(사생활 보호 모드 등)면 이번 화면에서만 적용 */ }
-  },
-};
+const LEGACY_PRESETS = { quality: "balanced" };      // 없어진 프리셋 → 대체값
+export const DEFAULT_PRESET = "balanced";
+export const PRESET_EVENT = "preset-change";
+
+const normalizePreset = (code) => LEGACY_PRESETS[code] || code || DEFAULT_PRESET;
+function storedPreset() {
+  try { return localStorage.getItem(PRESET_KEY); } catch { return null; }
+}
+
+export function getPreset() {
+  return normalizePreset(new URLSearchParams(location.search).get("preset") || storedPreset());
+}
+
+export function setPreset(code, { silent = false } = {}) {
+  try { localStorage.setItem(PRESET_KEY, code); } catch { /* 저장 불가(사생활 보호 모드 등)면 URL로만 유지 */ }
+  const url = new URL(location.href);
+  url.searchParams.set("preset", code);
+  history.replaceState(history.state, "", url);
+  if (!silent) document.dispatchEvent(new CustomEvent(PRESET_EVENT, { detail: { preset: code } }));
+}
+
+// 링크로 받은 값은 저장해 두고, 옛 값(quality)은 대체값으로 바꿔 둔다
+{
+  const current = getPreset();
+  if (storedPreset() !== current) {
+    try { localStorage.setItem(PRESET_KEY, current); } catch { /* 저장 불가 */ }
+  }
+  const inUrl = new URLSearchParams(location.search).get("preset");
+  if (inUrl && inUrl !== current) setPreset(current, { silent: true });
+}
 
 // 화면에서 쓰는 호출 모음
 export const Market = {
@@ -72,11 +95,11 @@ export const Market = {
 };
 
 export const Stocks = {
-  list: (params) => api.get("/stocks", { limit: 100, preset: scorePreset.get(), ...params }),
+  list: (params) => api.get("/stocks", { limit: 100, preset: getPreset(), ...params }),
   groups: () => api.get("/peer-groups"),
   detail: (m, t) => api.get(`/stocks/${m}/${t}`),
   candles: (m, t, range) => api.get(`/stocks/${m}/${t}/candles`, { range }),
-  analysis: (m, t, preset = scorePreset.get()) => api.get(`/stocks/${m}/${t}/analysis`, { preset }),
+  analysis: (m, t, preset = getPreset()) => api.get(`/stocks/${m}/${t}/analysis`, { preset }),
   financials: (m, t) => api.get(`/stocks/${m}/${t}/financials`, { limit: 5 }),
   peers: (m, t) => api.get(`/stocks/${m}/${t}/peers`),
   peersChart: (m, t, range, groupId) => api.get(`/stocks/${m}/${t}/peers/chart`, { range, group_id: groupId }),
@@ -84,7 +107,7 @@ export const Stocks = {
 };
 
 export const Watchlist = {
-  list: () => api.get("/watchlist", { preset: scorePreset.get() }),
+  list: () => api.get("/watchlist", { preset: getPreset() }),
   add: (market, ticker) => api.post("/watchlist", { market, ticker }),
   remove: (market, ticker) => api.del(`/watchlist/${market}/${ticker}`),
 };

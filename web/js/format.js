@@ -73,6 +73,25 @@ export function changeHtml(rate, country, opts) {
   return `<span class="${c.cls}" aria-label="${c.label}">${c.text}</span>`;
 }
 
+/** 등락률 읽기용 문장: "1.09% 하락" / "0.22% 상승" / "보합" / "등락 정보 없음" (소수점 둘째 자리 기준) */
+export function changeLabel(rate) {
+  if (!isNum(rate)) return "등락 정보 없음";
+  const r = Math.round(rate * 10000) / 10000;
+  if (r === 0) return "보합";
+  return `${pct(Math.abs(r))} ${r > 0 ? "상승" : "하락"}`;
+}
+
+/** 가격 (등락률): "273,000원 (▼1.09%)" — 국내·해외 같은 규칙(상승 빨강·하락 파랑·0% 회색, 값 없으면 (–)) */
+export function formatPriceWithChange(value, currency, rate) {
+  let cls = "flat", text = `(${DASH})`;
+  if (isNum(rate)) {
+    const r = Math.round(rate * 10000) / 10000;
+    cls = r > 0 ? "up" : r < 0 ? "down" : "flat";
+    text = `(${r > 0 ? "▲" : r < 0 ? "▼" : ""}${pct(Math.abs(r))})`;
+  }
+  return `<span class="pwc"><span class="pwc__price num">${price(value, currency)}</span><span class="pwc__chg pwc__chg--${cls} num">${text}</span></span>`;
+}
+
 const dtf = new Intl.DateTimeFormat("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Seoul" });
 const df = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Seoul" });
 
