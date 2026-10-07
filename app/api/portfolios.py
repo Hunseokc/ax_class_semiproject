@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Response
 
-from app.api.deps import get_current_user_id, get_portfolio_service
+from app.api.deps import get_portfolio_service
 from app.models import Portfolio, PortfolioItem
 from app.schemas.api import (ItemCreate, ItemInput, ItemOut, ItemsOut, PortfolioCreate, PortfolioOut,
                              PortfolioUpdate, SummaryOut)
@@ -30,14 +30,13 @@ def _item_out(item: PortfolioItem) -> dict:
 
 
 @router.post("", response_model=PortfolioOut, status_code=201, summary="포트폴리오 생성")
-def create_portfolio(body: PortfolioCreate, user_id: int = Depends(get_current_user_id),
-                     svc: PortfolioService = Depends(get_portfolio_service)):
-    return _pf_out(svc, svc.create(user_id, body.name, body.seed_krw))
+def create_portfolio(body: PortfolioCreate, svc: PortfolioService = Depends(get_portfolio_service)):
+    return _pf_out(svc, svc.create(body.name, body.seed_krw))
 
 
 @router.get("", response_model=list[PortfolioOut], summary="사용자의 포트폴리오 목록")
-def list_portfolios(user_id: int = Depends(get_current_user_id), svc: PortfolioService = Depends(get_portfolio_service)):
-    return [_pf_out(svc, pf) for pf in svc.list(user_id)]
+def list_portfolios(svc: PortfolioService = Depends(get_portfolio_service)):
+    return [_pf_out(svc, pf) for pf in svc.list()]
 
 
 @router.get("/{portfolio_id}", response_model=PortfolioOut, summary="포트폴리오 단건")
@@ -64,7 +63,6 @@ def add_item(portfolio_id: int, body: ItemCreate, svc: PortfolioService = Depend
 
 @router.get("/{portfolio_id}/items", response_model=ItemsOut, summary="담은 종목과 현재 평가")
 def list_items(portfolio_id: int, svc: PortfolioService = Depends(get_portfolio_service)):
-    svc.get(portfolio_id)
     items, fx = svc.valued_items(portfolio_id)
     return {"portfolio_id": portfolio_id, "fx_rate": fx.usd_krw if fx else None,
             "fx_rate_at": fx.rate_at if fx else None, "fx_stale": fx.stale if fx else False, "items": items}

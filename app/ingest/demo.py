@@ -45,7 +45,7 @@ def seed_demo(engine: Engine, providers: Providers) -> dict:
     fx = FxService(engine, providers.fx, get_settings().refresh_ttl_hours)
     with session_factory(engine)() as db:
         uid = db.execute(select(User.user_id).where(User.nickname == "demo")).scalar_one()
-        svc = PortfolioService(db, fx)
+        svc = PortfolioService(db, fx, uid)
         for name, seed, items in DEMO_PORTFOLIOS:
             if db.execute(select(Portfolio).where(Portfolio.user_id == uid, Portfolio.name == name)).scalar():
                 log.info("이미 있음: %s", name)
@@ -55,7 +55,7 @@ def seed_demo(engine: Engine, providers: Providers) -> dict:
             if not any((mk, tk) in priced for mk, tk, *_ in items):
                 out["skipped"].append(f"{name}(시세 있는 종목 없음)")
                 continue
-            pf = svc.create(uid, name, Decimal(seed))
+            pf = svc.create(name, Decimal(seed))
             for market, ticker, mode, value, memo in items:
                 try:
                     svc.add_item(pf.portfolio_id, market, ticker, mode, Decimal(value), memo)

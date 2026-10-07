@@ -60,5 +60,6 @@ def get_refresh_service(engine: Engine = Depends(get_engine_dep), providers: Pro
     return RefreshService(engine, providers, fx, get_settings().refresh_ttl_hours, scorer=scorer)
 
 
-def get_portfolio_service(db: Session = Depends(get_db), fx: FxService = Depends(get_fx_service)) -> PortfolioService:
-    return PortfolioService(db, fx)
+def get_portfolio_service(db: Session = Depends(get_db), fx: FxService = Depends(get_fx_service),
+                          user_id: int = Depends(get_current_user_id)) -> PortfolioService:
+    return PortfolioService(db, fx, user_id)

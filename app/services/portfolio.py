@@ -59,19 +59,22 @@ def quantity_for(mode: str, value: Decimal, seed: Decimal, unit_cost: Decimal) -
 
 
 class PortfolioService:
-    def __init__(self, db: Session, fx: FxService):
+    """user_id(요청 사용자) 소유의 포트폴리오만 다룬다. 남의 포트폴리오는 존재를 드러내지 않고 404."""
+
+    def __init__(self, db: Session, fx: FxService, user_id: int):
         self.db = db
         self.fx = fx
+        self.user_id = user_id
 
     # ------------------------------------------------------------ 조회 도우미
-    def _user(self, user_id: int) -> User:
-        user = self.db.get(User, user_id)
+    def _user(self) -> User:
+        user = self.db.get(User, self.user_id)
         if user is None:
-            raise NotFound(f"사용자(ID {user_id})를 찾을 수 없습니다", code="USER_NOT_FOUND")
+            raise NotFound(f"사용자(ID {self.user_id})를 찾을 수 없습니다", code="USER_NOT_FOUND")
         return user
 
     def get(self, portfolio_id: int, *, lock: bool = False) -> Portfolio:
-        stmt = select(Portfolio).where(Portfolio.portfolio_id == portfolio_id)
+        stmt = select(Portfolio).where(Portfolio.portfolio_id == portfolio_id, Portfolio.user_id == self.user_id)
         if lock:
             # 잠금 후 최신 값으로 다시 읽는다(앞서 identity map에 올라온 객체도 덮어씀)
             stmt = stmt.with_for_update().execution_options(populate_existing=True)
@@ -104,14 +107,14 @@ class PortfolioService:
         return RefQuote(stock, q(row.close, PRICE_Q), row.trade_date, q(fx.usd_krw, PRICE_Q), fx)
 
     # ------------------------------------------------------------ 포트폴리오 CRUD
-    def list(self, user_id: int) -> list[Portfolio]:
-        self._user(user_id)
-        return list(self.db.execute(select(Portfolio).where(Portfolio.user_id == user_id)
+    def list(self) -> list[Portfolio]:
+        self._user()
+        return list(self.db.execute(select(Portfolio).where(Portfolio.user_id == self.user_id)
                                     .order_by(Portfolio.portfolio_id)).scalars())
 
-    def create(self, user_id: int, name: str, seed_krw: Decimal) -> Portfolio:
-        self._user(user_id)
-        pf = Portfolio(user_id=user_id, name=name.strip(), seed_krw=seed_krw)
+    def create(self, name: str, seed_krw: Decimal) -> Portfolio:
+        self._user()
+        pf = Portfolio(user_id=self.user_id, name=name.strip(), seed_krw=seed_krw)
         self.db.add(pf)
         self._commit_unique(f"같은 이름의 포트폴리오가 이미 있습니다: {name}", "DUPLICATE_PORTFOLIO_NAME")
         self.db.refresh(pf)
@@ -206,12 +209,17 @@ class PortfolioService:
         return item
 
     def delete_item(self, portfolio_id: int, item_id: int) -> None:
+        self.get(portfolio_id)
         item = self.get_item(portfolio_id, item_id)
         self.db.delete(item)
         self.db.commit()
 
     # ------------------------------------------------------------ 평가·요약
     def valued_items(self, portfolio_id: int) -> tuple[list[dict], FxQuote | None]:
+        self.get(portfolio_id)
+        return self._valued_items(portfolio_id)
+
+    def _valued_items(self, portfolio_id: int) -> tuple[list[dict], FxQuote | None]:
         rows = self.db.execute(sql("portfolio_items_valued"), {"pid": portfolio_id}).mappings().all()
         fx = self.fx.get_current_rate() if any(r["currency"] == "USD" for r in rows) else None
         out = []
@@ -240,7 +248,7 @@ class PortfolioService:
 
     def summary(self, portfolio_id: int) -> dict:
         pf = self.get(portfolio_id)
-        items, fx = self.valued_items(portfolio_id)
+        items, fx = self._valued_items(portfolio_id)
         seed = pf.seed_krw
         used = sum((i["cost_krw"] for i in items), Decimal(0))
         remaining = seed - used
