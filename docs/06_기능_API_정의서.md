@@ -45,7 +45,7 @@
 | 모의 포트폴리오 | DELETE | `/portfolios/{portfolio_id}/items/{item_id}` | 담은 종목 삭제 | - | 204 · 404/409/422 |
 | 모의 포트폴리오 | GET | `/portfolios/{portfolio_id}/summary` | 요약: 사용·잔여·비중·가중 매력도·평가손익(환 효과 분리) | - | 200 · 404/409/422 |
 | 분석 | GET | `/stocks/{market}/{ticker}/analysis` | 수치 분석(v_stock_metrics) + 매력도(프리셋별 점수·팩터 기여도·지표 원값/Z·국가 내 순위·백분위·데이터 충족도) | preset | 200 · 404/409/422 |
-| 분석 | GET | `/scoring/presets` | 매력도 가중치 프리셋과 팩터별 가중치 | - | 200 |
+| 분석 | GET | `/scoring/presets` | 투자 성향 프리셋(sort_order 순: 위험·성장·균형·가치)과 팩터별 가중치 | - | 200 |
 | 분석 | GET | `/stocks/{market}/{ticker}/peers` | 경쟁 그룹별 비교 표 (그룹 내 RANK·AVG, 구성원 1명 그룹은 비교 대상 없음) | - | 200 · 404/409/422 |
 | 분석 | GET | `/stocks/{market}/{ticker}/peers/chart` | 경쟁 그룹 기준일=100 가격 추이 (합집합 날짜 + 휴장일 null) | range, group_id | 200 · 404/409/422 |
 | 통계 | GET | `/statistics/overview` | 데이터 개요: 행 수·기간·마지막 갱신 | - | 200 · 404/409/422 |
@@ -55,7 +55,7 @@
 
 ※ `GET /market/refresh/status`, `GET /peer-groups`는 화면 요구로 추가한 엔드포인트(ASSUMPTIONS A-48, A-67)
 
-※ `preset`: 매력도 가중치 프리셋 코드(balanced·value·growth·quality, 기본 balanced). 없는 코드는 422 `UNKNOWN_PRESET`(`detail.presets`에 사용 가능한 코드). 경쟁 비교 표(`/peers`)와 포트폴리오 요약의 매력도는 균형 프리셋 기준. 점수 정의는 docs/09.
+※ `preset`: 투자 성향 프리셋 코드(aggressive·growth·balanced·value, 기본 balanced). 없는 코드(옛 quality 포함)는 422 `UNKNOWN_PRESET`(`detail.presets`에 사용 가능한 코드). 경쟁 비교 표(`/peers`)와 포트폴리오 요약의 매력도는 균형 프리셋 기준. 점수 정의는 docs/09.
 
 ## 3. 요청·응답 예시 (실제 호출)
 
@@ -408,8 +408,8 @@
     "as_of": "2026-10-07",
     "preset": {
       "code": "growth",
-      "name": "성장형",
-      "description": "매출·이익 성장과 추세에 비중을 둔다"
+      "name": "성장",
+      "description": "성장성 중심"
     },
     "score": 73.13,
     "composite": 0.4865,
@@ -494,29 +494,31 @@
   "note": "공개된 일반적 투자 스타일을 단순화한 가중치이며 특정 인물의 판단이 아닙니다.",
   "presets": [
     {
-      "code": "balanced",
-      "name": "균형",
-      "description": "다섯 팩터를 같은 비중으로 본다",
-      "is_default": true,
+      "code": "aggressive",
+      "name": "위험",
+      "description": "모멘텀·성장 중심",
+      "sort_order": 1,
+      "is_default": false,
       "weights": {
-        "value": 0.2,
-        "quality": 0.2,
-        "growth": 0.2,
-        "safety": 0.2,
-        "momentum": 0.2
+        "value": 0.05,
+        "quality": 0.1,
+        "growth": 0.35,
+        "safety": 0.1,
+        "momentum": 0.4
       }
     },
     {
-      "code": "value",
-      "name": "가치형",
-      "description": "이익·자산 대비 싼 종목에 비중을 둔다",
+      "code": "growth",
+      "name": "성장",
+      "description": "성장성 중심",
+      "sort_order": 2,
       "is_default": false,
       "weights": {
-        "value": 0.4,
+        "value": 0.1,
         "quality": 0.2,
-        "growth": 0.1,
-        "safety": 0.2,
-        "momentum": 0.1
+        "growth": 0.4,
+        "safety": 0.05,
+        "momentum": 0.25
       }
     },
     "… 외 2개"
@@ -1371,17 +1373,18 @@
 | 공통 | 모든 화면 | 사이드바 마지막 갱신·새로고침 | `GET /market/refresh/status`, `POST /market/refresh` |
 | 대시보드 홈 | `/` | 지수 카드 5개 | `GET /market/indices` |
 | | | USD/KRW 카드 | `GET /market/fx` |
-| | | 내 관심종목 카드 | `GET /watchlist?preset=` (리스트에서 고른 프리셋) |
+| | | 투자 성향 펼침 메뉴(헤더) | `GET /scoring/presets` |
+| | | 내 관심종목 카드(카드 클릭 → 상세 `?preset=`) | `GET /watchlist?preset=` |
 | | | 거래량 상위 5 (국내/미국) | `GET /stocks?country=&sort=volume&limit=5` |
 | 주식 리스트 | `/stocks` | 순위 리스트·탭·정렬·검색 | `GET /stocks?country=&sort=&order=&group=&q=&preset=` |
-| | | 매력도 프리셋 선택 | `GET /scoring/presets` |
+| | | 투자 성향 펼침 메뉴(헤더) | `GET /scoring/presets` |
 | | | 경쟁 그룹 필터 | `GET /peer-groups` |
 | | | ★ 토글 | `POST /watchlist`, `DELETE /watchlist/{market}/{ticker}` |
 | | | 담기 모달 | `GET /portfolios`, `GET /market/fx`(USD), `POST /portfolios/{id}/items` |
 | 종목 상세 | `/stocks/{market}/{ticker}` | 헤더·★·담기 | `GET /stocks/{market}/{ticker}` (+ 위 ★·담기 API) |
 | | | 가격 차트 (1M~1Y) | `GET /stocks/{market}/{ticker}/candles?range=` |
 | | | 핵심 지표·매력도·수치 분석 | `GET /stocks/{market}/{ticker}/analysis?preset=` |
-| | | 매력도 프리셋 탭 | `GET /scoring/presets` |
+| | | 투자 성향 펼침 메뉴(매력도 영역) | `GET /scoring/presets` |
 | | | 재무 추이 | `GET /stocks/{market}/{ticker}/financials` |
 | | | 경쟁 비교 표·막대 | `GET /stocks/{market}/{ticker}/peers` |
 | | | 기준일=100 차트 | `GET /stocks/{market}/{ticker}/peers/chart?range=&group_id=` |

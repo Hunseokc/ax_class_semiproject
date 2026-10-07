@@ -160,6 +160,7 @@ erDiagram
         varchar code UK
         varchar name
         text description
+        smallint sort_order
     }
     scoring_weights {
         smallint preset_id PK,FK
@@ -430,9 +431,10 @@ erDiagram
 | 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | preset_id | smallint | N | 자동 증가 | PK | 프리셋 ID |
-| code | character varying(20) | N |  | UQ | balanced / value / growth / quality |
-| name | character varying(50) | N |  |  | 화면 이름 (균형·가치형·성장형·퀄리티형) |
+| code | character varying(20) | N |  | UQ | aggressive / growth / balanced / value |
+| name | character varying(50) | N |  |  | 화면 이름 (위험·성장·균형·가치) |
 | description | text | Y |  |  | 설명 |
+| sort_order | smallint | N | 0 |  | 화면 표시 순서 (위험 1 → 가치 4) |
 
 `config/scoring.yaml`에서 적재(init-db·migrate·scores 실행 시). 프리셋별 가중치 합 = 1은 행 간 제약이라 적재 시 검증한다.
 
