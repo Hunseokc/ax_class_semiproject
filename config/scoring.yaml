@@ -6,22 +6,28 @@ shrinkage_k: 5
 
 default_preset: balanced
 
-# 프리셋별 가중치 합은 정확히 1이어야 한다(적재 시 검증). 소수점 셋째 자리까지(NUMERIC(4,3))
+# 투자 성향 프리셋. sort_order 순서로 화면에 표시한다(위험 → 성장 → 균형 → 가치).
+# 여기서 빠진 프리셋은 적재 시 DB에서 점수와 함께 삭제된다.
+# 가중치 합은 정확히 1이어야 한다(적재 시 검증). 소수점 셋째 자리까지(NUMERIC(4,3))
 # 공개된 일반적 투자 스타일을 단순화한 가중치이며 특정 인물의 판단이 아니다.
 presets:
+  - code: aggressive
+    name: 위험
+    description: 모멘텀·성장 중심
+    sort_order: 1
+    weights: {value: 0.05, quality: 0.10, growth: 0.35, safety: 0.10, momentum: 0.40}
+  - code: growth
+    name: 성장
+    description: 성장성 중심
+    sort_order: 2
+    weights: {value: 0.10, quality: 0.20, growth: 0.40, safety: 0.05, momentum: 0.25}
   - code: balanced
     name: 균형
-    description: 다섯 팩터를 같은 비중으로 본다
+    description: 5개 팩터 균등
+    sort_order: 3
     weights: {value: 0.20, quality: 0.20, growth: 0.20, safety: 0.20, momentum: 0.20}
   - code: value
-    name: 가치형
-    description: 이익·자산 대비 싼 종목에 비중을 둔다
+    name: 가치
+    description: 저평가·안정성 중심
+    sort_order: 4
     weights: {value: 0.40, quality: 0.20, growth: 0.10, safety: 0.20, momentum: 0.10}
-  - code: growth
-    name: 성장형
-    description: 매출·이익 성장과 추세에 비중을 둔다
-    weights: {value: 0.10, quality: 0.20, growth: 0.40, safety: 0.05, momentum: 0.25}
-  - code: quality
-    name: 퀄리티형
-    description: 수익성과 재무 안정성에 비중을 둔다
-    weights: {value: 0.15, quality: 0.40, growth: 0.10, safety: 0.30, momentum: 0.05}

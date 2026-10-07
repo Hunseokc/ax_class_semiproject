@@ -82,6 +82,7 @@ class ScoreOut(Schema):
 
 
 class PresetOut(PresetRef):
+    sort_order: int
     is_default: bool
     weights: dict[str, Num]
 
@@ -205,14 +206,15 @@ def analysis(market: str, ticker: str, preset: dict = Depends(get_preset), db: S
     }
 
 
-@scoring_router.get("/presets", response_model=PresetsOut, summary="매력도 가중치 프리셋과 팩터별 가중치")
+@scoring_router.get("/presets", response_model=PresetsOut, summary="투자 성향 프리셋(sort_order 순)과 팩터별 가중치")
 def presets(db: Session = Depends(get_db)):
-    rows = db.execute(text("""SELECT p.preset_id, p.code, p.name, p.description, w.factor, w.weight
+    rows = db.execute(text("""SELECT p.preset_id, p.code, p.name, p.description, p.sort_order, w.factor, w.weight
                               FROM scoring_presets p JOIN scoring_weights w ON w.preset_id = p.preset_id
-                              ORDER BY p.preset_id""")).mappings().all()
+                              ORDER BY p.sort_order, p.preset_id""")).mappings().all()
     out: dict[int, dict] = {}
     for r in rows:
         p = out.setdefault(r["preset_id"], {"code": r["code"], "name": r["name"], "description": r["description"],
+                                            "sort_order": r["sort_order"],
                                             "is_default": r["code"] == default_preset(), "weights": {}})
         p["weights"][r["factor"]] = r["weight"]
     for p in out.values():

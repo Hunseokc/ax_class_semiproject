@@ -17,8 +17,10 @@ CREATE TABLE IF NOT EXISTS scoring_presets (
   preset_id   SMALLSERIAL PRIMARY KEY,
   code        VARCHAR(20) NOT NULL UNIQUE,
   name        VARCHAR(50) NOT NULL,
-  description TEXT
+  description TEXT,
+  sort_order  SMALLINT    NOT NULL DEFAULT 0
 );
+ALTER TABLE scoring_presets ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS scoring_weights (
   preset_id SMALLINT     NOT NULL REFERENCES scoring_presets ON DELETE CASCADE,

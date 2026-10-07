@@ -15,7 +15,8 @@ from sqlalchemy import text
 
 from app.services.fx import FxService
 from app.services.refresh import RefreshService
-from app.services.scoring import (FACTORS, METRICS, aggregate, compute_scores, load_config, normalize,
+from app.ingest.jobs import migrate
+from app.services.scoring import (FACTORS, METRICS, aggregate, compute_scores, load_config, normalize, sync_presets,
                                   validate_presets)
 from tests.conftest import D
 from tests.fakes import make_providers
@@ -344,23 +345,65 @@ def test_adding_a_stock_does_not_rescale_like_min_max(engine, universe):
 # ------------------------------------------------------------------ 프리셋
 def test_preset_weights_sum_to_one_in_config_and_db(engine):
     cfg = load_config()
-    assert {p["code"] for p in cfg["presets"]} == {"balanced", "value", "growth", "quality"}
+    assert [p["code"] for p in sorted(cfg["presets"], key=lambda p: p["sort_order"])] == ["aggressive", "growth", "balanced", "value"]
     with engine.connect() as conn:
         sums = dict(conn.execute(text("""SELECT p.code, SUM(w.weight) FROM scoring_presets p
                                          JOIN scoring_weights w USING (preset_id) GROUP BY p.code""")).all())
         counts = set(conn.execute(text("SELECT count(*) FROM scoring_weights GROUP BY preset_id")).scalars())
-    assert sums == {"balanced": 1, "value": 1, "growth": 1, "quality": 1} and counts == {5}
+    assert sums == {"aggressive": 1, "growth": 1, "balanced": 1, "value": 1} and counts == {5}
 
 
-@pytest.mark.parametrize("weights, message", [
-    ({"value": 0.5, "quality": 0.2, "growth": 0.2, "safety": 0.2, "momentum": 0.2}, "합이 1"),
-    ({"value": 0.5, "quality": 0.5}, "5개"),
-    ({"value": 1.2, "quality": -0.2, "growth": 0, "safety": 0, "momentum": 0}, "0~1"),
-    ({"value": 0.2005, "quality": 0.2, "growth": 0.2, "safety": 0.2, "momentum": 0.1995}, "셋째 자리"),
+EVEN = {"value": 0.2, "quality": 0.2, "growth": 0.2, "safety": 0.2, "momentum": 0.2}
+
+
+@pytest.mark.parametrize("presets, message", [
+    ([{"code": "bad", "sort_order": 1, "weights": {**EVEN, "value": 0.5}}], "합이 1"),
+    ([{"code": "bad", "sort_order": 1, "weights": {"value": 0.5, "quality": 0.5}}], "5개"),
+    ([{"code": "bad", "sort_order": 1, "weights": {**EVEN, "value": 1.2, "quality": -0.2, "growth": 0, "safety": 0, "momentum": 0}}], "0~1"),
+    ([{"code": "bad", "sort_order": 1, "weights": {**EVEN, "value": 0.2005, "momentum": 0.1995}}], "셋째 자리"),
+    ([{"code": "a", "weights": EVEN}], "sort_order"),
+    ([{"code": "a", "sort_order": 1, "weights": EVEN}, {"code": "b", "sort_order": 1, "weights": EVEN}], "sort_order"),
 ])
-def test_invalid_presets_are_rejected(weights, message):
+def test_invalid_presets_are_rejected(presets, message):
     with pytest.raises(ValueError, match=message):
-        validate_presets([{"code": "bad", "name": "x", "weights": weights}])
+        validate_presets(presets)
+
+
+def _add_old_quality_preset(engine):
+    with engine.begin() as conn:
+        pid = conn.execute(text("INSERT INTO scoring_presets (code, name, sort_order) VALUES ('quality', '퀄리티형', 9) "
+                                "RETURNING preset_id")).scalar_one()
+        conn.execute(text("INSERT INTO scoring_weights SELECT :p, factor, weight FROM scoring_weights w "
+                          "JOIN scoring_presets s USING (preset_id) WHERE s.code = 'balanced'"), {"p": pid})
+        conn.execute(text("INSERT INTO stock_scores (stock_id, as_of, preset_id, score, factor_coverage) VALUES (1, :d, :p, 50, 5)"),
+                     {"d": D, "p": pid})
+
+
+def _presets_in_db(engine):
+    with engine.connect() as conn:
+        return conn.execute(text("""SELECT p.code, p.name, p.sort_order, (SELECT count(*) FROM stock_scores st WHERE st.preset_id = p.preset_id)
+                                    FROM scoring_presets p ORDER BY p.sort_order""")).all()
+
+
+def test_sync_removes_presets_missing_from_config(engine):
+    _add_old_quality_preset(engine)
+    with engine.begin() as conn:
+        sync_presets(conn)
+        sync_presets(conn)                                                   # 재실행 안전
+    rows = _presets_in_db(engine)
+    assert [(r[0], r[1], r[2]) for r in rows] == [("aggressive", "위험", 1), ("growth", "성장", 2), ("balanced", "균형", 3), ("value", "가치", 4)]
+
+
+def test_migration_002_is_idempotent(engine):
+    _add_old_quality_preset(engine)
+    for _ in range(2):
+        migrate(engine, "002_presets")
+    rows = _presets_in_db(engine)
+    assert [r[0] for r in rows] == ["aggressive", "growth", "balanced", "value"]
+    with engine.connect() as conn:
+        w = dict(conn.execute(text("""SELECT w.factor, w.weight FROM scoring_weights w JOIN scoring_presets p USING (preset_id)
+                                      WHERE p.code = 'aggressive'""")).all())
+    assert w == {"value": Dec("0.05"), "quality": Dec("0.1"), "growth": Dec("0.35"), "safety": Dec("0.1"), "momentum": Dec("0.4")}
 
 
 # ------------------------------------------------------------------ API
@@ -394,6 +437,7 @@ def test_preset_parameter_on_lists_and_unknown_preset(client, engine, universe):
         assert client.get(f"{API}/stocks/KOSPI/005930?preset={p}").json()["score"] == by[p]["005930"]
     assert by["balanced"] != by["value"]
     assert client.get(f"{API}/stocks").json()["preset"] == "balanced"
+    assert client.get(f"{API}/stocks?preset=quality").status_code == 422          # 없어진 프리셋
     r = client.get(f"{API}/stocks?preset=buffett")
     assert r.status_code == 422 and r.json()["error"]["code"] == "UNKNOWN_PRESET"
     assert "balanced" in r.json()["error"]["detail"]["presets"]
@@ -402,8 +446,12 @@ def test_preset_parameter_on_lists_and_unknown_preset(client, engine, universe):
 def test_presets_endpoint(client):
     body = client.get(f"{API}/scoring/presets").json()
     assert "특정 인물의 판단이 아닙니다" in body["note"]
+    assert [x["code"] for x in body["presets"]] == ["aggressive", "growth", "balanced", "value"]
+    assert [x["sort_order"] for x in body["presets"]] == [1, 2, 3, 4]
     p = {x["code"]: x for x in body["presets"]}
+    assert (p["aggressive"]["name"], p["aggressive"]["description"]) == ("위험", "모멘텀·성장 중심")
     assert list(p["value"]["weights"]) == list(FACTORS) and p["value"]["weights"]["value"] == 0.4
+    assert p["aggressive"]["weights"] == {"value": 0.05, "quality": 0.1, "growth": 0.35, "safety": 0.1, "momentum": 0.4}
     assert p["balanced"]["is_default"] and not p["growth"]["is_default"]
     assert all(sum(x["weights"].values()) == pytest.approx(1) for x in body["presets"])
 

@@ -201,6 +201,7 @@ class ScoringPreset(Base):
     code: Mapped[str] = mapped_column(String(20), unique=True)
     name: Mapped[str] = mapped_column(String(50))
     description: Mapped[str | None] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(SmallInteger, server_default="0")
 
 
 class ScoringWeight(Base):

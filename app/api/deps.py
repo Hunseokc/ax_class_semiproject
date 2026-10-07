@@ -36,13 +36,13 @@ def get_db(engine: Engine = Depends(get_engine_dep)) -> Iterator[Session]:
         db.close()
 
 
-def get_preset(preset: str | None = Query(None, description="매력도 가중치 프리셋 코드(balanced·value·growth·quality). 비우면 balanced"),
+def get_preset(preset: str | None = Query(None, description="투자 성향 프리셋 코드(aggressive·growth·balanced·value). 비우면 balanced, 그 외 값은 422"),
                db: Session = Depends(get_db)) -> dict:
     code = preset or default_preset()
     row = db.execute(text("SELECT preset_id, code, name, description FROM scoring_presets WHERE code = :c"),
                      {"c": code}).mappings().first()
     if row is None:
-        codes = list(db.execute(text("SELECT code FROM scoring_presets ORDER BY preset_id")).scalars())
+        codes = list(db.execute(text("SELECT code FROM scoring_presets ORDER BY sort_order")).scalars())
         raise Unprocessable(f"알 수 없는 매력도 프리셋입니다: {code}", detail={"presets": codes}, code="UNKNOWN_PRESET")
     return dict(row)
 

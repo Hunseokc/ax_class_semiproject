@@ -199,9 +199,10 @@ CREATE TABLE portfolio_items (
 --   CHECK로 걸 수 없다 → 적재 시 검증(app/services/scoring.py)하고 테스트로 보장한다.
 CREATE TABLE scoring_presets (
   preset_id   SMALLSERIAL PRIMARY KEY,
-  code        VARCHAR(20) NOT NULL UNIQUE,                       -- balanced / value / growth / quality
+  code        VARCHAR(20) NOT NULL UNIQUE,                       -- aggressive / growth / balanced / value
   name        VARCHAR(50) NOT NULL,
-  description TEXT
+  description TEXT,
+  sort_order  SMALLINT    NOT NULL DEFAULT 0                     -- 화면 표시 순서 (위험 → 성장 → 균형 → 가치)
 );
 
 CREATE TABLE scoring_weights (

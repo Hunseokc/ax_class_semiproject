@@ -66,6 +66,9 @@ def validate_presets(presets: list[dict]) -> None:
     """프리셋별 가중치 합 = 1 (행 간 제약이라 DB CHECK 대신 적재 시 검증)."""
     if not presets:
         raise ValueError("scoring.yaml에 프리셋이 없습니다")
+    orders = [p.get("sort_order") for p in presets]
+    if not all(isinstance(o, int) for o in orders) or len(set(orders)) != len(orders):
+        raise ValueError("프리셋마다 서로 다른 정수 sort_order가 필요합니다")
     for p in presets:
         w = {k: Decimal(str(v)) for k, v in p["weights"].items()}
         if set(w) != set(FACTORS):
@@ -77,13 +80,20 @@ def validate_presets(presets: list[dict]) -> None:
 
 
 def sync_presets(conn: Connection, cfg: dict | None = None) -> None:
-    """scoring.yaml 프리셋을 scoring_presets·scoring_weights에 맞춘다(재실행 안전)."""
+    """scoring.yaml 프리셋을 scoring_presets·scoring_weights에 맞춘다(재실행 안전).
+    설정에서 빠진 프리셋은 그 점수 행과 함께 삭제한다."""
     cfg = cfg or load_config()
+    codes = [p["code"] for p in cfg["presets"]]
+    removed = "SELECT preset_id FROM scoring_presets WHERE NOT (code = ANY(CAST(:codes AS text[])))"
+    conn.execute(text(f"DELETE FROM stock_scores WHERE preset_id IN ({removed})"), {"codes": codes})
+    conn.execute(text(f"DELETE FROM scoring_presets WHERE preset_id IN ({removed})"), {"codes": codes})
     for p in cfg["presets"]:
         pid = conn.execute(text("""
-            INSERT INTO scoring_presets (code, name, description) VALUES (:code, :name, :description)
-            ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description
-            RETURNING preset_id"""), {"code": p["code"], "name": p["name"], "description": p.get("description")}).scalar_one()
+            INSERT INTO scoring_presets (code, name, description, sort_order) VALUES (:code, :name, :description, :sort_order)
+            ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description,
+                                             sort_order = EXCLUDED.sort_order
+            RETURNING preset_id"""), {"code": p["code"], "name": p["name"], "description": p.get("description"),
+                                      "sort_order": p["sort_order"]}).scalar_one()
         conn.execute(text("""
             INSERT INTO scoring_weights (preset_id, factor, weight) VALUES (:pid, :factor, :weight)
             ON CONFLICT (preset_id, factor) DO UPDATE SET weight = EXCLUDED.weight"""),
