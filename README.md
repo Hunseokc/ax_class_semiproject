@@ -83,10 +83,6 @@ uvicorn app.main:app --reload
 - 환율·지수·종목 일봉·밸류에이션·점수는 **작업 종류별 `REFRESH_TTL_HOURS`(기본 4시간)에 최대 1회**만 외부 호출합니다.
 - 사이드바 새로고침(`POST /api/v1/market/refresh`)과 `python -m app.ingest refresh`는 TTL 이내 작업을 `SKIPPED`로 기록하고 외부 호출 없이 현재 상태를 돌려줍니다.
 - 환율은 TTL이 지났을 때 한 번만 조회해 저장하며(동시 요청은 advisory lock으로 한 번만), 실패하면 마지막 값과 `fx_stale: true`를 응답합니다.
-- 주기 실행이 필요하면 cron 예시:
-```cron
-0 */4 * * * cd /path/to/ax_semi && .venv/bin/python -m app.ingest refresh >> data/refresh.log 2>&1
-```
 
 ## 5. 테스트
 ```bash
