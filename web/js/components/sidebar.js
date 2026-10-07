@@ -16,7 +16,7 @@ export function mountSidebar(active) {
   const aside = document.getElementById("sidebar");
   aside.setAttribute("aria-label", "주 메뉴");
   aside.replaceChildren(
-    h('<a class="brand" href="/" aria-label="대시보드 홈"><span class="brand__dots"><i></i><i></i><i></i><i></i></span>Stock Board</a>'),
+    h('<a class="brand" href="/" aria-label="대시보드 홈"><span class="brand__dots"><i></i><i></i><i></i><i></i></span>StockMind</a>'),
     h(`<nav class="nav">${NAV.map((n) => `
       <a class="nav__item" href="${n.href}" ${n.key === active ? 'aria-current="page"' : ""}>
         <span class="nav__icon-wrap"><span class="nav__icon">${n.icon}</span></span><span>${n.label}</span></a>`).join("")}

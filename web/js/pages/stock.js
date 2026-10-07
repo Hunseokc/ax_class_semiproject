@@ -21,7 +21,7 @@ const money = (v, cur, compact = true) => (cur === "USD" ? usd(v, { compact }) :
 
 // ---------------------------------------------------------------- 헤더
 function renderHeader(s) {
-  document.title = `${s.name} (${s.ticker}) · Stock Board`;
+  document.title = `${s.name} (${s.ticker}) · StockMind`;
   const el = h(`<header class="stock-head">
       <div class="stock-head__id">
         <p class="subtle">${esc(s.ticker)} ${marketBadge(s.market, s.country)} ${s.groups.map((g) => `<span class="badge badge--market">${esc(g.name)}</span>`).join(" ")}</p>
