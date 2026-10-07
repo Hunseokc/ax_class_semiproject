@@ -25,8 +25,8 @@
 | 시장·갱신 | POST | `/market/refresh` | 환율·지수·증분 일봉·밸류에이션·점수 갱신 (작업별 TTL 이내면 SKIPPED) | - | 200 · 404/409/422 |
 | 시장·갱신 | GET | `/market/refresh/status` | 갱신 상태 조회 — 외부 호출 없음 (사이드바 '마지막 갱신 시각' 표시용) | - | 200 · 404/409/422 |
 | 종목 | GET | `/peer-groups` | 경쟁 그룹 목록 (리스트 필터용) | - | 200 · 404/409/422 |
-| 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 검색, 프리셋별 매력도) | country, sort, order, group, q, limit, offset, preset | 200 · 404/409/422 |
-| 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도 | preset | 200 · 404/409/422 |
+| 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 검색, 프리셋별 매력도). 기본은 노출 종목만, q가 있으면 매력도 비교군도(`coverage`) | country, sort, order, group, q, limit, offset, preset | 200 · 404/409/422 |
+| 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도. 비교군 종목이면 상세 데이터 수집을 예약하고 `detail_status`(ready/loading/failed) | preset | 200 · 404/409/422 |
 | 종목 | GET | `/stocks/{market}/{ticker}/candles` | 기간 일봉 | range | 200 · 404/409/422 |
 | 종목 | GET | `/stocks/{market}/{ticker}/financials` | FY 재무 추이 | limit | 200 · 404/409/422 |
 | 종목 | GET | `/stocks/{market}/{ticker}/disclosures` | 최근 공시 | limit | 200 · 404/409/422 |
@@ -54,6 +54,8 @@
 | 통계 | GET | `/statistics/disclosure-frequency` | 기간별 공시 빈도 (월·분기·주) | period, days | 200 · 404/409/422 |
 
 ※ `GET /market/refresh/status`, `GET /peer-groups`는 화면 요구로 추가한 엔드포인트(ASSUMPTIONS A-48, A-67)
+
+※ 매력도 비교군(benchmark): 점수 비교 표본으로만 쓰는 종목(docs/09 9절). 경쟁 비교(`/peers`, `/peers/chart`)·통계는 노출 종목(+대상 종목) 기준이고, 관심종목에 추가하면(POST `/watchlist`) 상세 데이터 수집을 예약한다.
 
 ※ `preset`: 투자 성향 프리셋 코드(aggressive·growth·balanced·value, 기본 balanced). 없는 코드(옛 quality 포함)는 422 `UNKNOWN_PRESET`(`detail.presets`에 사용 가능한 코드). 경쟁 비교 표(`/peers`)와 포트폴리오 요약의 매력도는 균형 프리셋 기준. 점수 정의는 docs/09.
 

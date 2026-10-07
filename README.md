@@ -59,11 +59,13 @@ python -m app.ingest status           # 테이블별 행 수·기간·최근 실
 | 7 | `disclosures [--days 365]` | 최근 1년 공시(지분공시·Form 4 제외) | DART / SEC |
 
 ### 이미 적재한 DB를 매력도 v2로 바꾸기 (2026-10-07 이전에 만든 DB)
-001을 이미 적용한 DB는 `migrate 002_presets`와 `scores`만 실행하면 됩니다.
+001을 이미 적용한 DB는 `migrate 002_presets`·`migrate 003_benchmark`·`benchmark --reselect`를 실행하면 됩니다(점수는 benchmark가 다시 계산).
 데이터를 지우지 않고 스키마만 바꾼 뒤 점수를 다시 계산합니다. 새로 `init-db`하는 DB는 필요 없습니다.
 ```bash
 python -m app.ingest migrate 001_scoring_v2   # 주 그룹 컬럼·프리셋·지표 테이블 추가, stock_scores 재정의(이전 점수 삭제)
 python -m app.ingest migrate 002_presets      # 투자 성향 개편: quality 제거, aggressive(위험) 추가, sort_order (멱등)
+python -m app.ingest migrate 003_benchmark    # 매력도 비교군 컬럼(coverage·detail_synced_at), 작업 종류 추가 (멱등)
+python -m app.ingest benchmark --reselect     # 비교군 선정 + 평시 데이터 + 점수 (첫 실행 약 8분)
 python -m app.ingest master --offline         # universe.yaml 순서로 주 그룹 다시 지정
 python -m app.ingest scores
 ```
@@ -94,18 +96,30 @@ uvicorn app.main:app --reload
 - 사용자: 인증 없음(단일 사용자·데모 모드). 요청 사용자는 서버의 `get_current_user_id()`가 `DEFAULT_USER_ID`로 정하며, API는 `user_id`를 받지 않습니다. 포트폴리오·관심종목은 소유자만 접근할 수 있고 남의 리소스는 404입니다. 로그인은 2차에서 이 함수를 JWT 검증으로 교체해 도입합니다
 - 오류 응답은 `{"error": {"code", "message", "detail"}}`, 모든 응답에 `X-Request-ID` 헤더
 
-### 갱신 정책 (앱 내부 스케줄러 없음)
+### 매력도 비교군 (docs/09 9절)
+화면에 보이는 25종목 외에, 점수 비교 표본으로 국가별·섹터별 시가총액 상위 종목(섹터당 최대 10개, 현재 121종목)을 함께 관리합니다.
+- 평시에는 점수 계산에 필요한 데이터(일봉 400일·최신 밸류에이션·FY 3개년)만 하루 한 번 갱신합니다.
+- 주식 리스트에서 검색하면 비교군 종목도 나오고(배지 "비교군"), 상세를 열거나 관심종목에 담을 때 공시·2년 시세·5개년 재무를 받습니다.
+```bash
+python -m app.ingest benchmark            # 오늘 갱신(30일마다 다시 선정), --reselect: 지금 다시 선정
+python -m app.ingest hydrate 042700       # 비교군 종목 상세 데이터 받기
+```
+
+### 갱신 정책 (앱 안 스케줄러)
 - 환율·지수·종목 일봉·밸류에이션·점수는 **작업 종류별 `REFRESH_TTL_HOURS`(기본 4시간)에 최대 1회**만 외부 호출합니다.
 - 사이드바 새로고침(`POST /api/v1/market/refresh`)과 `python -m app.ingest refresh`는 TTL 이내 작업을 `SKIPPED`로 기록하고 외부 호출 없이 현재 상태를 돌려줍니다.
 - 환율은 TTL이 지났을 때 한 번만 조회해 저장하며(동시 요청은 advisory lock으로 한 번만), 실패하면 마지막 값과 `fx_stale: true`를 응답합니다.
-- 주기 실행이 필요하면 cron 예시:
+- **앱 안 스케줄러**(`SCHEDULER_ENABLED=true`, 기본): 서버가 떠 있는 동안 5분마다 확인해 노출 종목(+관심종목·포트폴리오 종목)을 4시간 TTL로 갱신하고, 비교군은 매일 07:00(KST) 이후 한 번 갱신합니다. 실패하면 30분(갱신)·60분(비교군) 간격으로만 다시 시도하고, 여러 프로세스가 동시에 돌려도 DB 잠금으로 한 번만 실행됩니다.
+- DART는 분당 100회 이상 호출하면 이용이 제한될 수 있어, 60초에 90회 이하로 호출합니다.
+- 서버를 띄우지 않는 환경이면 `SCHEDULER_ENABLED=false`로 두고 cron 예시처럼 돌립니다:
 ```cron
 0 */4 * * * cd /path/to/ax_semi && .venv/bin/python -m app.ingest refresh >> data/refresh.log 2>&1
+10 7 * * *  cd /path/to/ax_semi && .venv/bin/python -m app.ingest benchmark >> data/benchmark.log 2>&1
 ```
 
 ## 5. 테스트
 ```bash
-pytest -q                              # 125 passed — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
+pytest -q                              # 142 passed — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
 python -m app.ingest explain           # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
 ```
 DB 제약·전처리·TTL 갱신(외부 호출 횟수)·분석 SQL 손계산·포트폴리오 명세 시나리오·동시성·화면 흐름을 검증합니다. 결과는 [docs/07](docs/07_테스트_결과서.md).

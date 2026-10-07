@@ -211,7 +211,7 @@ erDiagram
 | 영역 | 테이블 | 설명 | PK | 행 수 |
 |---|---|---|---|---|
 | 마스터 | markets | 시장(통화·국가·시간대) | market_id | 4 |
-| 마스터 | stocks | 종목 | stock_id | 25 |
+| 마스터 | stocks | 종목 (노출 + 매력도 비교군) | stock_id | 146 (노출 25 + 비교군 121, 2026-10-07) |
 | 마스터 | peer_groups | 경쟁 그룹 | group_id | 8 |
 | 마스터 | peer_group_members | 종목↔그룹 N:M, 주 그룹 표시 | (group_id, stock_id) | 25 (주 그룹 25) |
 | 시계열 | daily_prices | 종목 일봉(수정주가) | (stock_id, trade_date) | 12,276 |
@@ -256,9 +256,11 @@ erDiagram
 | name_en | character varying(128) | Y |  |  | 영문 이름 |
 | corp_code | character varying(16) | Y |  |  | OpenDART 고유번호 (KR) |
 | cik | character varying(10) | Y |  |  | SEC CIK 10자리 (US) |
-| is_active | boolean | N | true |  | 수집 대상 여부 |
+| is_active | boolean | N | true |  | 수집·점수 계산 대상 여부 (false면 데이터만 보존) |
+| coverage | character varying(10) | N | 'featured' |  | featured(화면 노출, 4시간 갱신) / benchmark(매력도 비교군, 1일 갱신) |
+| detail_synced_at | timestamp with time zone | Y |  |  | 비교군 종목 상세(공시·2년 일봉·5개년 재무)를 마지막으로 받은 시각 |
 
-제약: `UNIQUE (market_id, ticker)`
+제약: `UNIQUE (market_id, ticker)` / `CHECK (coverage IN ('featured','benchmark'))`
 
 #### `peer_groups`
 
@@ -495,7 +497,7 @@ erDiagram
 | started_at | timestamp with time zone | N |  |  | 시작 시각 |
 | finished_at | timestamp with time zone | Y |  |  | 종료 시각 |
 
-제약: `CHECK (((job_type)::text = ANY ((ARRAY['PRICES'::character varying, 'INDICES'::character varying, 'FX'::character varying, 'VALUATION'::character varying, 'FINANCIALS'::character varying, 'DISCLOSURES'::character varying, 'SCORES'::character varying, 'MASTER'::character varying])::text[])))` / `CHECK (((status)::text = ANY ((ARRAY['SUCCESS'::character varying, 'FAILED'::character varying, 'SKIPPED'::character varying])::text[])))` / `CHECK ((rows_loaded >= 0))` / `CHECK (((finished_at IS NULL) OR (finished_at >= started_at)))`
+제약: `CHECK (((job_type)::text = ANY ((ARRAY['PRICES'::character varying, 'INDICES'::character varying, 'FX'::character varying, 'VALUATION'::character varying, 'FINANCIALS'::character varying, 'DISCLOSURES'::character varying, 'SCORES'::character varying, 'MASTER'::character varying, 'BENCHMARK'::character varying, 'HYDRATE'::character varying])::text[])))` / `CHECK (((status)::text = ANY ((ARRAY['SUCCESS'::character varying, 'FAILED'::character varying, 'SKIPPED'::character varying])::text[])))` / `CHECK ((rows_loaded >= 0))` / `CHECK (((finished_at IS NULL) OR (finished_at >= started_at)))`
 
 ## 4. 정규화
 
