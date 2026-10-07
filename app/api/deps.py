@@ -21,6 +21,11 @@ def get_engine_dep() -> Engine:
     return get_engine()
 
 
+def get_current_user_id() -> int:
+    """1차는 단일 사용자(데모) 모드라 설정값을 그대로 쓴다. 2차에서 JWT 검증으로 교체한다."""
+    return get_settings().default_user_id
+
+
 def get_db(engine: Engine = Depends(get_engine_dep)) -> Iterator[Session]:
     db = session_factory(engine)()
     try:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Response
 
-from app.api.deps import get_portfolio_service
+from app.api.deps import get_current_user_id, get_portfolio_service
 from app.models import Portfolio, PortfolioItem
 from app.schemas.api import (ItemCreate, ItemInput, ItemOut, ItemsOut, PortfolioCreate, PortfolioOut,
                              PortfolioUpdate, SummaryOut)
@@ -30,12 +30,13 @@ def _item_out(item: PortfolioItem) -> dict:
 
 
 @router.post("", response_model=PortfolioOut, status_code=201, summary="포트폴리오 생성")
-def create_portfolio(body: PortfolioCreate, svc: PortfolioService = Depends(get_portfolio_service)):
-    return _pf_out(svc, svc.create(body.user_id, body.name, body.seed_krw))
+def create_portfolio(body: PortfolioCreate, user_id: int = Depends(get_current_user_id),
+                     svc: PortfolioService = Depends(get_portfolio_service)):
+    return _pf_out(svc, svc.create(user_id, body.name, body.seed_krw))
 
 
 @router.get("", response_model=list[PortfolioOut], summary="사용자의 포트폴리오 목록")
-def list_portfolios(user_id: int = 1, svc: PortfolioService = Depends(get_portfolio_service)):
+def list_portfolios(user_id: int = Depends(get_current_user_id), svc: PortfolioService = Depends(get_portfolio_service)):
     return [_pf_out(svc, pf) for pf in svc.list(user_id)]
 
 

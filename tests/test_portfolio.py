@@ -10,8 +10,8 @@ from tests.conftest import D
 API = "/api/v1/portfolios"
 
 
-def create(client, name="테스트", seed=10_000_000, user_id=1):
-    r = client.post(API, json={"user_id": user_id, "name": name, "seed_krw": seed})
+def create(client, name="테스트", seed=10_000_000):
+    r = client.post(API, json={"name": name, "seed_krw": seed})
     assert r.status_code == 201, r.text
     return r.json()["portfolio_id"]
 
@@ -110,15 +110,17 @@ def test_duplicate_item_and_not_found(client):
     assert client.delete(f"{API}/{other}/items/{first['item_id']}").status_code == 404
 
 
-def test_portfolio_validation_and_duplicate_name(client):
+def test_portfolio_validation_and_duplicate_name(client, as_user):
     assert client.post(API, json={"name": "x", "seed_krw": 0}).status_code == 422
     assert client.post(API, json={"name": "x", "seed_krw": -1}).status_code == 422
     assert client.post(API, json={"name": "", "seed_krw": 100}).status_code == 422
-    assert client.post(API, json={"user_id": 99, "name": "x", "seed_krw": 100}).status_code == 404
     create(client, name="같은이름")
     r = client.post(API, json={"name": "같은이름", "seed_krw": 100})
     assert r.status_code == 409 and r.json()["error"]["code"] == "DUPLICATE_PORTFOLIO_NAME"
-    create(client, name="같은이름", user_id=2)                              # 사용자가 다르면 허용
+    as_user(2)
+    create(client, name="같은이름")                                         # 사용자가 다르면 허용
+    as_user(99)
+    assert client.post(API, json={"name": "x", "seed_krw": 100}).status_code == 404
 
 
 def test_empty_summary(client):

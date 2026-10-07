@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     dart_api_key: str = ""
     sec_user_agent: str = ""
     log_level: str = "INFO"
+    default_user_id: int = Field(default=1, ge=1)
 
 
 @lru_cache

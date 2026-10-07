@@ -199,7 +199,6 @@ class DisclosuresOut(Schema):
 
 # ------------------------------------------------------------------ 관심종목
 class WatchlistCreate(Schema):
-    user_id: int = 1
     market: str = Field(examples=["KOSPI"])
     ticker: str = Field(examples=["005930"])
 
@@ -211,7 +210,6 @@ class WatchlistOrderItem(Schema):
 
 
 class WatchlistOrder(Schema):
-    user_id: int = 1
     items: list[WatchlistOrderItem] = Field(min_length=1)
 
 
@@ -239,7 +237,6 @@ class WatchlistOut(Schema):
 
 # ------------------------------------------------------------------ 포트폴리오
 class PortfolioCreate(Schema):
-    user_id: int = 1
     name: str = Field(min_length=1, max_length=100, examples=["반도체 집중"])
     seed_krw: Decimal = Field(gt=0, max_digits=20, decimal_places=0, examples=[10_000_000])
 

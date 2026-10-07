@@ -22,16 +22,25 @@ def test_crud_flow(client):
     assert [c["ticker"] for c in client.get(API).json()["items"]] == ["AAPL"]
 
 
-def test_not_found_and_validation(client):
+def test_not_found_and_validation(client, as_user):
     assert client.post(API, json={"market": "KOSPI", "ticker": "999999"}).status_code == 404
-    assert client.post(API, json={"user_id": 99, "market": "KOSPI", "ticker": "005930"}).status_code == 404
-    assert client.get(f"{API}?user_id=99").status_code == 404
     assert client.post(API, json={"market": "KOSPI"}).status_code == 422
     r = client.patch(f"{API}/order", json={"items": [{"market": "KOSPI", "ticker": "000660", "sort_order": 1}]})
     assert r.status_code == 404 and r.json()["error"]["code"] == "WATCHLIST_ITEM_NOT_FOUND"
+    as_user(99)
+    assert client.post(API, json={"market": "KOSPI", "ticker": "005930"}).status_code == 404
+    assert client.get(API).json()["error"]["code"] == "USER_NOT_FOUND"
 
 
-def test_watchlists_are_per_user(client):
+def test_user_id_in_request_is_ignored(client):
     client.post(API, json={"user_id": 2, "market": "KOSPI", "ticker": "005930"})
+    assert client.get(f"{API}?user_id=2").json()["user_id"] == 1
+    assert client.get(API).json()["count"] == 1
+
+
+def test_watchlists_are_per_user(client, as_user):
+    as_user(2)
+    client.post(API, json={"market": "KOSPI", "ticker": "005930"})
+    assert client.get(API).json()["count"] == 1
+    as_user(1)
     assert client.get(API).json()["count"] == 0
-    assert client.get(f"{API}?user_id=2").json()["count"] == 1

@@ -102,6 +102,14 @@ def client(engine, providers):
     app.dependency_overrides.clear()
 
 
+@pytest.fixture
+def as_user(client):
+    """이후 요청을 지정한 사용자로 보낸다 (2차에서 JWT가 정할 사용자를 대신함)."""
+    def _set(user_id: int) -> None:
+        app.dependency_overrides[deps.get_current_user_id] = lambda: user_id
+    return _set
+
+
 def scalar(engine, sql: str, **params):
     with engine.connect() as conn:
         return conn.execute(text(sql), params).scalar()

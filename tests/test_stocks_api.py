@@ -41,13 +41,15 @@ def test_filters_and_pagination(client):
     assert empty["items"] == [] and empty["total"] == 0
 
 
-def test_is_watched_flag(client, engine):
+def test_is_watched_flag(client, engine, as_user):
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO watchlist_items (user_id, stock_id) VALUES (1, 3)"))
     items = {x["ticker"]: x["is_watched"] for x in client.get(f"{API}/stocks").json()["items"]}
     assert items == {"AAPL": True, "NVDA": False, "005930": False, "000660": False}
-    other = {x["ticker"]: x["is_watched"] for x in client.get(f"{API}/stocks?user_id=2").json()["items"]}
+    as_user(2)
+    other = {x["ticker"]: x["is_watched"] for x in client.get(f"{API}/stocks").json()["items"]}
     assert not any(other.values())
+    assert client.get(f"{API}/stocks/NASDAQ/AAPL").json()["is_watched"] is False
 
 
 def test_stock_detail_and_404(client):

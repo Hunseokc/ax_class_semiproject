@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_fx_service
+from app.api.deps import get_current_user_id, get_db, get_fx_service
 from app.core.errors import NotFound, Unprocessable
 from app.queries import raw, sql
 from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, StockDetailOut, StockListOut
@@ -38,7 +38,7 @@ def list_stocks(
     q: str | None = Query(None, min_length=1, max_length=50, description="이름·티커 검색"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    user_id: int = 1,
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     if sort == "volume" and country is None:
@@ -53,7 +53,7 @@ def list_stocks(
 
 
 @router.get("/{market}/{ticker}", response_model=StockDetailOut, summary="종목 기본 정보 + 최신 시세·밸류에이션·매력도")
-def stock_detail(market: str, ticker: str, user_id: int = 1, db: Session = Depends(get_db),
+def stock_detail(market: str, ticker: str, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db),
                  fx_service: FxService = Depends(get_fx_service)):
     row = db.execute(sql("stock_detail"), {"market": market.upper(), "ticker": ticker.upper(),
                                            "user_id": user_id}).mappings().first()
