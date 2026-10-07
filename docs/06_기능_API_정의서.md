@@ -1,6 +1,7 @@
 # 06. 기능·API 정의서
 
 - 기준: 실행 중인 서버의 OpenAPI(`/openapi.json`)와 **실제 호출 응답**(생성 시각 2026-10-06T22:11:16+09:00, 운영 DB). 배열은 앞 2개만 표시
+- 매력도 관련 예시(`/analysis`, `/scoring/presets`, 없는 프리셋 422)는 다중 팩터 모델 적용 후 2026-10-07 실제 호출 응답
 - Swagger UI: `http://localhost:8000/docs`
 
 ## 1. 공통 규칙
@@ -24,12 +25,12 @@
 | 시장·갱신 | POST | `/market/refresh` | 환율·지수·증분 일봉·밸류에이션·점수 갱신 (작업별 TTL 이내면 SKIPPED) | - | 200 · 404/409/422 |
 | 시장·갱신 | GET | `/market/refresh/status` | 갱신 상태 조회 — 외부 호출 없음 (사이드바 '마지막 갱신 시각' 표시용) | - | 200 · 404/409/422 |
 | 종목 | GET | `/peer-groups` | 경쟁 그룹 목록 (리스트 필터용) | - | 200 · 404/409/422 |
-| 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 검색) | country, sort, order, group, q, limit, offset | 200 · 404/409/422 |
-| 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도 | - | 200 · 404/409/422 |
+| 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 검색, 프리셋별 매력도) | country, sort, order, group, q, limit, offset, preset | 200 · 404/409/422 |
+| 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도 | preset | 200 · 404/409/422 |
 | 종목 | GET | `/stocks/{market}/{ticker}/candles` | 기간 일봉 | range | 200 · 404/409/422 |
 | 종목 | GET | `/stocks/{market}/{ticker}/financials` | FY 재무 추이 | limit | 200 · 404/409/422 |
 | 종목 | GET | `/stocks/{market}/{ticker}/disclosures` | 최근 공시 | limit | 200 · 404/409/422 |
-| 관심종목 | GET | `/watchlist` | 관심종목 카드 목록 (정렬순) | - | 200 · 404/409/422 |
+| 관심종목 | GET | `/watchlist` | 관심종목 카드 목록 (정렬순, 프리셋별 매력도) | preset | 200 · 404/409/422 |
 | 관심종목 | POST | `/watchlist` | 관심종목 추가 | body: market, ticker | 201 · 404/409/422 |
 | 관심종목 | PATCH | `/watchlist/order` | 관심종목 정렬 순서 변경 | body: items | 200 · 404/409/422 |
 | 관심종목 | DELETE | `/watchlist/{market}/{ticker}` | 관심종목 삭제 | - | 204 · 404/409/422 |
@@ -43,7 +44,8 @@
 | 모의 포트폴리오 | PUT | `/portfolios/{portfolio_id}/items/{item_id}` | 담은 종목 수정 (기준가·환율을 현재값으로 갱신) | body: mode, value, memo | 200 · 404/409/422 |
 | 모의 포트폴리오 | DELETE | `/portfolios/{portfolio_id}/items/{item_id}` | 담은 종목 삭제 | - | 204 · 404/409/422 |
 | 모의 포트폴리오 | GET | `/portfolios/{portfolio_id}/summary` | 요약: 사용·잔여·비중·가중 매력도·평가손익(환 효과 분리) | - | 200 · 404/409/422 |
-| 분석 | GET | `/stocks/{market}/{ticker}/analysis` | 수치 분석(v_stock_metrics) + 매력도(팩터별·data_quality) | - | 200 · 404/409/422 |
+| 분석 | GET | `/stocks/{market}/{ticker}/analysis` | 수치 분석(v_stock_metrics) + 매력도(프리셋별 점수·팩터 기여도·지표 원값/Z·국가 내 순위·백분위·데이터 충족도) | preset | 200 · 404/409/422 |
+| 분석 | GET | `/scoring/presets` | 매력도 가중치 프리셋과 팩터별 가중치 | - | 200 |
 | 분석 | GET | `/stocks/{market}/{ticker}/peers` | 경쟁 그룹별 비교 표 (그룹 내 RANK·AVG, 구성원 1명 그룹은 비교 대상 없음) | - | 200 · 404/409/422 |
 | 분석 | GET | `/stocks/{market}/{ticker}/peers/chart` | 경쟁 그룹 기준일=100 가격 추이 (합집합 날짜 + 휴장일 null) | range, group_id | 200 · 404/409/422 |
 | 통계 | GET | `/statistics/overview` | 데이터 개요: 행 수·기간·마지막 갱신 | - | 200 · 404/409/422 |
@@ -52,6 +54,8 @@
 | 통계 | GET | `/statistics/disclosure-frequency` | 기간별 공시 빈도 (월·분기·주) | period, days | 200 · 404/409/422 |
 
 ※ `GET /market/refresh/status`, `GET /peer-groups`는 화면 요구로 추가한 엔드포인트(ASSUMPTIONS A-48, A-67)
+
+※ `preset`: 매력도 가중치 프리셋 코드(balanced·value·growth·quality, 기본 balanced). 없는 코드는 422 `UNKNOWN_PRESET`(`detail.presets`에 사용 가능한 코드). 경쟁 비교 표(`/peers`)와 포트폴리오 요약의 매력도는 균형 프리셋 기준. 점수 정의는 docs/09.
 
 ## 3. 요청·응답 예시 (실제 호출)
 
@@ -195,6 +199,7 @@
   "offset": 0,
   "sort": "volume",
   "order": "desc",
+  "preset": "balanced",
   "fx_rate_at": "2026-10-06T12:16:55.504460Z",
   "items": [
     {
@@ -272,6 +277,7 @@
   "shares_outstanding": 5846278608,
   "score": 51.75,
   "score_as_of": "2026-10-06",
+  "preset": "balanced",
   "groups": [
     {
       "group_id": 1,
@@ -379,7 +385,7 @@
 }
 ```
 ### 3-3. 분석·경쟁 비교
-#### `GET /api/v1/stocks/KOSPI/005930/analysis`
+#### `GET /api/v1/stocks/KOSPI/005930/analysis?preset=growth`
 응답 `200`:
 ```json
 {
@@ -387,74 +393,134 @@
   "ticker": "005930",
   "currency": "KRW",
   "as_of": "2026-10-06",
-  "valuation_as_of": "2026-10-06",
+  "valuation_as_of": "2026-10-07",
   "fin_period_end": "2025-12-31",
   "accounting_std": "K-IFRS",
-  "fx_usd_krw": 1339.08,
-  "fx_rate_at": "2026-10-06T12:16:55.504460Z",
+  "fx_usd_krw": 1339.83,
+  "fx_rate_at": "2026-10-07T02:18:55.125990Z",
   "metrics": {
     "return_1w": -0.007273,
     "return_1m": 0.068493,
     "return_3m": -0.141509,
-    "return_6m": 0.413775,
-    "return_1y": 2.067416,
-    "volatility_1y": 0.752514,
-    "max_drawdown_1y": -0.428966,
-    "ma20": 266925,
-    "ma60": 258483.3333,
-    "ma120": 271808.3333,
-    "ma120_gap": 0.004384,
-    "high_52w": 374500,
-    "low_52w": 90200,
-    "position_52w": 0.642983,
-    "volume": 12895120,
-    "avg_volume_20d": 16612227,
-    "volume_ratio_20d": 0.776243,
-    "per": 41.18,
-    "pbr": 4.25,
-    "eps": 6605,
-    "bps": 63997,
-    "market_cap": 1590187781376000,
-    "market_cap_krw": 1590187781376000,
-    "operating_margin": 0.130696,
-    "roe": 0.104312,
-    "debt_ratio": 0.307843,
-    "revenue_yoy": 0.108801,
-    "operating_income_yoy": 0.332308
+    "…": "외 25개 (수치 분석 지표, 이전과 같음)"
   },
   "attractiveness": {
-    "as_of": "2026-10-06",
-    "score": 51.75,
+    "as_of": "2026-10-07",
+    "preset": {
+      "code": "growth",
+      "name": "성장형",
+      "description": "매출·이익 성장과 추세에 비중을 둔다"
+    },
+    "score": 73.13,
+    "composite": 0.4865,
+    "factor_coverage": 5,
+    "factor_total": 5,
+    "rank": {
+      "country": "KR",
+      "position": 5,
+      "total": 16,
+      "percentile": 73.3
+    },
     "factors": {
-      "valuation": {
-        "score": 32.5,
-        "weight": 30,
+      "value": {
+        "score": -0.0134,
+        "weight": 0.1,
+        "effective_weight": 0.1,
+        "contribution": -0.0013,
+        "available": true
+      },
+      "quality": {
+        "score": 0.0025,
+        "weight": 0.2,
+        "effective_weight": 0.2,
+        "contribution": 0.0005,
         "available": true
       },
       "growth": {
-        "score": 53.33,
-        "weight": 25,
+        "score": -0.1287,
+        "weight": 0.4,
+        "effective_weight": 0.4,
+        "contribution": -0.0515,
         "available": true
       },
-      "profitability": {
-        "score": 66.67,
-        "weight": 25,
+      "safety": {
+        "score": 0.2022,
+        "weight": 0.05,
+        "effective_weight": 0.05,
+        "contribution": 0.0101,
         "available": true
       },
       "momentum": {
-        "score": 60,
-        "weight": 20,
+        "score": 2.1149,
+        "weight": 0.25,
+        "effective_weight": 0.25,
+        "contribution": 0.5287,
         "available": true
       }
     },
+    "metrics": [
+      {
+        "metric": "earnings_yield",
+        "label": "이익수익률 E/P",
+        "factor": "value",
+        "direction": 1,
+        "raw_value": 0.024194139194139194,
+        "z_raw": -0.0649,
+        "z_adj": 0.1315
+      },
+      {
+        "metric": "book_yield",
+        "label": "B/P",
+        "factor": "value",
+        "direction": 1,
+        "raw_value": 0.23442124542124543,
+        "z_raw": -0.3197,
+        "z_adj": -0.1582
+      },
+      "… 외 7개"
+    ],
     "data_quality": {
-      "partition": "KR",
-      "unavailable": {},
-      "missing_inputs": []
+      "partition": "KR"
     },
-    "weights_version": "v1"
+    "method": "지표별로 같은 시장 안 로버스트 Z(중앙값·MAD)를 구해 ±3으로 자르고, 주 경쟁 그룹 평균을 축소 추정으로 빼 섹터 중립화한 뒤 팩터 평균 → 프리셋 가중 평균 → 시장 안에서 다시 표준화해 100·Φ(z)로 0~100 변환합니다."
   },
-  "disclaimer": "유니버스(25종목) 안에서 같은 시장끼리 비교한 상대 평가이며 투자 권유가 아닙니다."
+  "disclaimer": "매력도는 유니버스(25종목) 안에서 같은 시장끼리 비교한 상대적 위치를 나타내는 팩터 점수이며, 수익률 예측이나 투자 권유가 아닙니다."
+}
+```
+#### `GET /api/v1/scoring/presets`
+응답 `200`:
+```json
+{
+  "note": "공개된 일반적 투자 스타일을 단순화한 가중치이며 특정 인물의 판단이 아닙니다.",
+  "presets": [
+    {
+      "code": "balanced",
+      "name": "균형",
+      "description": "다섯 팩터를 같은 비중으로 본다",
+      "is_default": true,
+      "weights": {
+        "value": 0.2,
+        "quality": 0.2,
+        "growth": 0.2,
+        "safety": 0.2,
+        "momentum": 0.2
+      }
+    },
+    {
+      "code": "value",
+      "name": "가치형",
+      "description": "이익·자산 대비 싼 종목에 비중을 둔다",
+      "is_default": false,
+      "weights": {
+        "value": 0.4,
+        "quality": 0.2,
+        "growth": 0.1,
+        "safety": 0.2,
+        "momentum": 0.1
+      }
+    },
+    "… 외 2개"
+  ]
 }
 ```
 #### `GET /api/v1/stocks/KOSPI/005930/peers`
@@ -633,6 +699,7 @@
 ```json
 {
   "user_id": 1,
+  "preset": "balanced",
   "count": 8,
   "items": [
     {
@@ -733,6 +800,7 @@
 ```json
 {
   "user_id": 1,
+  "preset": "balanced",
   "count": 9,
   "items": [
     {
@@ -1253,6 +1321,23 @@
   }
 }
 ```
+#### `GET /api/v1/stocks?preset=buffett — 없는 프리셋 → 422`
+응답 `422`:
+```json
+{
+  "error": {
+    "code": "UNKNOWN_PRESET",
+    "message": "알 수 없는 매력도 프리셋입니다: buffett",
+    "detail": {
+      "presets": [
+        "balanced",
+        "value",
+        "… 외 2개"
+      ]
+    }
+  }
+}
+```
 #### `POST /api/v1/portfolios` — 스키마 검증 → 422
 요청 본문:
 ```json
@@ -1286,15 +1371,17 @@
 | 공통 | 모든 화면 | 사이드바 마지막 갱신·새로고침 | `GET /market/refresh/status`, `POST /market/refresh` |
 | 대시보드 홈 | `/` | 지수 카드 5개 | `GET /market/indices` |
 | | | USD/KRW 카드 | `GET /market/fx` |
-| | | 내 관심종목 카드 | `GET /watchlist` |
+| | | 내 관심종목 카드 | `GET /watchlist?preset=` (리스트에서 고른 프리셋) |
 | | | 거래량 상위 5 (국내/미국) | `GET /stocks?country=&sort=volume&limit=5` |
-| 주식 리스트 | `/stocks` | 순위 리스트·탭·정렬·검색 | `GET /stocks?country=&sort=&order=&group=&q=` |
+| 주식 리스트 | `/stocks` | 순위 리스트·탭·정렬·검색 | `GET /stocks?country=&sort=&order=&group=&q=&preset=` |
+| | | 매력도 프리셋 선택 | `GET /scoring/presets` |
 | | | 경쟁 그룹 필터 | `GET /peer-groups` |
 | | | ★ 토글 | `POST /watchlist`, `DELETE /watchlist/{market}/{ticker}` |
 | | | 담기 모달 | `GET /portfolios`, `GET /market/fx`(USD), `POST /portfolios/{id}/items` |
 | 종목 상세 | `/stocks/{market}/{ticker}` | 헤더·★·담기 | `GET /stocks/{market}/{ticker}` (+ 위 ★·담기 API) |
 | | | 가격 차트 (1M~1Y) | `GET /stocks/{market}/{ticker}/candles?range=` |
-| | | 핵심 지표·매력도·수치 분석 | `GET /stocks/{market}/{ticker}/analysis` |
+| | | 핵심 지표·매력도·수치 분석 | `GET /stocks/{market}/{ticker}/analysis?preset=` |
+| | | 매력도 프리셋 탭 | `GET /scoring/presets` |
 | | | 재무 추이 | `GET /stocks/{market}/{ticker}/financials` |
 | | | 경쟁 비교 표·막대 | `GET /stocks/{market}/{ticker}/peers` |
 | | | 기준일=100 차트 | `GET /stocks/{market}/{ticker}/peers/chart?range=&group_id=` |

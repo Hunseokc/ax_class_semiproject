@@ -1,7 +1,8 @@
 # 05. ERD 및 DB 설계서
 
 - DDL 원문: `db/schema.sql` → `db/indexes.sql` → `db/views.sql` 순서로 실행
-- DBMS: PostgreSQL 16 / 테이블 17개, VIEW 3개, 보조 인덱스 10개(명세 10개 − 중복 1개 + 추가 1개), 트리거 2개
+- DBMS: PostgreSQL 16 / 테이블 20개, VIEW 3개, 보조 인덱스 10개(명세 10개 − 중복 1개 + 추가 1개), 부분 UNIQUE 인덱스 1개(주 그룹 제약), 트리거 2개
+- 매력도 테이블(`scoring_presets`·`scoring_weights`·`stock_metric_values`·`stock_scores`, `peer_group_members.is_primary`)은 다중 팩터 모델로 바꾸며 추가·재정의했다(2026-10-07, `db/migrations/001_scoring_v2.sql`, 계산 정의는 `docs/09`).
 - 3절 테이블 정의는 테스트 DB에 DDL을 실제 적용한 뒤 시스템 카탈로그(`pg_attribute`, `pg_constraint`)에서 생성했다.
 
 ## 1. ERD
@@ -16,7 +17,10 @@ erDiagram
     stocks ||--o{ valuation_snapshots : "밸류에이션"
     stocks ||--o{ financial_statements : "재무"
     stocks ||--o{ disclosures : "공시"
+    stocks ||--o{ stock_metric_values : "지표 원값·Z"
     stocks ||--o{ stock_scores : "매력도"
+    scoring_presets ||--o{ scoring_weights : "가중치"
+    scoring_presets ||--o{ stock_scores : "프리셋"
     indices ||--o{ index_daily_prices : "지수 일봉"
     users ||--o{ watchlist_items : ""
     stocks ||--o{ watchlist_items : ""
@@ -50,6 +54,7 @@ erDiagram
     peer_group_members {
         int group_id PK,FK
         int stock_id PK,FK
+        boolean is_primary
     }
     daily_prices {
         int stock_id PK,FK
@@ -150,16 +155,39 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at
     }
+    scoring_presets {
+        smallint preset_id PK
+        varchar code UK
+        varchar name
+        text description
+    }
+    scoring_weights {
+        smallint preset_id PK,FK
+        varchar factor PK
+        numeric weight
+    }
+    stock_metric_values {
+        int stock_id PK,FK
+        date as_of PK
+        varchar metric PK
+        varchar factor
+        numeric raw_value
+        numeric z_raw
+        numeric z_adj
+    }
     stock_scores {
         int stock_id PK,FK
         date as_of PK
-        numeric score
-        numeric valuation_score
+        smallint preset_id PK,FK
+        numeric value_score
+        numeric quality_score
         numeric growth_score
-        numeric profitability_score
+        numeric safety_score
         numeric momentum_score
+        numeric composite
+        numeric score
+        smallint factor_coverage
         jsonb data_quality
-        varchar weights_version
     }
     ingestion_logs {
         int log_id PK
@@ -184,7 +212,7 @@ erDiagram
 | 마스터 | markets | 시장(통화·국가·시간대) | market_id | 4 |
 | 마스터 | stocks | 종목 | stock_id | 25 |
 | 마스터 | peer_groups | 경쟁 그룹 | group_id | 8 |
-| 마스터 | peer_group_members | 종목↔그룹 N:M | (group_id, stock_id) | 25 |
+| 마스터 | peer_group_members | 종목↔그룹 N:M, 주 그룹 표시 | (group_id, stock_id) | 25 (주 그룹 25) |
 | 시계열 | daily_prices | 종목 일봉(수정주가) | (stock_id, trade_date) | 12,276 |
 | 시계열 | valuation_snapshots | PER·PBR·시총 스냅샷 | (stock_id, as_of) | 3,881 (KR 16×242일 + US 9) |
 | 재무 | financial_statements | 재무제표(FY) | fin_id | 125 (25×5) |
@@ -196,7 +224,10 @@ erDiagram
 | 사용자 | watchlist_items | 관심종목 N:M | (user_id, stock_id) | 8 |
 | 사용자 | portfolios | 모의 포트폴리오 | portfolio_id | 2 |
 | 사용자 | portfolio_items | 담은 종목 | item_id | 11 (6 + 5, KRW·USD 혼합) |
-| 파생 | stock_scores | 매력도 점수 스냅샷 | (stock_id, as_of) | 25 (as_of 2026-10-06) |
+| 설정 | scoring_presets | 매력도 가중치 프리셋 | preset_id | 4 |
+| 설정 | scoring_weights | 프리셋별 팩터 가중치 | (preset_id, factor) | 20 (4×5) |
+| 파생 | stock_metric_values | 매력도 지표 원값·Z | (stock_id, as_of, metric) | 225 (25×9, as_of 2026-10-07) |
+| 파생 | stock_scores | 프리셋별 매력도 점수 | (stock_id, as_of, preset_id) | 100 (25×4, as_of 2026-10-07) |
 | 운영 | ingestion_logs | 적재·갱신 로그 | log_id | 적재·갱신마다 증가 |
 
 ## 3. 테이블 정의서
@@ -242,6 +273,9 @@ erDiagram
 |---|---|---|---|---|---|
 | group_id | integer | N |  | PK, FK→peer_groups (CASCADE) | 경쟁 그룹 ID |
 | stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
+| is_primary | boolean | N | false |  | 매력도 섹터 중립화의 주 그룹 여부 |
+
+제약: 부분 UNIQUE 인덱스 `CREATE UNIQUE INDEX ux_pgm_primary ON peer_group_members (stock_id) WHERE is_primary` — 종목당 주 그룹 최대 1개
 
 #### `daily_prices`
 
@@ -391,21 +425,59 @@ erDiagram
 
 제약: `CHECK ((quantity > 0))` / `CHECK ((ref_price > (0)::numeric))` / `CHECK ((ref_fx_rate > (0)::numeric))` / `UNIQUE (portfolio_id, stock_id)`
 
+#### `scoring_presets`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| preset_id | smallint | N | 자동 증가 | PK | 프리셋 ID |
+| code | character varying(20) | N |  | UQ | balanced / value / growth / quality |
+| name | character varying(50) | N |  |  | 화면 이름 (균형·가치형·성장형·퀄리티형) |
+| description | text | Y |  |  | 설명 |
+
+`config/scoring.yaml`에서 적재(init-db·migrate·scores 실행 시). 프리셋별 가중치 합 = 1은 행 간 제약이라 적재 시 검증한다.
+
+#### `scoring_weights`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| preset_id | smallint | N |  | PK, FK→scoring_presets (CASCADE) | 프리셋 ID |
+| factor | character varying(12) | N |  | PK | value / quality / growth / safety / momentum |
+| weight | numeric(4,3) | N |  |  | 가중치 0~1 |
+
+제약: `CHECK (((factor)::text = ANY ((ARRAY['value'::character varying, 'quality'::character varying, 'growth'::character varying, 'safety'::character varying, 'momentum'::character varying])::text[])))` / `CHECK (((weight >= (0)::numeric) AND (weight <= (1)::numeric)))`
+
+#### `stock_metric_values`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
+| as_of | date | N |  | PK | 기준일 |
+| metric | character varying(24) | N |  | PK | 지표 (earnings_yield, book_yield, roe … 9종, docs/09 2절) |
+| factor | character varying(12) | N |  |  | 소속 팩터 |
+| raw_value | numeric | Y |  |  | 지표 원값, 계산 불가면 NULL |
+| z_raw | numeric(8,4) | Y |  |  | 국가 내 로버스트 Z(방향 반영, ±3 클리핑) |
+| z_adj | numeric(8,4) | Y |  |  | 주 그룹 축소 추정으로 섹터 중립화한 Z |
+
+제약: `CHECK (((factor)::text = ANY ((ARRAY['value'::character varying, 'quality'::character varying, 'growth'::character varying, 'safety'::character varying, 'momentum'::character varying])::text[])))`
+
 #### `stock_scores`
 
 | 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
 | as_of | date | N |  | PK | 기준일 |
-| score | numeric(5,2) | Y |  |  | 유니버스 내 상대평가, 전부 계산 불가면 NULL |
-| valuation_score | numeric(5,2) | Y |  |  | 밸류에이션 팩터 점수 |
-| growth_score | numeric(5,2) | Y |  |  | 성장 팩터 점수 |
-| profitability_score | numeric(5,2) | Y |  |  | 수익성 팩터 점수 |
-| momentum_score | numeric(5,2) | Y |  |  | 모멘텀 팩터 점수 |
-| data_quality | jsonb | N | '{}'::jsonb |  | 계산 불가 팩터와 사유 |
-| weights_version | character varying(20) | N |  |  | config/scoring.yaml version |
+| preset_id | smallint | N |  | PK, FK→scoring_presets | 프리셋 ID |
+| value_score | numeric(8,4) | Y |  |  | 가치 팩터 점수(유효 지표 z_adj 평균, Z 단위) |
+| quality_score | numeric(8,4) | Y |  |  | 퀄리티 팩터 점수 |
+| growth_score | numeric(8,4) | Y |  |  | 성장 팩터 점수 |
+| safety_score | numeric(8,4) | Y |  |  | 안정성 팩터 점수 |
+| momentum_score | numeric(8,4) | Y |  |  | 모멘텀 팩터 점수 |
+| composite | numeric(8,4) | Y |  |  | 유효 팩터 가중 평균(재정규화), 유효 팩터 < 3이면 NULL |
+| score | numeric(5,2) | Y |  |  | 0~100 = 100·Φ(국가 내 표준화한 composite) |
+| factor_coverage | smallint | N |  |  | 유효 팩터 수 0~5 |
+| data_quality | jsonb | N | '{}'::jsonb |  | 계산 불가 지표·팩터와 사유, 대체 계산 메모 |
 
-제약: `CHECK (((score >= (0)::numeric) AND (score <= (100)::numeric)))` / `CHECK (((valuation_score >= (0)::numeric) AND (valuation_score <= (100)::numeric)))` / `CHECK (((growth_score >= (0)::numeric) AND (growth_score <= (100)::numeric)))` / `CHECK (((profitability_score >= (0)::numeric) AND (profitability_score <= (100)::numeric)))` / `CHECK (((momentum_score >= (0)::numeric) AND (momentum_score <= (100)::numeric)))`
+제약: `CHECK (((factor_coverage >= 0) AND (factor_coverage <= 5)))` / `CHECK (((score >= (0)::numeric) AND (score <= (100)::numeric)))`
 
 #### `ingestion_logs`
 
@@ -429,7 +501,7 @@ erDiagram
 모든 컬럼이 원자값이다. 경쟁 그룹 소속(종목 하나가 여러 그룹)이나 관심종목처럼 반복되는 값은 컬럼 목록(`group1, group2…`)이나 배열로 두지 않고 교차 테이블 행으로 분리했다. 유일한 JSONB 컬럼인 `stock_scores.data_quality`는 조회·조인 대상이 아닌 진단 메타데이터(계산 불가 팩터와 사유)여서 문서 단위로 저장한다.
 
 ### 4-2. 2NF
-복합 PK를 가진 테이블(`daily_prices`, `valuation_snapshots`, `index_daily_prices`, `stock_scores`, `peer_group_members`, `watchlist_items`)의 일반 속성은 PK 전체에 종속된다. 예를 들어 `daily_prices.close`는 (종목, 날짜) 조합에 종속되며, 종목 이름처럼 `stock_id`에만 종속되는 속성은 이 테이블에 두지 않는다.
+복합 PK를 가진 테이블(`daily_prices`, `valuation_snapshots`, `index_daily_prices`, `stock_metric_values`, `stock_scores`, `scoring_weights`, `peer_group_members`, `watchlist_items`)의 일반 속성은 PK 전체에 종속된다. `stock_metric_values.factor`는 `metric`에서 정해지는 값이지만, 파생 테이블(5-2)에서 팩터별 집계를 JOIN 없이 하기 위해 함께 저장한다. 예를 들어 `daily_prices.close`는 (종목, 날짜) 조합에 종속되며, 종목 이름처럼 `stock_id`에만 종속되는 속성은 이 테이블에 두지 않는다.
 
 ### 4-3. 3NF — `markets` 분리 (이행적 종속 제거)
 `stocks`에 통화·국가·시간대를 두면 `stock_id → market → currency/country/timezone`의 이행적 종속이 생기고, 같은 시장 종목 수만큼 같은 값이 반복된다. 시장 단위 속성을 `markets`로 분리해 `stocks`는 `market_id`만 참조한다. 시장의 시간대를 바꿔도 한 행만 고치면 된다.
@@ -437,7 +509,7 @@ erDiagram
 ### 4-4. N:M 교차 테이블
 | 관계 | 교차 테이블 | 속성 |
 |---|---|---|
-| 종목 ↔ 경쟁 그룹 | `peer_group_members` | 없음 (순수 연결) |
+| 종목 ↔ 경쟁 그룹 | `peer_group_members` | `is_primary` (매력도 섹터 중립화의 주 그룹, 종목당 최대 1개) |
 | 사용자 ↔ 종목 (관심종목) | `watchlist_items` | `sort_order`, `added_at` |
 
 ### 4-5. 파생값은 저장하지 않음 (VIEW)
@@ -450,10 +522,10 @@ erDiagram
 - 사유: "담은 시점의 가격과 환율"은 **그 시점에 확정된 변하지 않는 사실**이다. 시세 테이블은 수정주가 재계산(배당·분할)으로 과거 종가가 바뀌고, 환율도 SNAPSHOT이 새로 쌓이며 재적재·보정될 수 있다. 참조로만 연결하면 이런 갱신이 일어날 때 이미 담은 원가와 평가손익이 소급해서 바뀐다.
 - 정합성: 항목 수정(PUT) 시 기준가·환율을 현재값으로 다시 저장하는 것만 허용한다(명세). `ref_date`로 어느 거래일 종가인지 추적할 수 있다.
 
-### 5-2. `stock_scores`
-- 형태: `v_stock_metrics`·`valuation_snapshots`에서 계산할 수 있는 점수를 테이블로 저장한다.
-- 사유: 매력도는 유니버스 전체에 대한 `PERCENT_RANK()` 상대평가라서, 종목 1개를 조회해도 25개 종목의 지표 전체(=무거운 `v_stock_metrics`)를 계산해야 한다. 리스트·관심종목·포트폴리오 요약에서 반복 조회되므로 결과를 `as_of`별 스냅샷으로 저장한다.
-- 정합성: **재생성 가능한 파생 테이블**이다. `python -m app.ingest scores`·`POST /market/refresh`가 해당 `as_of`를 DELETE 후 INSERT로 다시 만들며, `weights_version`으로 어떤 가중치로 계산했는지 남긴다.
+### 5-2. `stock_metric_values`·`stock_scores` (매력도 파생 테이블)
+- 형태: `v_stock_metrics`·`valuation_snapshots`·`financial_statements`·`daily_prices`에서 계산할 수 있는 지표 원값·Z(`stock_metric_values`)와 프리셋별 점수(`stock_scores`)를 as_of별로 저장한다.
+- 사유: 매력도는 같은 시장 전체의 중앙값·MAD, 주 그룹 평균, 국가 내 재표준화를 거치는 상대 점수라서 종목 1개를 보여 줘도 유니버스 전체를 계산해야 한다. 리스트·관심종목·포트폴리오 요약에서 반복 조회되고, 상세 화면은 점수의 근거(지표 원값·z_raw·z_adj)를 설명해야 하므로 결과를 저장한다. 지표 Z는 프리셋과 무관해 한 번만 저장하고, 프리셋별로는 가중합·변환 결과만 저장한다.
+- 정합성: **재생성 가능한 파생 테이블**이다. `python -m app.ingest scores`·`POST /market/refresh`가 해당 `as_of`의 두 테이블을 한 트랜잭션에서 DELETE 후 INSERT로 다시 만든다. 가중치는 `scoring_weights`에서 읽으므로 점수 행이 어떤 프리셋으로 계산됐는지 `preset_id`로 추적된다.
 
 ## 6. 인덱스
 | 인덱스 | 대상 | 받치는 조회 | 비고 |
@@ -534,7 +606,7 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 
 | SQL 파일 | SELECT | WHERE | JOIN | GROUP BY | HAVING | ORDER BY | AVG | SUM | COUNT | MAX | MIN | 윈도우 함수 | CTE | LATERAL | 사용한 윈도우 함수 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `app/queries/analysis.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| `app/queries/analysis.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  | ✓ | ✓ |  | COUNT, PERCENT_RANK, RANK |
 | `app/queries/candles.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  | ✓ |  |  |  |  |  |
 | `app/queries/disclosures.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  |  |  |  |  |  |  |
 | `app/queries/financials.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  |  |  |  |  |  |  |
@@ -543,7 +615,10 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | `app/queries/peers.sql` | ✓ | ✓ | ✓ |  |  | ✓ | ✓ |  | ✓ |  |  | ✓ | ✓ | ✓ | AVG, COUNT, RANK |
 | `app/queries/peers_chart.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  | ✓ |  | ✓ | ✓ |  | FIRST_VALUE |
 | `app/queries/portfolio_items_valued.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
-| `app/queries/scores.sql` | ✓ |  |  |  |  | ✓ | ✓ |  | ✓ |  |  | ✓ | ✓ |  | COUNT, PERCENT_RANK |
+| `app/queries/score_aggregate.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | AVG, STDDEV_SAMP |
+| `app/queries/score_metrics.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ |  |  |  | ✓ |  | ✓ | ✓ | ✓ | LAG, ROW_NUMBER |
+| `app/queries/score_neutralize.sql` | ✓ | ✓ | ✓ |  |  |  | ✓ |  | ✓ |  |  | ✓ | ✓ |  | AVG, COUNT |
+| `app/queries/score_zscore.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | ✓ |  |  |  | ✓ |  |  |
 | `app/queries/stats_disclosure_frequency.sql` | ✓ | ✓ |  | ✓ |  | ✓ |  | ✓ | ✓ |  |  | ✓ | ✓ |  | SUM |
 | `app/queries/stats_market_excluded.sql` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |
 | `app/queries/stats_market_valuation.sql` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |  |  |  |
@@ -554,7 +629,7 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | `app/queries/stock_list.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  | ✓ | ✓ | ✓ | COUNT, RANK |
 | `app/queries/watchlist.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | `db/views.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | LAG, MAX, ROW_NUMBER |
-| **사용 파일 수** | 20 | 19 | 13 | 5 | 2 | 19 | 5 | 3 | 10 | 6 | 4 | 7 | 8 | 8 | |
+| **사용 파일 수** | 23 | 23 | 17 | 8 | 2 | 21 | 7 | 4 | 13 | 8 | 4 | 10 | 12 | 8 | |
 
 
 
@@ -562,7 +637,11 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | 쿼리 | 용도 | 핵심 기법 |
 |---|---|---|
 | `db/views.sql` `v_stock_metrics` | 종목별 수익률·변동성·MDD·이동평균·52주·재무 지표 | CTE 9단계, ROW_NUMBER로 최근 N거래일, LAG 일수익률, 누적 MAX OVER(MDD), STDDEV_SAMP, AVG FILTER, LATERAL 기준일 종가 |
-| `scores.sql` | 매력도 점수 | 같은 country 안 PERCENT_RANK, `PARTITION BY country, 값 IS NULL`로 NULL 제외 순위, COUNT OVER로 표본 2개 미만 제외, 가중치 재정규화, jsonb data_quality |
+| `score_metrics.sql` | 매력도 지표 원값 9종 | CTE, LAG(직전 FY), ROW_NUMBER(t−21·126·252거래일), MAX FILTER 피벗, CROSS JOIN LATERAL (VALUES …)로 지표 행 펼치기 |
+| `score_zscore.sql` | 국가 내 로버스트 Z | `PERCENTILE_CONT(0.5) WITHIN GROUP` CTE로 중앙값·MAD, 표본·MAD 조건부 평균·표준편차 대체, LEAST/GREATEST 클리핑, UPDATE … FROM |
+| `score_neutralize.sql` | 섹터 중립화 | 주 그룹(부분 UNIQUE) LEFT JOIN, COUNT·AVG OVER (PARTITION BY 그룹, 지표)로 n/(n+k) 축소 |
+| `score_aggregate.sql` | 프리셋별 점수 | AVG GROUP BY(팩터), CROSS JOIN 프리셋, FILTER 피벗, SUM(w·F)/SUM(w) 재정규화, AVG·STDDEV_SAMP OVER 재표준화, `erf`로 100·Φ |
+| `analysis.sql` | 국가 내 순위·백분위 | RANK·PERCENT_RANK OVER (같은 as_of·프리셋·country) |
 | `peers.sql` | 경쟁 그룹 비교 | 그룹별 RANK() OVER, AVG() OVER, COUNT OVER(그룹 크기) |
 | `peers_chart.sql` | 기준일=100 추이 | FIRST_VALUE OVER로 구간 첫 종가 |
 | `stats_market_valuation.sql` | 시장별 평균 밸류에이션 | GROUP BY + HAVING(표본 수), AVG/MIN/MAX FILTER, SUM |

@@ -2,7 +2,7 @@
 
 국내(KOSPI·KOSDAQ)·미국(NASDAQ) 25개 종목의 시세·지수·환율·재무·공시를 수집·전처리해 PostgreSQL에 구조화하고, FastAPI 조회·분석 API와 바닐라 HTML/CSS/JS 대시보드로 제공하는 1차 세미프로젝트입니다.
 
-> 시세는 **일봉 기준**(장중 실시간 아님)이며, 매력도·모의 포트폴리오를 포함한 모든 정보는 **투자 권유가 아닙니다**.
+> 시세는 **일봉 기준**(장중 실시간 아님)이며, 매력도·모의 포트폴리오를 포함한 모든 정보는 **투자 권유가 아닙니다**. 매력도는 유니버스 안에서 같은 시장끼리 비교한 상대적 위치를 나타내는 팩터 점수이며 수익률 예측이 아닙니다.
 >
 > 1차는 **로그인 없는 단일 사용자(데모) 모드**로, **로컬·시연 전용**입니다. 인증이 없으므로 외부에 공개된 서버로 배포하지 마세요.
 
@@ -12,8 +12,8 @@
 | 화면 | 기능 |
 |---|---|
 | 대시보드 홈 `/` | 주요 지수 5개·USD/KRW(30일 스파크라인), 내 관심종목 카드, 거래량 상위 5 |
-| 주식 리스트 `/stocks` | 시장 탭·거래량/시가총액(원화 환산) 순위·검색·경쟁 그룹 필터, ★ 관심 토글, 포트폴리오 담기 |
-| 종목 상세 `/stocks/{market}/{ticker}` | 가격 차트, 핵심 지표, 매력도(팩터별), 수치 분석(수익률·변동성·MDD·120일선 괴리율), FY 재무 추이, 경쟁 종목 비교(그룹 내 순위·평균, 기준일=100 추이), 최근 공시 |
+| 주식 리스트 `/stocks` | 시장 탭·거래량/시가총액(원화 환산) 순위·검색·경쟁 그룹 필터, 매력도 프리셋 선택, ★ 관심 토글, 포트폴리오 담기 |
+| 종목 상세 `/stocks/{market}/{ticker}` | 가격 차트, 핵심 지표, 매력도(프리셋 탭, 국가 내 순위, 팩터 기여도, 지표 원값·Z), 수치 분석(수익률·변동성·MDD·120일선 괴리율), FY 재무 추이, 경쟁 종목 비교(그룹 내 순위·평균, 기준일=100 추이), 최근 공시 |
 | 모의 포트폴리오 `/portfolio` | 시드 설정, 수량/금액/비중으로 담기(미리보기), 시드 초과 방어, 평가손익과 환율 효과 분리, 비중 차트 |
 
 ## 기술 스택
@@ -44,7 +44,7 @@ docker compose up -d db       # PostgreSQL 16 → localhost:5433 (stockdb, stock
 python -m app.ingest.smoke            # (선택) 외부 소스 동작 확인 → docs/smoke_test_result.md
 python -m app.ingest init-db          # db/schema.sql → indexes.sql → views.sql  (--reset: 스키마 재생성)
 python -m app.ingest all              # 아래 1~7 전체 (빈 DB 기준 실측 257초)
-python -m app.ingest scores           # 매력도 점수 계산 (config/scoring.yaml 가중치)
+python -m app.ingest scores           # 매력도 점수 계산 (다중 팩터 모델, 프리셋 4종 — docs/09)
 python -m app.ingest seed-demo        # demo 사용자의 관심종목 8건 + 모의 포트폴리오 2개
 python -m app.ingest status           # 테이블별 행 수·기간·최근 실패
 ```
@@ -57,6 +57,15 @@ python -m app.ingest status           # 테이블별 행 수·기간·최근 실
 | 5 | `financials [--years 5]` | FY 5개년 재무(국내 연결) | DART / SEC + yfinance 보완 |
 | 6 | `valuation [--full]` | KR 일별 1년, US 스냅샷 | pykrx / yfinance |
 | 7 | `disclosures [--days 365]` | 최근 1년 공시(지분공시·Form 4 제외) | DART / SEC |
+
+### 이미 적재한 DB를 매력도 v2로 바꾸기 (2026-10-07 이전에 만든 DB)
+데이터를 지우지 않고 스키마만 바꾼 뒤 점수를 다시 계산합니다. 새로 `init-db`하는 DB는 필요 없습니다.
+```bash
+python -m app.ingest migrate 001_scoring_v2   # 주 그룹 컬럼·프리셋·지표 테이블 추가, stock_scores 재정의(이전 점수 삭제)
+python -m app.ingest master --offline         # universe.yaml 순서로 주 그룹 다시 지정
+python -m app.ingest scores
+```
+일봉이 253개 미만인 종목은 변동성·12-1개월 모멘텀이 계산되지 않습니다(샘플 데이터 위에 증분 적재한 경우 `prices --full --tickers …`로 다시 받기).
 
 - 호출 간격 0.25~0.7초, 실패 시 지수 백오프(1·2·4초) 최대 3회 재시도
 - 대상(종목·지수)마다 `ingestion_logs`에 결과 기록, 한 종목이 실패해도 나머지는 계속 적재
@@ -94,7 +103,7 @@ uvicorn app.main:app --reload
 
 ## 5. 테스트
 ```bash
-pytest -q                              # 103 passed — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
+pytest -q                              # 121 passed — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
 python -m app.ingest explain           # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
 ```
 DB 제약·전처리·TTL 갱신(외부 호출 횟수)·분석 SQL 손계산·포트폴리오 명세 시나리오·동시성·화면 흐름을 검증합니다. 결과는 [docs/07](docs/07_테스트_결과서.md).
@@ -112,7 +121,7 @@ app/
   queries/    조회·분석 SQL 원문 (text()로 실행)
 web/          index.html · stocks.html · stock.html · portfolio.html, css/(tokens·base·components·pages), js/
 db/           schema.sql · indexes.sql · views.sql · init/(테스트 DB 생성)
-config/       universe.yaml(종목·지수·경쟁 그룹) · scoring.yaml(매력도 가중치)
+config/       universe.yaml(종목·지수·경쟁 그룹, 첫 소속 그룹 = 주 그룹) · scoring.yaml(매력도 프리셋·축소 계수)
 sample_data/  재현용 소량 CSV
 docs/         문서 01~08, ASSUMPTIONS, smoke test·EXPLAIN 결과, screenshots/
 tests/        pytest
@@ -129,6 +138,7 @@ tests/        pytest
 | [06 기능·API 정의서](docs/06_기능_API_정의서.md) | 엔드포인트 표·실제 요청/응답 예시·화면↔API |
 | [07 테스트 결과서](docs/07_테스트_결과서.md) | pytest 결과·수동 UI 점검 체크리스트 |
 | [08 최종 결과보고서](docs/08_최종_결과보고서.md) | 전체 정리·주요 SQL·문제 해결·회고·발표 흐름 |
+| [09 매력도 점수 정의서](docs/09_매력도_점수_정의서.md) | 지표 정의·NULL 사유, 로버스트 Z·섹터 중립화·프리셋·100·Φ, Min-Max 미사용 사유 |
 | [ASSUMPTIONS](docs/ASSUMPTIONS.md) | 가정·결정·미확인 사항 |
 
 ## 8. 데이터 출처와 이용 조건
@@ -147,5 +157,5 @@ pykrx·yfinance는 비공식 라이브러리로 사이트 변경 시 동작하�
 - 증분 적재는 과거 수정주가의 소급 조정(배당·분할)을 반영하지 못함 → 필요 시 `prices --full`
 - 재무는 KR K-IFRS 연결·US US-GAAP로 회계기준이 다름. 일부 연도·항목은 원천에 값이 없어 NULL(ASSUMPTIONS A-41)
 - KRX 제공 PER/EPS의 산정 기준은 DART 연결 재무 기반 계산과 다를 수 있음(A-38)
-- 매력도는 25종목 유니버스 안에서 같은 시장끼리 비교한 상대평가
+- 매력도는 25종목 유니버스 안에서 같은 시장끼리 비교한 상대적 위치(팩터 점수)이며 수익률 예측이 아님. 재무는 최신 FY 1개년 기준(docs/09 8절)
 - 미구현 선택 기능: 분기 재무, 투자 스타일 체크리스트, 시나리오 API, 관심종목 균등 배분 미리보기, 관심종목 정렬 변경 화면(API는 있음)
