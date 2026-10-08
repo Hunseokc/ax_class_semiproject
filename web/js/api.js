@@ -112,6 +112,10 @@ export const Watchlist = {
   remove: (market, ticker) => api.del(`/watchlist/${market}/${ticker}`),
 };
 
+export const Stats = {
+  monthly: (market, ticker, months = 12) => api.get("/statistics/monthly", { market, ticker, months }),
+};
+
 export const Scoring = {
   presets: () => api.get("/scoring/presets"),
 };

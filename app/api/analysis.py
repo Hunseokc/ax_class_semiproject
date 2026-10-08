@@ -1,9 +1,10 @@
 """분석 API: 종목 수치 분석·매력도, 경쟁 그룹 비교·기준일=100 차트, DB 통계."""
 from __future__ import annotations
 
-from typing import Any, Literal
-
+from datetime import date, datetime
 from decimal import Decimal
+from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
@@ -13,7 +14,7 @@ from app.api.deps import MarketPath, TickerPath, get_db, get_preset
 from app.api.stocks import RANGE_MONTHS, resolve_stock
 from app.core.errors import NotFound
 from app.queries import sql
-from app.schemas.common import INT_MAX, Num, Schema
+from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN, Num, Schema
 from app.services.scoring import FACTORS, METRICS, default_preset
 
 router = APIRouter(prefix="/stocks", tags=["analysis"])
@@ -291,6 +292,46 @@ def stats_market_valuation(min_samples: int = Query(3, ge=1, le=25), db: Session
 @stats_router.get("/peer-group-valuation", summary="경쟁 그룹별 평균·최고·최저 지표")
 def stats_peer_group_valuation(db: Session = Depends(get_db)):
     return {"groups": [dict(r) for r in db.execute(sql("stats_peer_group_valuation")).mappings()]}
+
+
+class MonthlyItem(Schema):
+    month: str                       # YYYY-MM
+    trading_days: int
+    first_date: date
+    last_date: date
+    avg_close: Num
+    max_high: Num
+    min_low: Num
+    first_close: Num
+    last_close: Num
+    monthly_return: Num | None       # 월초(첫 거래일) 종가 대비 월말(마지막 거래일) 종가
+    total_volume: int
+    avg_volume: int
+    is_partial: bool                 # 아직 끝나지 않은 달
+
+
+class MonthlyOut(Schema):
+    market: str
+    ticker: str
+    name: str
+    currency: str
+    months: int
+    today: date                      # 시장 현지 날짜(이 달이 is_partial)
+    items: list[MonthlyItem]
+
+
+@stats_router.get("/monthly", response_model=MonthlyOut,
+                  summary="종목 월별 집계: 거래일 수·평균 종가·최고/최저·월초 대비 월말 수익률·거래량 (진행 중인 달은 is_partial)")
+def stats_monthly(market: str = Query(pattern=MARKET_PATTERN, examples=["KOSPI"]),
+                  ticker: str = Query(pattern=TICKER_PATTERN, examples=["005930"]),
+                  months: int = Query(12, ge=1, le=24, description="이번 달 포함 최근 N개월"),
+                  db: Session = Depends(get_db)):
+    s = resolve_stock(db, market, ticker)
+    tz = db.execute(text("SELECT timezone FROM markets WHERE code = :m"), {"m": s["market"]}).scalar_one()
+    today = datetime.now(ZoneInfo(tz)).date()
+    rows = db.execute(sql("stats_monthly"), {"stock_id": s["stock_id"], "today": today, "months": months}).mappings().all()
+    return {"market": s["market"], "ticker": s["ticker"], "name": s["name"], "currency": s["currency"],
+            "months": months, "today": today, "items": [dict(r) for r in rows]}
 
 
 @stats_router.get("/disclosure-frequency", summary="기간별 공시 빈도 (월·분기·주)")

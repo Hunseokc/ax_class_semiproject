@@ -57,6 +57,7 @@
 | 통계 | GET | `/statistics/market-valuation` | 시장별 평균 PER/PBR/ROE (HAVING 표본 수 이상) | min_samples | 200 · 422 VALIDATION_ERROR |
 | 통계 | GET | `/statistics/peer-group-valuation` | 경쟁 그룹별 평균·최고·최저 지표 | - | 200 |
 | 통계 | GET | `/statistics/disclosure-frequency` | 기간별 공시 빈도 (월·분기·주) | period, days | 200 · 422 VALIDATION_ERROR |
+| 통계 | GET | `/statistics/monthly` | 종목 월별 집계: 거래일 수·평균 종가·최고/최저·월초 대비 월말 수익률·거래량 합계/평균 (date_trunc + GROUP BY, FIRST_VALUE/LAST_VALUE 윈도우). 진행 중인 달은 `is_partial: true` | market, ticker (필수), months (1~24, 기본 12) | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
 
 ※ 오류 열은 엔드포인트별로 실제 발생할 수 있는 상태와 `code`다. 모든 엔드포인트는 예상하지 못한 예외 시 500 `INTERNAL_ERROR`. 코드별 조건은 [5절](#5-에러-코드).
 
@@ -1323,6 +1324,52 @@
   ]
 }
 ```
+#### `GET /api/v1/statistics/monthly?market=KOSPI&ticker=005930&months=2` — 월별 집계 (2026-10-08 실제 호출)
+`months=2` → 지난달과 이번 달. 이번 달(10월)은 진행 중이라 `is_partial: true`, `monthly_return`은 10월 첫 거래일 종가 274,500 대비 마지막 거래일 종가 269,000 = −2.0036%.
+응답 `200`:
+```json
+{
+  "market": "KOSPI",
+  "ticker": "005930",
+  "name": "삼성전자",
+  "currency": "KRW",
+  "months": 2,
+  "today": "2026-10-08",
+  "items": [
+    {
+      "month": "2026-09",
+      "trading_days": 20,
+      "first_date": "2026-09-01",
+      "last_date": "2026-09-30",
+      "avg_close": 263825,
+      "max_high": 286500,
+      "min_low": 243000,
+      "first_close": 261000,
+      "last_close": 269500,
+      "monthly_return": 0.032567,
+      "total_volume": 337498673,
+      "avg_volume": 16874934,
+      "is_partial": false
+    },
+    {
+      "month": "2026-10",
+      "trading_days": 4,
+      "first_date": "2026-10-01",
+      "last_date": "2026-10-07",
+      "avg_close": 273125,
+      "max_high": 279500,
+      "min_low": 264500,
+      "first_close": 274500,
+      "last_close": 269000,
+      "monthly_return": -0.020036,
+      "total_volume": 54551646,
+      "avg_volume": 13637912,
+      "is_partial": true
+    }
+  ]
+}
+```
+
 ### 3-7. 공통 오류 응답
 #### `GET /api/v1/portfolios/99999999999` — id가 INT 범위 밖 → 422 (이전에는 DB 오류가 500으로 노출)
 응답 `422` (2026-10-08 실제 호출):
@@ -1415,7 +1462,7 @@
 | 화면 | URL | 영역 | 호출 API |
 |---|---|---|---|
 | 공통 | 모든 화면 | 사이드바 마지막 갱신·새로고침 | `GET /market/refresh/status`, `POST /market/refresh` |
-| 대시보드 홈 | `/` | 지수 카드 5개 | `GET /market/indices` |
+| 대시보드 홈 | `/` | 지수·환율 카드(설정에서 지수 10개 + 환율 중 선택, 기본 6개) | `GET /market/indices` |
 | | | USD/KRW 카드 | `GET /market/fx` |
 | | | 투자 성향 펼침 메뉴(헤더) | `GET /scoring/presets` |
 | | | 내 관심종목 카드(카드 클릭 → 상세 `?preset=`) | `GET /watchlist?preset=` |
@@ -1429,6 +1476,7 @@
 | | | 가격 차트 (1M~1Y) | `GET /stocks/{market}/{ticker}/candles?range=` |
 | | | 핵심 지표·매력도·수치 분석 | `GET /stocks/{market}/{ticker}/analysis?preset=` |
 | | | 투자 성향 펼침 메뉴(매력도 영역) | `GET /scoring/presets` |
+| | | 월별 요약(최근 12개월 표) | `GET /statistics/monthly?market=&ticker=&months=12` |
 | | | 재무 추이 | `GET /stocks/{market}/{ticker}/financials` |
 | | | 경쟁 비교 표·막대 | `GET /stocks/{market}/{ticker}/peers` |
 | | | 기준일=100 차트 | `GET /stocks/{market}/{ticker}/peers/chart?range=&group_id=` |
@@ -1449,7 +1497,7 @@
 | `METHOD_NOT_ALLOWED` | 405 | 경로는 있으나 허용하지 않는 메서드 | - | Method Not Allowed | ERR-06 |
 | `HTTP_ERROR` | 그 밖의 4xx·5xx | 프레임워크가 낸 기타 HTTP 예외(현재 라우트에서 직접 내는 곳 없음 — 최후 방어) | - | (예외 메시지) | ERR-07 |
 | `INTERNAL_ERROR` | 500 | 처리하지 못한 예외. 응답은 고정 메시지만, 스택은 요청 ID와 함께 서버 로그 | 모든 엔드포인트 | 서버 오류가 발생했습니다 | ERR-08 |
-| `STOCK_NOT_FOUND` | 404 | (시장, 티커) 종목 없음 | `/stocks/{market}/{ticker}`·하위, `/watchlist`(POST·DELETE), 담기 | 종목 KOSPI/999999을(를) 찾을 수 없습니다 | ST-06, ERR-09 |
+| `STOCK_NOT_FOUND` | 404 | (시장, 티커) 종목 없음 | `/stocks/{market}/{ticker}`·하위, `/watchlist`(POST·DELETE), 담기, `/statistics/monthly` | 종목 KOSPI/999999을(를) 찾을 수 없습니다 | ST-06, ERR-09, AN-14 |
 | `USER_NOT_FOUND` | 404 | 요청 사용자(`DEFAULT_USER_ID`)가 DB에 없음 | `/watchlist`, `/portfolios` | 사용자(ID 99)를 찾을 수 없습니다 | WL-03 |
 | `PORTFOLIO_NOT_FOUND` | 404 | 포트폴리오 없음 또는 다른 사용자 소유 | `/portfolios/{portfolio_id}`·하위 | 포트폴리오(ID 7)를 찾을 수 없습니다 | USR-02, ERR-10 |
 | `ITEM_NOT_FOUND` | 404 | 그 포트폴리오에 항목 없음 또는 다른 사용자 소유 | `/portfolios/{id}/items/{item_id}` | 포트폴리오(ID 1)에 항목(ID 9)이 없습니다 | USR-04, ERR-10 |

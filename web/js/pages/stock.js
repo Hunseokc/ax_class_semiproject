@@ -1,6 +1,6 @@
-// 종목 상세: 헤더·가격 차트·핵심 지표·매력도·수치 분석·재무 추이·경쟁 비교·최근 공시
-import { PRESET_EVENT, Stocks, getPreset } from "../api.js";
-import { DASH, changeHtml, date, esc, krw, num, pct, price, stockUrl, usd } from "../format.js";
+// 종목 상세: 헤더·가격 차트·핵심 지표·매력도·수치 분석·월별 요약·재무 추이·경쟁 비교·최근 공시
+import { PRESET_EVENT, Stats, Stocks, getPreset } from "../api.js";
+import { DASH, changeHtml, date, esc, krw, num, pct, price, stockUrl, usd, volume } from "../format.js";
 import { openAddToPortfolio } from "../components/add-to-portfolio.js";
 import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";
 import { color, dashedAxis, draw, plainAxis } from "../components/charts.js";
@@ -232,6 +232,32 @@ async function loadAnalysis() {
 }
 
 // ---------------------------------------------------------------- 재무 추이
+// ---------------------------------------------------------------- 월별 요약 (GET /statistics/monthly)
+function loadMonthly() {
+  return load($("#monthly"), {
+    skeleton: skeleton("row", 3),
+    fetch: () => Stats.monthly(MARKET, TICKER, 12),
+    isEmpty: (d) => !d.items.length,
+    empty: emptyState({ title: "월별로 집계할 시세가 없습니다" }),
+    render: (d) => {
+      const rows = [...d.items].reverse().map((m) => `<tr>
+          <td>${esc(m.month)}${m.is_partial ? ' <span class="badge badge--market">진행 중</span>' : ""}</td>
+          <td class="num">${m.trading_days}</td>
+          <td class="num">${price(m.avg_close, d.currency)}</td>
+          <td class="num">${price(m.max_high, d.currency)}</td>
+          <td class="num">${price(m.min_low, d.currency)}</td>
+          <td class="num">${changeHtml(m.monthly_return, stock.country)}</td>
+          <td class="num">${volume(m.total_volume)}</td></tr>`).join("");
+      return h(`<div class="section"><div class="table-wrap"><table class="table">
+          <caption class="sr-only">월별 거래일 수, 평균 종가, 최고가, 최저가, 월간 수익률, 거래량 합계</caption>
+          <thead><tr><th scope="col">월</th><th scope="col">거래일</th><th scope="col">평균 종가</th><th scope="col">최고</th>
+            <th scope="col">최저</th><th scope="col">월간 수익률</th><th scope="col">거래량</th></tr></thead>
+          <tbody>${rows}</tbody></table></div>
+        <p class="subtle">월간 수익률 = 그 달 첫 거래일 종가 대비 마지막 거래일 종가 · 단위 ${esc(d.currency)} · 진행 중인 달은 마지막 거래일까지</p></div>`);
+    },
+  });
+}
+
 function loadFinancials() {
   return load($("#financials"), {
     skeleton: h('<div class="skeleton" style="height:220px"></div>'),
@@ -417,6 +443,7 @@ async function init() {
   loadCandles();
   if (!presetList) await mountPresetControl();
   loadAnalysis();
+  loadMonthly();
   loadFinancials();
   loadPeers();
   loadDisclosures();
@@ -445,7 +472,7 @@ async function waitForDetail() {
     try { d = await Stocks.detail(MARKET, TICKER); } catch { continue; }
     if (d.detail_status === "loading") continue;
     renderDetailNotice(d.detail_status);
-    if (d.detail_status === "ready") { loadCandles(); loadFinancials(); loadPeers(); loadDisclosures(); }
+    if (d.detail_status === "ready") { loadCandles(); loadMonthly(); loadFinancials(); loadPeers(); loadDisclosures(); }
     return;
   }
 }

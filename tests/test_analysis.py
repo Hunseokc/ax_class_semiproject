@@ -151,3 +151,77 @@ def test_statistics(client, engine):
     items = client.get(f"{API}/statistics/disclosure-frequency?period=month").json()["items"]
     assert sum(i["total"] for i in items) == 3 and items[-1]["cumulative"] == 3
     assert sum(i["periodic_reports"] for i in items) == 2 and sum(i["share"] for i in items) == pytest.approx(1)
+
+
+# ------------------------------------------------------------------ 월별 집계 (/statistics/monthly)
+def _month_start(d: date, back: int) -> date:
+    y, m = divmod(d.month - 1 - back, 12)
+    return date(d.year + y, m + 1, 1)
+
+
+@pytest.fixture
+def monthly_stock(engine):
+    """카카오(5, KOSPI): 3개월 전 1봉(범위 밖) · 2개월 전 3봉 · 지난달 2봉 · 이번 달 1봉 (시장 현지 날짜 기준)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+    m3, m2, m1, m0 = (_month_start(today, k) for k in (3, 2, 1, 0))
+    bars = [  # (날짜, 시가, 고가, 저가, 종가, 거래량)
+        (m3, 50, 60, 40, 55, 9999),
+        (m2, 100, 110, 95, 105, 1000), (m2.replace(day=2), 106, 120, 100, 115, 2000), (m2.replace(day=3), 114, 118, 90, 98, 3000),
+        (m1, 200, 210, 190, 200, 500), (m1.replace(day=2), 202, 230, 201, 220, 1500),
+        (m0, 300, 305, 295, 303, 700),
+    ]
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO stocks (stock_id, market_id, ticker, name) VALUES (5, 1, '035720', '카카오')"))
+        conn.execute(text("INSERT INTO daily_prices VALUES (5, :d, :o, :h, :l, :c, :v)"),
+                     [dict(zip("dohlcv", b)) for b in bars])
+    return {"m2": m2, "m1": m1, "m0": m0}
+
+
+def test_monthly_statistics_match_hand_calculation(client, monthly_stock):
+    r = client.get(f"{API}/statistics/monthly", params={"market": "KOSPI", "ticker": "035720", "months": 3})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["currency"], body["months"], body["name"]) == ("KRW", 3, "카카오")
+    items = body["items"]
+    assert [i["month"] for i in items] == [monthly_stock[k].strftime("%Y-%m") for k in ("m2", "m1", "m0")]  # 3개월 전 제외
+    m2, m1, m0 = items
+    # 2개월 전: 종가 105·115·98 → 평균 318/3 = 106, 고가 최대 120, 저가 최소 90, 월초 105 → 월말 98
+    assert (m2["trading_days"], m2["avg_close"], m2["max_high"], m2["min_low"]) == (3, 106, 120, 90)
+    assert (m2["first_close"], m2["last_close"], m2["total_volume"], m2["avg_volume"]) == (105, 98, 6000, 2000)
+    assert m2["monthly_return"] == pytest.approx(round(98 / 105 - 1, 6))            # -0.066667
+    assert m2["first_date"] == monthly_stock["m2"].isoformat() and m2["is_partial"] is False
+    # 지난달: 종가 200·220 → 평균 210, 수익률 +10%, 거래량 2000 / 평균 1000
+    assert (m1["trading_days"], m1["avg_close"], m1["max_high"], m1["min_low"], m1["monthly_return"]) == (2, 210, 230, 190, 0.1)
+    assert (m1["total_volume"], m1["avg_volume"], m1["is_partial"]) == (2000, 1000, False)
+    # 이번 달: 진행 중 1봉 → 수익률 0, is_partial
+    assert (m0["trading_days"], m0["first_close"], m0["last_close"], m0["monthly_return"], m0["is_partial"]) == (1, 303, 303, 0, True)
+
+
+def test_monthly_statistics_months_window(client, monthly_stock):
+    def months(n):
+        return [i["month"] for i in client.get(f"{API}/statistics/monthly",
+                                                params={"market": "KOSPI", "ticker": "035720", "months": n}).json()["items"]]
+    assert months(1) == [monthly_stock["m0"].strftime("%Y-%m")]
+    assert months(2) == [monthly_stock[k].strftime("%Y-%m") for k in ("m1", "m0")]
+    assert len(months(24)) == 4                                         # 3개월 전 봉까지 포함
+
+
+@pytest.mark.parametrize("params, status, code", [
+    ({"market": "KOSPI", "ticker": "999999"}, 404, "STOCK_NOT_FOUND"),
+    ({"market": "KOSPI", "ticker": "005930", "months": 0}, 422, "VALIDATION_ERROR"),
+    ({"market": "KOSPI", "ticker": "005930", "months": 25}, 422, "VALIDATION_ERROR"),
+    ({"market": "KOSPI"}, 422, "VALIDATION_ERROR"),                     # ticker 필수
+    ({"market": "KOSPI1", "ticker": "005930"}, 422, "VALIDATION_ERROR"),
+])
+def test_monthly_statistics_errors(client, params, status, code):
+    r = client.get(f"{API}/statistics/monthly", params=params)
+    assert r.status_code == status and r.json()["error"]["code"] == code
+
+
+def test_monthly_statistics_empty_when_no_prices(client, engine):
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO stocks (stock_id, market_id, ticker, name) VALUES (5, 1, '035720', '카카오')"))
+    r = client.get(f"{API}/statistics/monthly", params={"market": "KOSPI", "ticker": "035720"})
+    assert r.status_code == 200 and r.json()["items"] == [] and r.json()["months"] == 12
