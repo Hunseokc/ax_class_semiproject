@@ -61,33 +61,6 @@ python -m app.ingest status           # 테이블별 행 수·기간·최근 실
 | 6 | `valuation [--full]` | KR 일별 1년, US 스냅샷 | pykrx / yfinance |
 | 7 | `disclosures [--days 365]` | 최근 1년 공시(지분공시·Form 4 제외) | DART / SEC |
 
-### 이미 적재한 DB 갱신 (2026-10-07 이전에 만든 DB)
-데이터를 지우지 않고 스키마만 바꾼 뒤 비교군을 받고 점수를 다시 계산합니다. 새로 `init-db`하는 DB는 필요 없습니다. 이미 적용한 단계는 건너뛰면 됩니다(002·003은 다시 실행해도 결과가 같음).
-```bash
-python -m app.ingest migrate 001_scoring_v2   # 매력도 다중 팩터 모델: 주 그룹 컬럼·프리셋·지표 테이블, stock_scores 재정의
-python -m app.ingest master --offline         # universe.yaml 순서로 주 그룹 다시 지정
-python -m app.ingest migrate 002_presets      # 투자 성향 개편: quality 제거, aggressive(위험) 추가, sort_order
-python -m app.ingest migrate 003_benchmark    # 매력도 비교군 컬럼(coverage·detail_synced_at), 작업 종류 추가
-python -m app.ingest benchmark --reselect     # 비교군 선정 + 평시 데이터 + 점수 (약 8분)
-```
-일봉이 253개 미만인 종목은 변동성·12-1개월 모멘텀이 계산되지 않습니다(샘플 데이터 위에 증분 적재한 경우 `prices --full --tickers …`로 다시 받기).
-
-- 호출 간격 0.25~0.7초, 실패 시 지수 백오프(1·2·4초) 최대 3회 재시도
-- 대상(종목·지수)마다 `ingestion_logs`에 결과 기록, 한 종목이 실패해도 나머지는 계속 적재
-- upsert(`ON CONFLICT DO UPDATE`)라 재실행해도 행 수 불변, 이상 행은 버리지 않고 `data/quarantine/*.csv`에 사유와 함께 보관
-
-### 샘플 데이터로 재현 (외부 호출·API 키 없이)
-`sample_data/`에 반도체 그룹 4종목(삼성전자·SK하이닉스·AAPL·NVDA) × 최근 6개월 + 지수·환율 6개월 + FY 재무·공시가 있습니다.
-```bash
-python -m app.ingest init-db --reset
-python -m app.ingest master --offline
-python -m app.ingest import-sample
-python -m app.ingest scores
-python -m app.ingest seed-demo        # 시세가 없는 종목·포트폴리오는 건너뛰고 보고 (샘플: 포트폴리오 1개·4종목)
-python -m app.ingest export-sample    # (전체 적재된 DB에서) 샘플 다시 만들기
-```
-샘플에는 4종목만 시세가 있어 나머지 21종목은 화면에서 '데이터 없음'으로 보입니다.
-
 ## 4. 실행
 ```bash
 uvicorn app.main:app --reload
