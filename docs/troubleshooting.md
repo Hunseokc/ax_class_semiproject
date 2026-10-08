@@ -34,7 +34,7 @@
 4. 장애 대비: `PRICE_SOURCE_KR=yfinance`로 국내 소스를 바꿀 수 있게 하고(A-03), pykrx 실패 시 DART FY 기반 파생 밸류에이션(`DERIVED`)으로 대체(A-02)
 
 ### 해결 결과
-- **정상화**: 로그인 후 일봉·시총·펀더멘털·지수가 모두 동작. 2026-10-08 운영 DB 기준 PYKRX 밸류에이션 4,096행, 국내 지수 3종 각 487행(`docs/03` 5-1)
+- **정상화**: 로그인 후 일봉·시총·펀더멘털·지수가 모두 동작(2026-10-08 깨끗한 DB 재현에서 적재 실패 0건)
 - **재발 확인 방법**: `python -m app.ingest.smoke` 재실행, `GET /api/v1/statistics/data-quality`에서 VALUATION·INDICES의 `last_failure_reason`, `python -m app.ingest status`의 최근 실패
 
 ### 재발 방지
