@@ -1,0 +1,47 @@
+# DB + API 서버를 함께 실행한다: docker compose up -d --build
+# 개발(소스 수정 즉시 반영): docker compose -f compose.yml -f compose.dev.yml up --build
+# 적재·관리 명령:            docker compose run --rm api python -m app.ingest <명령>
+name: semi   # 기존 볼륨(semi_pgdata)을 그대로 쓰기 위해 프로젝트 이름을 고정
+
+services:
+  db:
+    image: postgres:16
+    container_name: ax_semi_db
+    environment:
+      POSTGRES_USER: stock
+      POSTGRES_PASSWORD: stock
+      POSTGRES_DB: stockdb
+      TZ: Asia/Seoul
+    ports:
+      - "${DB_PORT:-5433}:5432"   # 로컬 도구·venv 실행용. 5432는 다른 로컬 PostgreSQL과 충돌할 수 있어 5433 사용
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro   # 테스트 DB 생성 스크립트
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stock -d stockdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: .
+    image: semi-api
+    container_name: ax_semi_api
+    env_file: .env
+    environment:
+      # .env의 localhost:5433(호스트에서 접속하는 주소)을 컨테이너 네트워크 주소로 덮어쓴다
+      DATABASE_URL: postgresql+psycopg://stock:stock@db:5432/stockdb
+      TEST_DATABASE_URL: postgresql+psycopg://stock:stock@db:5432/stockdb_test
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./data:/srv/data                        # 이상 행 보관(data/quarantine)
+      - ${EXTRA_CA_DIR:-./certs}:/certs:ro      # 추가 CA(*.pem·*.crt). 없으면 시스템 CA만 사용
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

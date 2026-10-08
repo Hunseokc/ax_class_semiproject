@@ -8,3 +8,7 @@ data/
 
 # 실행 로그
 *.log
+
+# 추가 CA 인증서(로컬 환경 전용)
+certs/*
+!certs/.gitkeep

@@ -18,14 +18,25 @@
 | 모의 포트폴리오 `/portfolio` | 시드 설정, 수량/금액/비중으로 담기(미리보기), 시드 초과 방어, 평가손익과 환율 효과 분리, 비중 차트 |
 
 ## 기술 스택
-Python 3.12 · FastAPI · SQLAlchemy 2.x(동기) · Pydantic v2 · psycopg 3 · PostgreSQL 16(docker-compose) · pytest · 바닐라 JS(ES Modules, 빌드 없음) · Chart.js(CDN) · Google Fonts
+Python 3.12 · FastAPI · SQLAlchemy 2.x(동기) · Pydantic v2 · psycopg 3 · PostgreSQL 16 · Docker Compose(db + api) · pytest · 바닐라 JS(ES Modules, 빌드 없음) · Chart.js(CDN) · Google Fonts
 
 ## 1. 설치
+DB와 API 서버를 모두 컨테이너로 실행합니다(권장). 필요한 것은 Docker뿐입니다.
+```bash
+cp .env.example .env          # 아래 환경변수 입력 (DATABASE_URL은 compose가 컨테이너 주소로 덮어씀)
+docker compose up -d --build  # db(PostgreSQL 16, localhost:5433) + api(http://localhost:8000), 둘 다 healthcheck
+```
+- 적재·관리 명령은 컨테이너에서 실행합니다: `docker compose run --rm api python -m app.ingest <명령>` (아래 3절의 `python -m app.ingest …` 앞에 `docker compose run --rm api`를 붙임)
+- 개발(소스 수정 즉시 반영): `docker compose -f compose.yml -f compose.dev.yml up -d --build` — `app/`·`config/`·`web/` 등을 bind mount하고 uvicorn `--reload`(Windows용 polling)
+- 로그: `docker compose logs -f api` · 중지: `docker compose down` (데이터는 `semi_pgdata` 볼륨에 유지)
+- **TLS 검사(백신·사내 프록시) 환경**: 호스트에서 HTTPS가 가로채져 인증서 오류가 나면, 그 루트 인증서(`*.pem`·`*.crt`)를 `certs/`에 두거나 `.env`에 `EXTRA_CA_DIR=<폴더>`를 지정합니다. entrypoint가 시스템 CA 번들에 합쳐 requests·curl_cffi(yfinance)·ssl 모두에 적용합니다. 예) Norton: `C:/ProgramData/Norton/Antivirus/wscert.pem`
+
+로컬 venv로 실행할 수도 있습니다(DB만 컨테이너).
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # 아래 환경변수 입력
-docker compose up -d db       # PostgreSQL 16 → localhost:5433 (stockdb, stockdb_test 자동 생성)
+docker compose up -d db
+uvicorn app.main:app --reload
 ```
 
 ## 2. 환경변수 (`.env`)
@@ -90,7 +101,7 @@ python -m app.ingest export-sample    # (전체 적재된 DB에서) 샘플 다�
 
 ## 4. 실행
 ```bash
-uvicorn app.main:app --reload
+docker compose up -d          # 로컬 venv라면: uvicorn app.main:app --reload
 ```
 - 화면: http://localhost:8000/ · `/stocks` · `/stocks/KOSPI/005930` · `/portfolio`
 - API 문서(Swagger): http://localhost:8000/docs — API는 `/api/v1` 아래
@@ -116,7 +127,7 @@ python -m app.ingest hydrate 042700       # 비교군 종목 상세 데이터 �
 
 ## 5. 테스트
 ```bash
-pytest -q                              # 142 passed — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
+docker compose run --rm api pytest -q   # 142 passed (venv라면 pytest -q) — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
 python -m app.ingest explain           # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
 ```
 DB 제약·전처리·TTL 갱신(외부 호출 횟수)·분석 SQL 손계산·포트폴리오 명세 시나리오·동시성·화면 흐름을 검증합니다. 결과는 [docs/07](docs/07_테스트_결과서.md).
