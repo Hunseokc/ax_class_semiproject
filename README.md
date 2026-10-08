@@ -23,7 +23,10 @@ docker compose run --rm api python -m app.ingest init-db
 docker compose run --rm api python -m app.ingest all
 docker compose run --rm api python -m app.ingest seed-demo
 #    (선택) 매력도 비교군 121종목 + 점수 — 첫 실행 약 8분
+#    서버의 스케줄러가 이미 시작했다면 "다른 프로세스가 비교군 갱신 중 — 건너뜀"으로 바로 끝난다(정상, 중복 실행 방지).
+#    그때는 서버가 끝낼 때까지 기다린 뒤 status의 '데이터 품질' 줄에서 실패 0건을 확인한다
 docker compose run --rm api python -m app.ingest benchmark
+docker compose run --rm api python -m app.ingest status
 
 # 4) 상태 확인 → {"status":"ok","db":"ok"}
 curl http://localhost:8000/health/db
