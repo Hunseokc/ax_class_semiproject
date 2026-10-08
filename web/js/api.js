@@ -131,4 +131,5 @@ export const Portfolios = {
   addItem: (id, body) => api.post(`/portfolios/${id}/items`, body),
   updateItem: (id, itemId, body) => api.put(`/portfolios/${id}/items/${itemId}`, body),
   removeItem: (id, itemId) => api.del(`/portfolios/${id}/items/${itemId}`),
+  previewEqualWeight: (id, body) => api.post(`/portfolios/${id}/preview/equal-weight`, body),
 };

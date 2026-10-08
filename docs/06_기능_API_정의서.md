@@ -50,6 +50,7 @@
 | 모의 포트폴리오 | PUT | `/portfolios/{portfolio_id}/items/{item_id}` | 담은 종목 수정 (기준가·환율을 현재값으로 갱신) | body: mode, value, memo | 200 · 404 PORTFOLIO_NOT_FOUND, ITEM_NOT_FOUND · 409 SEED_EXCEEDED · 422 VALIDATION_ERROR, QUANTITY_ZERO, NO_PRICE · 503 FX_UNAVAILABLE(USD) |
 | 모의 포트폴리오 | DELETE | `/portfolios/{portfolio_id}/items/{item_id}` | 담은 종목 삭제 | - | 204 · 404 PORTFOLIO_NOT_FOUND, ITEM_NOT_FOUND · 422 VALIDATION_ERROR |
 | 모의 포트폴리오 | GET | `/portfolios/{portfolio_id}/summary` | 요약: 사용·잔여·비중·가중 매력도·평가손익(환 효과 분리) | - | 200 · 404 PORTFOLIO_NOT_FOUND · 422 VALIDATION_ERROR · 503 FX_UNAVAILABLE(USD 보유) |
+| 모의 포트폴리오 | POST | `/portfolios/{portfolio_id}/preview/equal-weight` | 관심종목(또는 지정 종목) 균등 배분 미리보기 — **저장하지 않는 계산 전용**. 예산 ÷ 대상 종목 수 = 균등 몫, 1주 원가로 나눠 내림한 정수 수량(담기 금액 모드와 같은 환산)·원화 금액·실제 비중, 남는 금액, 제외 종목과 사유(ALREADY_IN_PORTFOLIO·NO_PRICE·PRICE_ABOVE_SHARE) | body(선택): stocks [{market, ticker}] (생략 시 관심종목 전체), budget_krw (생략 시 잔여 시드) | 200 · 404 PORTFOLIO_NOT_FOUND, STOCK_NOT_FOUND · 409 SEED_EXCEEDED(예산 > 잔여 시드, 잔여 시드 0) · 422 VALIDATION_ERROR, EMPTY_WATCHLIST · 503 FX_UNAVAILABLE(USD) |
 | 분석 | GET | `/stocks/{market}/{ticker}/analysis` | 수치 분석(v_stock_metrics) + 매력도(프리셋별 점수·팩터 기여도·지표 원값/Z·국가 내 순위·백분위·데이터 충족도) | preset | 200 · 404 STOCK_NOT_FOUND, NO_PRICE · 422 VALIDATION_ERROR, UNKNOWN_PRESET |
 | 분석 | GET | `/scoring/presets` | 투자 성향 프리셋(sort_order 순: 위험·성장·균형·가치)과 팩터별 가중치 | - | 200 |
 | 분석 | GET | `/stocks/{market}/{ticker}/peers` | 경쟁 그룹별 비교 표 (그룹 내 RANK·AVG, 구성원 1명 그룹은 비교 대상 없음) | - | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
@@ -1231,6 +1232,96 @@
 ```json
 (본문 없음)
 ```
+#### `POST /api/v1/portfolios/1/preview/equal-weight` — 균등 배분 미리보기 (2026-10-08 실제 호출, 저장되지 않음)
+요청: `{"budget_krw": 3000000}` · 관심종목 6개 중 이미 담은 AAPL·NVDA는 제외 → 4종목 × 750,000원. 호출 전후 `portfolio_items` 9행·원가 합계 그대로임을 확인.
+응답 `200`:
+```json
+{
+  "portfolio_id": 1,
+  "seed_krw": 30000000,
+  "used_krw": 15189368.4,
+  "remaining_krw": 14810631.6,
+  "budget_krw": 3000000,
+  "target_count": 4,
+  "share_krw": 750000,
+  "items": [
+    {
+      "market": "NASDAQ",
+      "ticker": "MSFT",
+      "name": "Microsoft",
+      "currency": "USD",
+      "price": 529.76,
+      "price_date": "2026-10-07",
+      "fx_rate": 1338.08,
+      "unit_cost_krw": 708861.26,
+      "quantity": 1,
+      "cost_krw": 708861.26,
+      "weight": 0.371472
+    },
+    {
+      "market": "NASDAQ",
+      "ticker": "AMZN",
+      "name": "Amazon",
+      "currency": "USD",
+      "price": 259.92,
+      "price_date": "2026-10-07",
+      "fx_rate": 1338.08,
+      "unit_cost_krw": 347793.75,
+      "quantity": 2,
+      "cost_krw": 695587.51,
+      "weight": 0.364516
+    },
+    {
+      "market": "NASDAQ",
+      "ticker": "AVGO",
+      "name": "Broadcom",
+      "currency": "USD",
+      "price": 376.51,
+      "price_date": "2026-10-07",
+      "fx_rate": 1338.08,
+      "unit_cost_krw": 503800.5,
+      "quantity": 1,
+      "cost_krw": 503800.5,
+      "weight": 0.264012
+    }
+  ],
+  "total_cost_krw": 1908249.27,
+  "leftover_krw": 1091750.73,
+  "skipped": [
+    {
+      "market": "NASDAQ",
+      "ticker": "AAPL",
+      "name": "Apple",
+      "reason": "ALREADY_IN_PORTFOLIO",
+      "message": "이미 담은 종목입니다(수량 변경은 담은 종목 수정)",
+      "unit_cost_krw": null,
+      "share_krw": null
+    },
+    {
+      "market": "NASDAQ",
+      "ticker": "NVDA",
+      "name": "NVIDIA",
+      "reason": "ALREADY_IN_PORTFOLIO",
+      "message": "이미 담은 종목입니다(수량 변경은 담은 종목 수정)",
+      "unit_cost_krw": null,
+      "share_krw": null
+    },
+    {
+      "market": "NASDAQ",
+      "ticker": "META",
+      "name": "Meta Platforms",
+      "reason": "PRICE_ABOVE_SHARE",
+      "message": "1주 원가가 균등 몫보다 큽니다",
+      "unit_cost_krw": 965170.48,
+      "share_krw": 750000
+    }
+  ],
+  "fx_rate": 1338.08,
+  "fx_rate_at": "2026-10-08T06:09:54.257939Z",
+  "saved": false
+}
+```
+
 ### 3-6. 통계
 #### `GET /api/v1/statistics/overview`
 응답 `200`:
@@ -1615,6 +1706,7 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 | 모의 포트폴리오 | `/portfolio?id=` | 선택·생성·수정·삭제 | `GET/POST /portfolios`, `PUT/DELETE /portfolios/{id}` |
 | | | 요약·비중 차트·담은 목록 | `GET /portfolios/{id}/summary` |
 | | | 종목 담기 패널 | `GET /stocks?limit=100`(검색 목록), `GET /market/fx`, `POST /portfolios/{id}/items` |
+| | | 관심종목 균등 배분 미리보기 → 결과 모달 · '모두 담기' | `POST /portfolios/{id}/preview/equal-weight` → 종목별 `POST /portfolios/{id}/items` |
 | | | 항목 수정·삭제 | `PUT/DELETE /portfolios/{id}/items/{item_id}` |
 | (보고서·발표) | — | 데이터 개요·통계 | `GET /statistics/*` |
 
@@ -1629,6 +1721,7 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 | `HTTP_ERROR` | 400 등 | 프레임워크가 낸 기타 HTTP 예외. 실제 예: 본문이 UTF-8이 아니어서 해석하지 못함(400 "There was an error parsing the body"). JSON 문법 오류는 422 `VALIDATION_ERROR`(`json_invalid`) | 본문을 받는 엔드포인트 | There was an error parsing the body | ERR-07 |
 | `INTERNAL_ERROR` | 500 | 처리하지 못한 예외. 응답은 고정 메시지만, 스택은 요청 ID와 함께 서버 로그 | 모든 엔드포인트 | 서버 오류가 발생했습니다 | ERR-08 |
 | `STOCK_NOT_FOUND` | 404 | (시장, 티커) 종목 없음 | `/stocks/{market}/{ticker}`·하위, `/watchlist`(POST·DELETE), 담기, `/statistics/monthly` | 종목 KOSPI/999999을(를) 찾을 수 없습니다 | ST-06, ERR-09, AN-14 |
+| `EMPTY_WATCHLIST` | 422 | 균등 배분 미리보기에서 종목을 지정하지 않았는데 관심종목이 0개 | `POST /portfolios/{id}/preview/equal-weight` | 관심종목이 없습니다. 종목을 지정하거나 관심종목을 추가하세요 | PF-18 |
 | `USER_NOT_FOUND` | 404 | 요청 사용자(`DEFAULT_USER_ID`)가 DB에 없음 | `/watchlist`, `/portfolios` | 사용자(ID 99)를 찾을 수 없습니다 | WL-03 |
 | `PORTFOLIO_NOT_FOUND` | 404 | 포트폴리오 없음 또는 다른 사용자 소유 | `/portfolios/{portfolio_id}`·하위 | 포트폴리오(ID 7)를 찾을 수 없습니다 | USR-02, ERR-10 |
 | `ITEM_NOT_FOUND` | 404 | 그 포트폴리오에 항목 없음 또는 다른 사용자 소유 | `/portfolios/{id}/items/{item_id}` | 포트폴리오(ID 1)에 항목(ID 9)이 없습니다 | USR-04, ERR-10 |
@@ -1639,7 +1732,7 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 | `DUPLICATE_WATCHLIST` | 409 | 이미 관심종목에 있는 종목 추가 | `POST /watchlist` | 이미 관심종목에 있습니다 | WL-02 |
 | `DUPLICATE_PORTFOLIO_NAME` | 409 | 같은 사용자의 같은 이름 포트폴리오 | `POST·PUT /portfolios` | 같은 이름의 포트폴리오가 이미 있습니다: 반도체 집중 | PF-07 |
 | `DUPLICATE_ITEM` | 409 | 이미 담은 종목을 다시 담기(`detail.item_id`, 수정은 PUT) | 담기 | 이미 담은 종목입니다. 수량을 바꾸려면 수정(PUT)을 사용하세요 | ERR-03 |
-| `SEED_EXCEEDED` | 409 | 담은 원가 합계가 시드 초과(`detail.max_quantity` 등) | 담기, 담은 종목 수정 | 담은 원가 합계가 시드를 넘습니다 | PF-02, ERR-13 |
+| `SEED_EXCEEDED` | 409 | 담은 원가 합계가 시드 초과(`detail.max_quantity` 등) | 담기, 담은 종목 수정, 균등 배분 미리보기(예산 > 잔여 시드·잔여 시드 0) | 담은 원가 합계가 시드를 넘습니다 | PF-02, ERR-13, PF-17 |
 | `SEED_BELOW_USED` | 409 | 시드를 담은 원가 합계보다 작게 수정 | `PUT /portfolios/{id}` | 시드를 현재 담은 원가 합계보다 작게 줄일 수 없습니다 | ERR-03 |
 | `QUANTITY_ZERO` | 422 | 금액·비중으로 계산한 수량이 0주(`detail.min_amount_krw` 등) | 담기, 담은 종목 수정 | 계산된 수량이 0주입니다. 금액이나 비중을 늘려 주세요 | PF-04 |
 | `INVALID_QUANTITY` | 422 | 수량 모드인데 정수가 아님 — 서비스 계층 방어(API는 스키마가 먼저 `VALIDATION_ERROR`) | (서비스 직접 호출) | 수량은 정수여야 합니다 | ERR-04 |

@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, Response
 
 from app.api.deps import IdPath, get_portfolio_service
 from app.models import Portfolio, PortfolioItem
-from app.schemas.api import (ItemCreate, ItemInput, ItemOut, ItemsOut, PortfolioCreate, PortfolioOut,
-                             PortfolioUpdate, SummaryOut)
+from app.schemas.api import (EqualWeightOut, EqualWeightRequest, ItemCreate, ItemInput, ItemOut, ItemsOut,
+                             PortfolioCreate, PortfolioOut, PortfolioUpdate, SummaryOut)
 from app.services.portfolio import PortfolioService
 
 router = APIRouter(prefix="/portfolios", tags=["portfolios"])
@@ -84,3 +84,12 @@ def delete_item(portfolio_id: IdPath, item_id: IdPath, svc: PortfolioService = D
             summary="요약: 사용·잔여·비중·가중 매력도·평가손익(환 효과 분리)")
 def summary(portfolio_id: IdPath, svc: PortfolioService = Depends(get_portfolio_service)):
     return svc.summary(portfolio_id)
+
+
+@router.post("/{portfolio_id}/preview/equal-weight", response_model=EqualWeightOut,
+             summary="관심종목(또는 지정 종목) 균등 배분 미리보기 — 저장하지 않는 계산 전용. 정수 수량·원화 금액·실제 비중, 살 수 없는 종목과 사유")
+def preview_equal_weight(portfolio_id: IdPath, body: EqualWeightRequest | None = None,
+                         svc: PortfolioService = Depends(get_portfolio_service)):
+    body = body or EqualWeightRequest()
+    targets = [(x.market, x.ticker) for x in body.stocks] if body.stocks is not None else None
+    return svc.preview_equal_weight(portfolio_id, targets, body.budget_krw)

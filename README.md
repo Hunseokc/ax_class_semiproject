@@ -17,7 +17,7 @@
 | 대시보드 홈 `/` | 투자 성향(위험·성장·균형·가치) 선택, 주요 지수·USD/KRW(30일 스파크라인, 지수 10개 + 환율 중 표시할 지표를 ‘설정’에서 선택 — 한 줄, 넘치면 가로 스크롤), 내 관심종목 카드(매력도 게이지·가격 등락·목표가 대비 괴리율·메모, 카드에서 메모·목표가 편집), 순위 상위 5(거래량·1개월·1년 수익률 × 국내/미국) |
 | 주식 리스트 `/stocks` | 시장 탭·거래량/시가총액(원화 환산) 순위·검색·경쟁 그룹 필터, 투자 성향 선택, ★ 관심 토글, 포트폴리오 담기 |
 | 종목 상세 `/stocks/{market}/{ticker}` | 가격 차트, 핵심 지표, 매력도(투자 성향 메뉴, 국가 내 순위, 팩터 기여도, 지표 원값·Z), 수치 분석(수익률·변동성·MDD·120일선 괴리율), 월별 요약(최근 12개월 평균·최고·최저·월간 수익률·거래량), FY 재무 추이, 경쟁 종목 비교(그룹 내 순위·평균, 기준일=100 추이), 최근 공시 |
-| 모의 포트폴리오 `/portfolio` | 시드 설정, 수량/금액/비중으로 담기(미리보기), 시드 초과 방어, 평가손익과 환율 효과 분리, 비중 차트 |
+| 모의 포트폴리오 `/portfolio` | 시드 설정, 수량/금액/비중으로 담기(미리보기), 관심종목 균등 배분 미리보기(저장 안 함, '모두 담기'로 연결), 시드 초과 방어, 평가손익과 환율 효과 분리, 비중 차트 |
 
 ## 기술 스택
 Python 3.12 · FastAPI · SQLAlchemy 2.x(동기) · Pydantic v2 · psycopg 3 · PostgreSQL 16 · Docker Compose(db + api) · pytest · 바닐라 JS(ES Modules, 빌드 없음) · Chart.js(CDN) · Google Fonts
@@ -105,7 +105,7 @@ python -m app.ingest hydrate 042700       # 비교군 종목 상세 데이터 �
 
 ## 5. 테스트
 ```bash
-docker compose run --rm api pytest -q   # 263 passed (venv라면 pytest -q) — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
+docker compose run --rm api pytest -q   # 275 passed (venv라면 pytest -q) — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
 python -m app.ingest explain           # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
 ```
 DB 제약·전처리·TTL 갱신(외부 호출 횟수)·분석 SQL 손계산·포트폴리오 명세 시나리오·동시성·화면 흐름을 검증합니다. 결과는 [docs/07](docs/07_테스트_결과서.md).
@@ -161,4 +161,4 @@ pykrx·yfinance는 비공식 라이브러리로 사이트 변경 시 동작하�
 - KRX 제공 PER/EPS의 산정 기준은 DART 연결 재무 기반 계산과 다를 수 있음(A-38)
 - 매력도는 비교 표본(노출 25 + 비교군 121종목) 안에서 같은 시장끼리 비교한 상대적 위치(팩터 점수)이며 수익률 예측이 아님. 재무는 최신 FY 1개년 기준(docs/09 8절)
 - 비교군 후보 풀은 직접 정의(섹터가 KRX 업종·GICS와 1:1이 아님). 미국 2차전지처럼 적자 소형주가 많은 그룹은 섹터 중립화로 그룹 안 상위 종목 점수가 크게 오를 수 있음 — 시장 특성으로 보고 그대로 둠(ASSUMPTIONS A-107)
-- 미구현 선택 기능: 분기 재무, 투자 스타일 체크리스트, 시나리오 API, 관심종목 균등 배분 미리보기, 관심종목 정렬 변경 화면(API는 있음)
+- 미구현 선택 기능: 분기 재무, 투자 스타일 체크리스트, 시나리오 API, 관심종목 정렬 변경 화면(API는 있음)

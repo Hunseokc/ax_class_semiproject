@@ -1,4 +1,4 @@
-// 모의 포트폴리오: 선택·생성·삭제, 시드 수정, 종목 담기(검색+모드+미리보기), 담은 목록(수정·삭제), 요약·비중 차트
+// 모의 포트폴리오: 선택·생성·삭제, 시드 수정, 종목 담기(검색+모드+미리보기·관심종목 균등 배분 미리보기), 담은 목록(수정·삭제), 요약·비중 차트
 // 체결 기록이 아니라 "시드 안에서 담아보는 계산기"다.
 import { Market, Portfolios, Stocks } from "../api.js";
 import { DASH, changeHtml, dateTime, esc, initials, krw, num, pct, price, signedKrw, stockUrl } from "../format.js";
@@ -224,8 +224,10 @@ async function renderAddPanel(s) {
       <label class="search"><span class="sr-only">담을 종목 검색</span>${icons.search}
         <input class="input" list="stock-options" placeholder="종목명·티커 검색 후 선택" autocomplete="off"></label>
       <datalist id="stock-options">${universe.map((u) => `<option value="${esc(u.name)} · ${esc(u.ticker)} · ${esc(u.market)}${held.has(u.stock_id) ? " (담김)" : ""}"></option>`).join("")}</datalist>
-      <div data-form><p class="subtle">종목을 고르면 수량·금액·비중으로 담고, 입력하는 동안 예상 수량·원가·잔여 현금을 미리 보여줍니다.</p></div></div>`);
+      <div data-form><p class="subtle">종목을 고르면 수량·금액·비중으로 담고, 입력하는 동안 예상 수량·원가·잔여 현금을 미리 보여줍니다.</p></div>
+      <div><button class="btn btn--sm" type="button" data-equal>관심종목 균등 배분 미리보기</button></div></div>`);
   panel.replaceChildren(box);
+  box.querySelector("[data-equal]").addEventListener("click", () => openEqualWeight(s));
   const input = box.querySelector("input");
   let shown = null;   // 지금 폼을 띄운 종목 — 같은 종목으로 change가 다시 와도(포커스 이동 등) 입력값을 지우지 않는다
   input.addEventListener("change", async () => {
@@ -239,6 +241,49 @@ async function renderAddPanel(s) {
     const fx = st.currency === "USD" ? await Market.fx() : null;
     const pfRow = { portfolio_id: currentId, name: s.name, seed_krw: s.seed_krw, remaining_krw: s.remaining_krw };
     renderAddForm(target, st, { portfolios: [pfRow], fx, portfolioId: currentId, onDone: refreshCurrent });
+  });
+}
+
+// ---------------------------------------------------------------- 관심종목 균등 배분 미리보기 (POST …/preview/equal-weight — 저장하지 않음)
+async function openEqualWeight(s) {
+  let d;
+  try {
+    d = await Portfolios.previewEqualWeight(currentId);
+  } catch (e) {
+    toast(e.code === "EMPTY_WATCHLIST" ? "관심종목이 없습니다. 주식 리스트에서 ★로 추가하세요." : e.message, "error");
+    return;
+  }
+  const rows = d.items.map((i) => `<tr><td>${esc(i.name)}<br><span class="subtle">${esc(i.ticker)} · 1주 ${krw(i.unit_cost_krw)}</span></td>
+      <td class="num">${num(i.quantity)}주</td><td class="num">${krw(i.cost_krw)}</td><td class="num">${pct(i.weight, { digits: 1 })}</td></tr>`).join("");
+  const body = h(`<div class="add-form">
+      <p class="subtle">${d.target_count
+        ? `예산(잔여 시드) ${krw(d.budget_krw)} ÷ ${d.target_count}종목 = 종목당 ${krw(d.share_krw)} · 1주 원가로 나눠 내림한 정수 수량${d.fx_rate ? ` · 환율 ${num(d.fx_rate, 2)}` : ""}`
+        : `예산(잔여 시드) ${krw(d.budget_krw)} · 나눌 대상 종목이 없습니다(아래 사유)`}</p>
+      ${d.items.length ? `<div class="table-wrap"><table class="table"><caption class="sr-only">균등 배분 미리보기</caption>
+        <thead><tr><th scope="col">종목</th><th scope="col">수량</th><th scope="col">금액</th><th scope="col">비중</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>` : '<p class="notice">살 수 있는 종목이 없습니다.</p>'}
+      <dl class="preview"><dt>사용 금액</dt><dd class="num">${krw(d.total_cost_krw)}</dd>
+        <dt>남는 금액</dt><dd class="num">${krw(d.leftover_krw)}</dd></dl>
+      ${d.skipped.length ? `<ul class="score-notes">${d.skipped.map((x) => `<li>${esc(x.name)}: ${esc(x.message)}${x.unit_cost_krw ? ` (1주 ${krw(x.unit_cost_krw)} > 몫 ${krw(x.share_krw)})` : ""}</li>`).join("")}</ul>` : ""}
+      <p class="subtle">미리보기는 저장되지 않습니다. '모두 담기'를 누르면 종목별로 수량 담기를 차례로 실행합니다.</p>
+      <div class="modal__foot"><button class="btn" type="button" data-close>닫기</button>
+        <button class="btn btn--primary" type="button" data-save ${d.items.length ? "" : "disabled"}>모두 담기</button></div></div>`);
+  const modal = openModal({ title: "관심종목 균등 배분 미리보기", body });
+  body.querySelector("[data-save]").addEventListener("click", async (e) => {
+    e.currentTarget.disabled = true;
+    let done = 0;
+    for (const i of d.items) {
+      try {
+        await Portfolios.addItem(currentId, { market: i.market, ticker: i.ticker, mode: "quantity", value: i.quantity });
+        done += 1;
+      } catch (err) {
+        toast(`${i.name} 담기 실패: ${err.message} (${done}종목 담음)`, "error");
+        break;
+      }
+    }
+    modal.close();
+    if (done === d.items.length) toast(`${done}종목을 담았습니다`);
+    refreshCurrent();
   });
 }
 

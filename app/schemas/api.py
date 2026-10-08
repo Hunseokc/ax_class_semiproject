@@ -379,6 +379,66 @@ class GroupWeight(WeightRow):
     group: str
 
 
+class StockKey(Schema):
+    market: Market
+    ticker: Ticker
+
+
+class EqualWeightRequest(Schema):
+    stocks: list[StockKey] | None = Field(default=None, min_length=1, max_length=100,
+                                          description="대상 종목. 생략하면 내 관심종목 전체")
+    budget_krw: Decimal | None = Field(default=None, gt=0, le=MONEY_MAX, max_digits=20, decimal_places=0,
+                                       description="배분할 금액(원). 생략하면 포트폴리오 잔여 시드, 잔여 시드 초과는 409")
+
+    @field_validator("stocks")
+    @classmethod
+    def _no_duplicates(cls, v: list[StockKey] | None):
+        if v is not None and len({(x.market.upper(), x.ticker.upper()) for x in v}) != len(v):
+            raise ValueError("같은 종목이 두 번 들어 있습니다")
+        return v
+
+
+class EqualWeightItem(Schema):
+    market: str
+    ticker: str
+    name: str
+    currency: str
+    price: Num                       # 종목 통화 최신 종가
+    price_date: date
+    fx_rate: Num                     # KRW 종목은 1
+    unit_cost_krw: Num               # 1주 원가(원)
+    quantity: int                    # 균등 몫 ÷ 1주 원가 내림
+    cost_krw: Num
+    weight: Num | None               # 실제 배분 비중 = cost / total_cost
+
+
+class EqualWeightSkipped(Schema):
+    market: str
+    ticker: str
+    name: str
+    reason: Literal["ALREADY_IN_PORTFOLIO", "NO_PRICE", "PRICE_ABOVE_SHARE"]
+    message: str
+    unit_cost_krw: Num | None = None
+    share_krw: Num | None = None
+
+
+class EqualWeightOut(Schema):
+    portfolio_id: int
+    seed_krw: Num
+    used_krw: Num
+    remaining_krw: Num
+    budget_krw: Num
+    target_count: int                # 균등 몫을 나눈 종목 수(이미 담은·시세 없는 종목 제외)
+    share_krw: Num                   # 종목당 균등 몫
+    items: list[EqualWeightItem]
+    total_cost_krw: Num
+    leftover_krw: Num                # 예산 − 총 사용 금액
+    skipped: list[EqualWeightSkipped]
+    fx_rate: Num | None
+    fx_rate_at: datetime | None
+    saved: bool = False              # 계산 전용 — 저장하려면 담기 API를 종목별로 호출
+
+
 class SummaryOut(Schema):
     portfolio_id: int
     name: str
