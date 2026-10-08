@@ -1,5 +1,5 @@
-// 대시보드 홈: 지수·환율 카드(표시 지표 선택), 내 관심종목, 거래량 상위 5
-import { Market, PRESET_EVENT, Stocks, Watchlist, getPreset } from "../api.js";
+// 대시보드 홈: 지수·환율 카드(표시 지표 선택), 내 관심종목, 순위 상위 5(거래량·수익률)
+import { Market, PRESET_EVENT, Stats, Stocks, Watchlist, getPreset } from "../api.js";
 import { changeHtml, changeLabel, date, dateTime, esc, formatPriceWithChange, initials, num, price, shortDate, stockUrl, volume } from "../format.js";
 import { color, destroyCharts, sparkline } from "../components/charts.js";
 import { DEFAULT_METRICS, FX_CODE, metricPicker, storedMetrics } from "../components/metric-picker.js";
@@ -179,8 +179,10 @@ window.addEventListener("resize", () => {
   }, 150);
 });
 
-// ---------------------------------------------------------------- 거래량 상위 5
+// ---------------------------------------------------------------- 순위 상위 5 (거래량: GET /stocks, 수익률: GET /statistics/ranking)
+const TOP_METRICS = [{ value: "volume", label: "거래량" }, { value: "return_1m", label: "1개월 수익률" }, { value: "return_1y", label: "1년 수익률" }];
 let topCountry = "KR";
+let topMetric = "volume";
 function volumeRow(s) {
   return h(`<li><a class="row" href="${stockUrl(s.market, s.ticker)}">
       <span style="display:flex;align-items:center;gap:12px"><span class="rank">${s.rank}</span><span class="avatar" aria-hidden="true">${esc(initials(s.name))}</span></span>
@@ -190,22 +192,39 @@ function volumeRow(s) {
     </a></li>`);
 }
 
+function returnRow(s) {
+  return h(`<li><a class="row" href="${stockUrl(s.market, s.ticker)}">
+      <span style="display:flex;align-items:center;gap:12px"><span class="rank">${s.rank}</span><span class="avatar" aria-hidden="true">${esc(initials(s.name))}</span></span>
+      <span class="row__main"><span class="row__title">${esc(s.name)}</span>
+        <span class="row__sub">${esc(s.ticker)} ${marketBadge(s.market, s.country)} 기준일 ${shortDate(s.as_of)}</span></span>
+      <span class="row__value num">${changeHtml(s.value, s.country)}</span>
+    </a></li>`);
+}
+
 function loadTopVolume() {
+  const label = TOP_METRICS.find((m) => m.value === topMetric).label;
+  $("#h-top").textContent = `${label} 상위 5`;
+  $("#top-more").hidden = topMetric !== "volume";        // 주식 리스트는 거래량·시총 정렬만 있다
   $("#top-more").href = `/stocks?country=${topCountry}&sort=volume`;
   return load($("#top-volume"), {
     skeleton: skeleton("row", 5),
-    fetch: async () => (await Stocks.list({ country: topCountry, sort: "volume", limit: 5 })).items,
+    fetch: async () => (topMetric === "volume"
+      ? (await Stocks.list({ country: topCountry, sort: "volume", limit: 5 })).items
+      : (await Stats.ranking(topMetric, topCountry, 5)).items),
     render: (items) => {
       const ul = h('<ul class="list card card--flush"></ul>');
-      ul.append(...items.map(volumeRow));
+      ul.append(...items.map(topMetric === "volume" ? volumeRow : returnRow));
       return ul;
     },
-    empty: emptyState({ title: "시세 데이터가 없습니다", body: "데이터 적재 후 다시 확인해 주세요." }),
+    empty: emptyState({ title: topMetric === "volume" ? "시세 데이터가 없습니다" : `${label}을 계산할 시세가 부족합니다`,
+      body: "데이터 적재 후 다시 확인해 주세요." }),
   });
 }
 
+$("#top-metric").append(segmented(TOP_METRICS, topMetric,
+  (v) => { topMetric = v; loadTopVolume(); }, { label: "순위 지표 선택" }));
 $("#top-tabs").append(segmented([{ value: "KR", label: "국내" }, { value: "US", label: "미국" }], topCountry,
-  (v) => { topCountry = v; loadTopVolume(); }, { label: "거래량 상위 시장 선택" }));
+  (v) => { topCountry = v; loadTopVolume(); }, { label: "순위 시장 선택" }));
 
 function loadAll() {
   loadMarket();

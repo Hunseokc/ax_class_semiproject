@@ -58,6 +58,7 @@
 | 통계 | GET | `/statistics/peer-group-valuation` | 경쟁 그룹별 평균·최고·최저 지표 | - | 200 |
 | 통계 | GET | `/statistics/disclosure-frequency` | 기간별 공시 빈도 (월·분기·주) | period, days | 200 · 422 VALIDATION_ERROR |
 | 통계 | GET | `/statistics/monthly` | 종목 월별 집계: 거래일 수·평균 종가·최고/최저·월초 대비 월말 수익률·거래량 합계/평균 (date_trunc + GROUP BY, FIRST_VALUE/LAST_VALUE 윈도우). 진행 중인 달은 `is_partial: true` | market, ticker (필수), months (1~24, 기본 12) | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
+| 통계 | GET | `/statistics/ranking` | 지표별 TOP N 랭킹(노출 종목). `v_stock_metrics` + `RANK() OVER` — 같은 값은 같은 순위(1, 1, 3), 지표값 없는 종목 제외. 수익률은 소수, 거래량은 주, 시총은 원화 환산 | metric (return_1m·return_3m·return_1y·volume·market_cap_krw, 필수), country (KR·US, 비우면 전체), order (desc·asc), limit (1~50, 기본 10) | 200 · 422 VALIDATION_ERROR, VOLUME_SORT_REQUIRES_MARKET(전체 + volume) |
 
 ※ 오류 열은 엔드포인트별로 실제 발생할 수 있는 상태와 `code`다. 모든 엔드포인트는 예상하지 못한 예외 시 500 `INTERNAL_ERROR`. 코드별 조건은 [5절](#5-에러-코드).
 
@@ -1370,6 +1371,54 @@
 }
 ```
 
+#### `GET /api/v1/statistics/ranking?metric=return_1y&limit=3` — 1년 수익률 상위 3 (2026-10-08 실제 호출)
+국가 구분 없이(전체) 원화·달러 종목을 같은 수익률(소수)로 비교. `total`은 1년 수익률이 있는 노출 종목 수.
+응답 `200`:
+```json
+{
+  "metric": "return_1y",
+  "country": null,
+  "order": "desc",
+  "limit": 3,
+  "total": 25,
+  "items": [
+    {
+      "rank": 1,
+      "stock_id": 2,
+      "market": "KOSPI",
+      "country": "KR",
+      "currency": "KRW",
+      "ticker": "000660",
+      "name": "SK하이닉스",
+      "value": 3.336283,
+      "as_of": "2026-10-07"
+    },
+    {
+      "rank": 2,
+      "stock_id": 25,
+      "market": "NASDAQ",
+      "country": "US",
+      "currency": "USD",
+      "ticker": "AMD",
+      "name": "AMD",
+      "value": 2.053567,
+      "as_of": "2026-10-07"
+    },
+    {
+      "rank": 3,
+      "stock_id": 1,
+      "market": "KOSPI",
+      "country": "KR",
+      "currency": "KRW",
+      "ticker": "005930",
+      "name": "삼성전자",
+      "value": 2.022472,
+      "as_of": "2026-10-07"
+    }
+  ]
+}
+```
+
 ### 3-7. 공통 오류 응답
 #### `GET /api/v1/portfolios/99999999999` — id가 INT 범위 밖 → 422 (이전에는 DB 오류가 500으로 노출)
 응답 `422` (2026-10-08 실제 호출):
@@ -1466,7 +1515,7 @@
 | | | USD/KRW 카드 | `GET /market/fx` |
 | | | 투자 성향 펼침 메뉴(헤더) | `GET /scoring/presets` |
 | | | 내 관심종목 카드(카드 클릭 → 상세 `?preset=`) | `GET /watchlist?preset=` |
-| | | 거래량 상위 5 (국내/미국) | `GET /stocks?country=&sort=volume&limit=5` |
+| | | 순위 상위 5 — 지표 탭(거래량·1개월·1년 수익률) × 국내/미국 | 거래량 `GET /stocks?country=&sort=volume&limit=5`, 수익률 `GET /statistics/ranking?metric=&country=&limit=5` |
 | 주식 리스트 | `/stocks` | 순위 리스트·탭·정렬·검색 | `GET /stocks?country=&sort=&order=&group=&q=&preset=` |
 | | | 투자 성향 펼침 메뉴(헤더) | `GET /scoring/presets` |
 | | | 경쟁 그룹 필터 | `GET /peer-groups` |
@@ -1514,6 +1563,6 @@
 | `INVALID_QUANTITY` | 422 | 수량 모드인데 정수가 아님 — 서비스 계층 방어(API는 스키마가 먼저 `VALIDATION_ERROR`) | (서비스 직접 호출) | 수량은 정수여야 합니다 | ERR-04 |
 | `INVALID_MODE` | 422 | 지원하지 않는 담기 모드 — 서비스 계층 방어(API는 스키마가 먼저 `VALIDATION_ERROR`) | (서비스 직접 호출) | 지원하지 않는 모드: shares | ERR-04 |
 | `UNKNOWN_PRESET` | 422 | 없는 투자 성향 프리셋(`detail.presets`) | `preset`을 받는 엔드포인트 | 알 수 없는 매력도 프리셋입니다: buffett | SC-13, ERR-19 |
-| `VOLUME_SORT_REQUIRES_MARKET` | 422 | 전체 탭(country 없음)에서 거래량 정렬 | `GET /stocks` | 시장마다 거래량 단위가 달라 '전체'에서는 거래량 정렬을 할 수 없습니다 … | ST-03 |
+| `VOLUME_SORT_REQUIRES_MARKET` | 422 | 전체 탭(country 없음)에서 거래량 정렬 | `GET /stocks`, `GET /statistics/ranking?metric=volume` | 시장마다 거래량 단위가 달라 '전체'에서는 거래량 정렬을 할 수 없습니다 … | ST-03, AN-20 |
 | `DB_UNAVAILABLE` | 503 | `SELECT 1` 실패(연결 거부·시간 초과 등). 접속 정보는 응답에 넣지 않고 로그에만 | `GET /health/db` | DB에 연결할 수 없습니다 | HL-03, HL-04 |
 | `FX_UNAVAILABLE` | 503 | 환율 조회 실패 + 저장된 환율 없음 | `/market/fx`, USD 종목 상세·담기·평가 | 환율을 조회할 수 없고 저장된 값도 없습니다 | RF-04, ERR-05 |

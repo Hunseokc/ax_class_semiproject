@@ -225,3 +225,70 @@ def test_monthly_statistics_empty_when_no_prices(client, engine):
         conn.execute(text("INSERT INTO stocks (stock_id, market_id, ticker, name) VALUES (5, 1, '035720', '카카오')"))
     r = client.get(f"{API}/statistics/monthly", params={"market": "KOSPI", "ticker": "035720"})
     assert r.status_code == 200 and r.json()["items"] == [] and r.json()["months"] == 12
+
+
+# ------------------------------------------------------------------ TOP N 랭킹 (/statistics/ranking)
+@pytest.fixture
+def ranking_data(engine):
+    """1개월 수익률: 삼성 70,000/56,000−1 = 25%, SK하이닉스 150,000/120,000−1 = 25%(동점), AAPL 200/250−1 = −20%,
+    NVDA는 1개월 전 시세가 없어 NULL(제외). 비교군 종목(5)은 시총이 가장 커도 제외."""
+    past = D - timedelta(days=40)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO daily_prices VALUES (:s, :d, :c, :c, :c, :c, 1)"),
+                     [{"s": 1, "d": past, "c": 56000}, {"s": 2, "d": past, "c": 120000}, {"s": 3, "d": past, "c": 250}])
+        conn.execute(text("INSERT INTO stocks (stock_id, market_id, ticker, name, coverage) VALUES (5, 2, 'MSFT', 'Microsoft', 'benchmark')"))
+        conn.execute(text("INSERT INTO daily_prices VALUES (5, :d, 400, 400, 400, 400, 99999)"), {"d": D})
+        conn.execute(text("INSERT INTO valuation_snapshots (stock_id, as_of, market_cap, source) VALUES (5, :d, 9000000000000, 'YFINANCE')"), {"d": D})
+
+
+def ranking(client, **params):
+    r = client.get(f"{API}/statistics/ranking", params=params)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_ranking_rank_ties_and_null_exclusion(client, ranking_data):
+    d = ranking(client, metric="return_1m")
+    assert d["total"] == 3                                               # NVDA(NULL)·비교군 제외
+    assert [(i["rank"], i["ticker"], i["value"]) for i in d["items"]] == [
+        (1, "000660", 0.25), (1, "005930", 0.25), (3, "AAPL", -0.2)]   # RANK: 동점 1, 1 → 다음은 3
+    asc = ranking(client, metric="return_1m", order="asc")
+    assert [(i["rank"], i["ticker"]) for i in asc["items"]] == [(1, "AAPL"), (2, "000660"), (2, "005930")]
+    assert d["items"][0]["as_of"] == D.isoformat() and d["items"][0]["currency"] == "KRW"
+
+
+def test_ranking_country_filter_and_volume(client, ranking_data):
+    kr = ranking(client, metric="return_1m", country="KR")
+    assert [i["ticker"] for i in kr["items"]] == ["000660", "005930"] and kr["total"] == 2
+    vol = ranking(client, metric="volume", country="KR")                # 거래량 3,000 > 1,000
+    assert [(i["rank"], i["ticker"], i["value"]) for i in vol["items"]] == [(1, "000660", 3000), (2, "005930", 1000)]
+    us = ranking(client, metric="volume", country="US")                 # 비교군 MSFT(99,999주)는 제외
+    assert [i["ticker"] for i in us["items"]] == ["NVDA", "AAPL"]
+
+
+def test_ranking_market_cap_krw_and_limit(client, ranking_data):
+    d = ranking(client, metric="market_cap_krw")                        # AAPL 3조$×1,300 > NVDA > 삼성 > SK
+    assert [i["ticker"] for i in d["items"]] == ["AAPL", "NVDA", "005930", "000660"]
+    assert d["items"][0]["value"] == 3_000_000_000_000 * 1300
+    top1 = ranking(client, metric="market_cap_krw", limit=1)
+    assert len(top1["items"]) == 1 and top1["total"] == 4 and top1["limit"] == 1
+    assert len(ranking(client, metric="market_cap_krw", limit=50)["items"]) == 4
+
+
+def test_ranking_empty_when_metric_missing(client):
+    d = ranking(client, metric="return_3m")                             # 3거래일 픽스처 → 모두 NULL
+    assert d["items"] == [] and d["total"] == 0
+
+
+@pytest.mark.parametrize("params, code", [
+    ({"metric": "per"}, "VALIDATION_ERROR"),
+    ({}, "VALIDATION_ERROR"),                                           # metric 필수
+    ({"metric": "return_1m", "limit": 0}, "VALIDATION_ERROR"),
+    ({"metric": "return_1m", "limit": 51}, "VALIDATION_ERROR"),
+    ({"metric": "return_1m", "country": "JP"}, "VALIDATION_ERROR"),
+    ({"metric": "return_1m", "order": "up"}, "VALIDATION_ERROR"),
+    ({"metric": "volume"}, "VOLUME_SORT_REQUIRES_MARKET"),              # 전체 탭 거래량은 단위가 달라 거부
+])
+def test_ranking_rejects_invalid_params(client, params, code):
+    r = client.get(f"{API}/statistics/ranking", params=params)
+    assert r.status_code == 422 and r.json()["error"]["code"] == code

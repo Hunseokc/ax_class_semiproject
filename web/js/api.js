@@ -114,6 +114,7 @@ export const Watchlist = {
 
 export const Stats = {
   monthly: (market, ticker, months = 12) => api.get("/statistics/monthly", { market, ticker, months }),
+  ranking: (metric, country, limit = 5) => api.get("/statistics/ranking", { metric, country, limit }),
 };
 
 export const Scoring = {

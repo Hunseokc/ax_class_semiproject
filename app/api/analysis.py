@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import MarketPath, TickerPath, get_db, get_preset
 from app.api.stocks import RANGE_MONTHS, resolve_stock
-from app.core.errors import NotFound
+from app.core.errors import NotFound, Unprocessable
 from app.queries import sql
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN, Num, Schema
 from app.services.scoring import FACTORS, METRICS, default_preset
@@ -332,6 +332,47 @@ def stats_monthly(market: str = Query(pattern=MARKET_PATTERN, examples=["KOSPI"]
     rows = db.execute(sql("stats_monthly"), {"stock_id": s["stock_id"], "today": today, "months": months}).mappings().all()
     return {"market": s["market"], "ticker": s["ticker"], "name": s["name"], "currency": s["currency"],
             "months": months, "today": today, "items": [dict(r) for r in rows]}
+
+
+RankingMetric = Literal["return_1m", "return_3m", "return_1y", "volume", "market_cap_krw"]
+
+
+class RankingItem(Schema):
+    rank: int
+    stock_id: int
+    market: str
+    country: str
+    currency: str
+    ticker: str
+    name: str
+    value: Num                       # 수익률은 소수(0.05 = 5%), 거래량은 주, 시총은 원화 환산
+    as_of: date
+
+
+class RankingOut(Schema):
+    metric: str
+    country: str | None
+    order: str
+    limit: int
+    total: int                       # 지표값이 있는 종목 수(순위 대상)
+    items: list[RankingItem]
+
+
+@stats_router.get("/ranking", response_model=RankingOut,
+                  summary="지표별 TOP N 랭킹 (노출 종목, RANK() — 같은 값은 같은 순위, 지표값 없는 종목 제외)")
+def stats_ranking(metric: RankingMetric = Query(description="return_1m·return_3m·return_1y·volume·market_cap_krw"),
+                  country: Literal["KR", "US"] | None = Query(None, description="비우면 전체 (volume은 시장 지정 필수)"),
+                  order: Literal["desc", "asc"] = "desc",
+                  limit: int = Query(10, ge=1, le=50),
+                  db: Session = Depends(get_db)):
+    if metric == "volume" and country is None:
+        raise Unprocessable("시장마다 거래량 단위가 달라 '전체'에서는 거래량 순위를 낼 수 없습니다. country를 지정하세요",
+                            detail={"allowed_metrics_for_all": ["return_1m", "return_3m", "return_1y", "market_cap_krw"]},
+                            code="VOLUME_SORT_REQUIRES_MARKET")
+    rows = db.execute(sql("stats_ranking"), {"metric": metric, "country": country, "order_dir": order,
+                                             "limit": limit}).mappings().all()
+    return {"metric": metric, "country": country, "order": order, "limit": limit,
+            "total": rows[0]["total"] if rows else 0, "items": [dict(r) for r in rows]}
 
 
 @stats_router.get("/disclosure-frequency", summary="기간별 공시 빈도 (월·분기·주)")
