@@ -11,7 +11,7 @@ from app.api.stocks import resolve_stock
 from app.core.errors import Conflict, NotFound
 from app.models import Stock, User, WatchlistItem
 from app.queries import sql
-from app.schemas.api import WatchlistCard, WatchlistCreate, WatchlistOrder, WatchlistOut
+from app.schemas.api import WatchlistCard, WatchlistCreate, WatchlistOrder, WatchlistOut, WatchlistUpdate
 from app.services.hydration import Hydrator
 from app.services.scoring import default_preset
 
@@ -69,6 +69,23 @@ def reorder_watchlist(body: WatchlistOrder, user_id: int = Depends(get_current_u
     db.commit()
     items = _cards(db, user_id)
     return {"user_id": user_id, "preset": default_preset(), "count": len(items), "items": items}
+
+
+@router.put("/{market}/{ticker}", response_model=WatchlistCard,
+            summary="관심종목 메모·목표가 수정 (보낸 필드만 변경, null이면 지움). 응답에 목표가 대비 괴리율 target_gap")
+def update_watchlist(market: MarketPath, ticker: TickerPath, body: WatchlistUpdate,
+                     user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    _require_user(db, user_id)
+    s = resolve_stock(db, market, ticker)
+    w = db.get(WatchlistItem, (user_id, s["stock_id"]))          # 다른 사용자 것이면 없는 것과 같은 404
+    if w is None:
+        raise NotFound(f"관심종목에 {market}/{ticker}이(가) 없습니다", code="WATCHLIST_ITEM_NOT_FOUND")
+    if "memo" in body.model_fields_set:
+        w.memo = body.memo
+    if "target_price" in body.model_fields_set:
+        w.target_price = body.target_price
+    db.commit()                                                  # updated_at은 트리거가 갱신
+    return next(c for c in _cards(db, user_id) if c["stock_id"] == s["stock_id"])
 
 
 @router.delete("/{market}/{ticker}", status_code=204, summary="관심종목 삭제")

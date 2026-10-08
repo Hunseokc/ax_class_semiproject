@@ -23,6 +23,17 @@
 .wl-card__price { font-size: var(--fs-xl); font-weight: var(--fw-extra); letter-spacing: .01em; }
 .wl-card__name { font-weight: var(--fw-bold); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wl-card__foot { margin-top: auto; display: flex; align-items: center; min-width: 0; }
+/* 관심종목 메모·목표가: 카드 링크 바깥 형제 버튼(링크 안 버튼 금지), 카드 위 오른쪽에 겹쳐 둔다 */
+.wl-item { position: relative; min-width: 0; }
+.wl-item > .wl-card { height: 100%; }
+.wl-card__note { font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--text-on-pastel-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wl-card__edit {
+  position: absolute; top: var(--sp-3); right: var(--sp-3); width: 32px; height: 32px;
+  display: grid; place-items: center; border: 0; border-radius: 50%;
+  background: rgba(20, 20, 20, .08); color: var(--text-on-pastel);
+  transition: background .15s var(--ease);
+}
+.wl-card__edit:hover { background: rgba(20, 20, 20, .16); }
 
 /* 가격 (등락률) — 가격 길이와 관계없이 등락률은 항상 가격 아래 줄 */
 .pwc { display: flex; flex-direction: column; align-items: flex-start; row-gap: 2px; }
@@ -149,6 +160,7 @@
   padding: 10px var(--sp-4); color: var(--text);
 }
 .input::placeholder { color: var(--text-3); }
+textarea.input { font: inherit; resize: vertical; }
 .input:focus, .select:focus { outline: none; border-color: var(--lavender); }
 .field { display: flex; flex-direction: column; gap: var(--sp-2); }
 .field label { font-size: var(--fs-sm); color: var(--text-2); font-weight: var(--fw-semibold); }

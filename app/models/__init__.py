@@ -156,7 +156,11 @@ class WatchlistItem(Base):
     stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
     sort_order: Mapped[int] = mapped_column(Integer, server_default="0")
     added_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    memo: Mapped[str | None] = mapped_column(String(200))
+    target_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))          # 종목 통화
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())       # 트리거가 갱신
     stock: Mapped[Stock] = relationship(lazy="joined")
+    __table_args__ = (CheckConstraint("target_price > 0"),)
 
 
 class Portfolio(Base):

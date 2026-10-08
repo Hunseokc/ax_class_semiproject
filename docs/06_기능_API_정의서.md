@@ -35,9 +35,10 @@
 | 종목 | GET | `/stocks/{market}/{ticker}/candles` | 기간 일봉 | range | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
 | 종목 | GET | `/stocks/{market}/{ticker}/financials` | FY 재무 추이 | limit | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
 | 종목 | GET | `/stocks/{market}/{ticker}/disclosures` | 최근 공시 | limit | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
-| 관심종목 | GET | `/watchlist` | 관심종목 카드 목록 (정렬순, 프리셋별 매력도) | preset | 200 · 404 USER_NOT_FOUND · 422 VALIDATION_ERROR, UNKNOWN_PRESET |
+| 관심종목 | GET | `/watchlist` | 관심종목 카드 목록 (정렬순, 프리셋별 매력도, 메모·목표가·목표가 대비 괴리율 `target_gap`) | preset | 200 · 404 USER_NOT_FOUND · 422 VALIDATION_ERROR, UNKNOWN_PRESET |
 | 관심종목 | POST | `/watchlist` | 관심종목 추가 | body: market, ticker | 201 · 404 STOCK_NOT_FOUND, USER_NOT_FOUND · 409 DUPLICATE_WATCHLIST · 422 VALIDATION_ERROR |
 | 관심종목 | PATCH | `/watchlist/order` | 관심종목 정렬 순서 변경 | body: items | 200 · 404 WATCHLIST_ITEM_NOT_FOUND, USER_NOT_FOUND · 422 VALIDATION_ERROR |
+| 관심종목 | PUT | `/watchlist/{market}/{ticker}` | 메모·목표가 수정 — 보낸 필드만 변경, `null`이면 지움, 빈 본문 422. 목표가는 종목 통화 기준, 응답에 `target_gap` = (목표가 − 현재가) / 현재가 | body: memo (200자), target_price (> 0, 소수 4자리) | 200 · 404 STOCK_NOT_FOUND, WATCHLIST_ITEM_NOT_FOUND, USER_NOT_FOUND · 422 VALIDATION_ERROR |
 | 관심종목 | DELETE | `/watchlist/{market}/{ticker}` | 관심종목 삭제 | - | 204 · 404 STOCK_NOT_FOUND, WATCHLIST_ITEM_NOT_FOUND, USER_NOT_FOUND · 422 VALIDATION_ERROR |
 | 모의 포트폴리오 | POST | `/portfolios` | 포트폴리오 생성 | body: name, seed_krw | 201 · 404 USER_NOT_FOUND · 409 DUPLICATE_PORTFOLIO_NAME · 422 VALIDATION_ERROR |
 | 모의 포트폴리오 | GET | `/portfolios` | 사용자의 포트폴리오 목록 | - | 200 · 404 USER_NOT_FOUND |
@@ -873,6 +874,32 @@
 ```json
 (본문 없음)
 ```
+#### `PUT /api/v1/watchlist/NASDAQ/AAPL` — 메모·목표가 수정 (2026-10-08 실제 호출, 확인 후 `null`로 되돌림)
+요청: `{"target_price": 400, "memo": "curl 확인"}` → 현재가 $336.67 대비 괴리율 (400 − 336.67) / 336.67 = 0.188107
+응답 `200`:
+```json
+{
+  "sort_order": 5,
+  "added_at": "2026-10-07T01:09:49.680628Z",
+  "stock_id": 17,
+  "market": "NASDAQ",
+  "country": "US",
+  "currency": "USD",
+  "ticker": "AAPL",
+  "name": "Apple",
+  "as_of": "2026-10-07",
+  "close": 336.67,
+  "change": 3.04,
+  "change_rate": 0.009112,
+  "score": 56.16,
+  "memo": "curl 확인",
+  "target_price": 400,
+  "target_gap": 0.188107,
+  "updated_at": "2026-10-08T07:35:47.568050Z"
+}
+```
+`{}` → 422 `VALIDATION_ERROR`(바꿀 값 없음), `{"target_price": 0}` → 422, 관심종목이 아닌 `KOSPI/000660` → 404 `WATCHLIST_ITEM_NOT_FOUND`, 없는 `KOSPI/999999` → 404 `STOCK_NOT_FOUND`.
+
 ### 3-5. 모의 포트폴리오 (CRUD) — 예시용 포트폴리오를 만들고 마지막에 삭제
 #### `POST /api/v1/portfolios`
 요청 본문:
@@ -1514,7 +1541,8 @@
 | 대시보드 홈 | `/` | 지수·환율 카드(설정에서 지수 10개 + 환율 중 선택, 기본 6개) | `GET /market/indices` |
 | | | USD/KRW 카드 | `GET /market/fx` |
 | | | 투자 성향 펼침 메뉴(헤더) | `GET /scoring/presets` |
-| | | 내 관심종목 카드(카드 클릭 → 상세 `?preset=`) | `GET /watchlist?preset=` |
+| | | 내 관심종목 카드(카드 클릭 → 상세 `?preset=`, 목표가·괴리율·메모 표시) | `GET /watchlist?preset=` |
+| | | 관심종목 카드 편집 버튼 → 메모·목표가 모달 | `PUT /watchlist/{market}/{ticker}` |
 | | | 순위 상위 5 — 지표 탭(거래량·1개월·1년 수익률) × 국내/미국 | 거래량 `GET /stocks?country=&sort=volume&limit=5`, 수익률 `GET /statistics/ranking?metric=&country=&limit=5` |
 | 주식 리스트 | `/stocks` | 순위 리스트·탭·정렬·검색 | `GET /stocks?country=&sort=&order=&group=&q=&preset=` |
 | | | 투자 성향 펼침 메뉴(헤더) | `GET /scoring/presets` |
@@ -1544,13 +1572,13 @@
 | `VALIDATION_ERROR` | 422 | 요청 파라미터·본문의 타입·형식·범위 위반(1절 입력 형식). `detail`에 `loc`·`msg`·`type` 목록 | 입력이 있는 모든 엔드포인트 | 요청 값이 올바르지 않습니다 | ST-09, PF-05, ERR-09~ERR-20 |
 | `NOT_FOUND` | 404 | 정의되지 않은 경로 | - | Not Found | ERR-06 |
 | `METHOD_NOT_ALLOWED` | 405 | 경로는 있으나 허용하지 않는 메서드 | - | Method Not Allowed | ERR-06 |
-| `HTTP_ERROR` | 그 밖의 4xx·5xx | 프레임워크가 낸 기타 HTTP 예외(현재 라우트에서 직접 내는 곳 없음 — 최후 방어) | - | (예외 메시지) | ERR-07 |
+| `HTTP_ERROR` | 400 등 | 프레임워크가 낸 기타 HTTP 예외. 실제 예: 본문이 UTF-8이 아니어서 해석하지 못함(400 "There was an error parsing the body"). JSON 문법 오류는 422 `VALIDATION_ERROR`(`json_invalid`) | 본문을 받는 엔드포인트 | There was an error parsing the body | ERR-07 |
 | `INTERNAL_ERROR` | 500 | 처리하지 못한 예외. 응답은 고정 메시지만, 스택은 요청 ID와 함께 서버 로그 | 모든 엔드포인트 | 서버 오류가 발생했습니다 | ERR-08 |
 | `STOCK_NOT_FOUND` | 404 | (시장, 티커) 종목 없음 | `/stocks/{market}/{ticker}`·하위, `/watchlist`(POST·DELETE), 담기, `/statistics/monthly` | 종목 KOSPI/999999을(를) 찾을 수 없습니다 | ST-06, ERR-09, AN-14 |
 | `USER_NOT_FOUND` | 404 | 요청 사용자(`DEFAULT_USER_ID`)가 DB에 없음 | `/watchlist`, `/portfolios` | 사용자(ID 99)를 찾을 수 없습니다 | WL-03 |
 | `PORTFOLIO_NOT_FOUND` | 404 | 포트폴리오 없음 또는 다른 사용자 소유 | `/portfolios/{portfolio_id}`·하위 | 포트폴리오(ID 7)를 찾을 수 없습니다 | USR-02, ERR-10 |
 | `ITEM_NOT_FOUND` | 404 | 그 포트폴리오에 항목 없음 또는 다른 사용자 소유 | `/portfolios/{id}/items/{item_id}` | 포트폴리오(ID 1)에 항목(ID 9)이 없습니다 | USR-04, ERR-10 |
-| `WATCHLIST_ITEM_NOT_FOUND` | 404 | 요청 사용자의 관심종목에 없는 종목 | `DELETE /watchlist/{market}/{ticker}`, `PATCH /watchlist/order` | 관심종목에 KOSPI/005930이(가) 없습니다 | WL-03, USR-02 |
+| `WATCHLIST_ITEM_NOT_FOUND` | 404 | 요청 사용자의 관심종목에 없는 종목 | `PUT·DELETE /watchlist/{market}/{ticker}`, `PATCH /watchlist/order` | 관심종목에 KOSPI/005930이(가) 없습니다 | WL-03, USR-02, WL-12 |
 | `NO_PRICE` | 404 / 422 | 시세가 없는 종목을 분석(404)하거나 담음(422) | `/analysis`, 담기·담은 종목 수정 | 시세가 없어 분석할 수 없습니다 / 시세가 없어 담을 수 없습니다 | ERR-02 |
 | `NO_PEER_GROUP` | 404 | 경쟁 그룹에 속하지 않은 종목의 기준일=100 차트 | `/peers/chart` | 이 종목은 경쟁 그룹에 속해 있지 않습니다 | ERR-01 |
 | `GROUP_NOT_FOUND` | 404 | `group_id`가 그 종목이 속한 그룹이 아님 | `/peers/chart` | 이 종목은 그룹(ID 2)에 속해 있지 않습니다 | ERR-01 |

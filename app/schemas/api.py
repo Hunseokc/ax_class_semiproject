@@ -232,6 +232,28 @@ class WatchlistCard(Schema):
     change: Num | None
     change_rate: Num | None
     score: Num | None
+    memo: str | None = None
+    target_price: Num | None = None          # 종목 통화(currency) 기준
+    target_gap: Num | None = None            # (목표가 − 현재가) / 현재가
+    updated_at: datetime | None = None
+
+
+class WatchlistUpdate(Schema):
+    """보낸 필드만 바꾼다. null을 보내면 그 값을 지운다(A-116)."""
+    memo: str | None = Field(default=None, max_length=200, description="메모(200자). 앞뒤 공백 제거, 빈 문자열은 지움")
+    target_price: Decimal | None = Field(default=None, gt=0, max_digits=20, decimal_places=4,
+                                         description="목표가(종목 통화 — KRW 종목은 원, USD 종목은 달러). 0 이하는 422")
+
+    @field_validator("memo")
+    @classmethod
+    def _blank_memo_is_none(cls, v: str | None) -> str | None:
+        return (v.strip() or None) if v is not None else None
+
+    @model_validator(mode="after")
+    def _at_least_one(self):
+        if not self.model_fields_set & {"memo", "target_price"}:
+            raise ValueError("memo 또는 target_price 중 하나 이상을 보내야 합니다")
+        return self
 
 
 class WatchlistOut(Schema):

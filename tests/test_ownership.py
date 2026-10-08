@@ -29,6 +29,7 @@ CROSS_REQUESTS = [
     ("DELETE", "/watchlist/KOSPI/005930", None, "WATCHLIST_ITEM_NOT_FOUND"),
     ("PATCH", "/watchlist/order", {"items": [{"market": "KOSPI", "ticker": "005930", "sort_order": 9}]},
      "WATCHLIST_ITEM_NOT_FOUND"),
+    ("PUT", "/watchlist/KOSPI/005930", {"memo": "탈취", "target_price": 1}, "WATCHLIST_ITEM_NOT_FOUND"),
 ]
 
 
@@ -42,7 +43,8 @@ def test_cross_user_access_is_404_and_changes_nothing(client, as_user, others, m
     assert (pf["name"], pf["seed_krw"], pf["item_count"]) == ("남의 것", 10_000_000, 1)
     items = client.get(f"{API}/portfolios/{others['pid']}/items").json()["items"]
     assert [(i["item_id"], i["quantity"]) for i in items] == [(others["iid"], 1)]
-    assert [(w["ticker"], w["sort_order"]) for w in client.get(f"{API}/watchlist").json()["items"]] == [("005930", 1)]
+    assert [(w["ticker"], w["sort_order"], w["memo"], w["target_price"])
+            for w in client.get(f"{API}/watchlist").json()["items"]] == [("005930", 1, None, None)]
 
 
 def test_others_resources_are_not_listed(client, others):

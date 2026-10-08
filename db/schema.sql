@@ -157,10 +157,13 @@ CREATE TABLE users (
 
 -- 사용자 ↔ 종목 N:M 교차 테이블
 CREATE TABLE watchlist_items (
-  user_id    INT         NOT NULL REFERENCES users  ON DELETE CASCADE,
-  stock_id   INT         NOT NULL REFERENCES stocks ON DELETE CASCADE,
-  sort_order INT         NOT NULL DEFAULT 0,
-  added_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  user_id      INT           NOT NULL REFERENCES users  ON DELETE CASCADE,
+  stock_id     INT           NOT NULL REFERENCES stocks ON DELETE CASCADE,
+  sort_order   INT           NOT NULL DEFAULT 0,
+  added_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  memo         VARCHAR(200),                                                  -- 사용자 메모 (migration 004)
+  target_price NUMERIC(20,4) CHECK (target_price > 0),                        -- 목표가(종목 통화)
+  updated_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),                          -- 트리거가 갱신
   PRIMARY KEY (user_id, stock_id)
 );
 
@@ -276,3 +279,5 @@ CREATE TRIGGER trg_portfolios_updated_at
   BEFORE UPDATE ON portfolios FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER trg_portfolio_items_updated_at
   BEFORE UPDATE ON portfolio_items FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER trg_watchlist_items_updated_at
+  BEFORE UPDATE ON watchlist_items FOR EACH ROW EXECUTE FUNCTION set_updated_at();

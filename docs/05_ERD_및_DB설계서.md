@@ -1,7 +1,7 @@
 # 05. ERD 및 DB 설계서
 
 - DDL 원문: `db/schema.sql` → `db/indexes.sql` → `db/views.sql` 순서로 실행
-- DBMS: PostgreSQL 16 / 테이블 20개, VIEW 3개, 보조 인덱스 10개(명세 10개 − 중복 1개 + 추가 1개), 부분 UNIQUE 인덱스 1개(주 그룹 제약), 트리거 2개
+- DBMS: PostgreSQL 16 / 테이블 20개, VIEW 3개, 보조 인덱스 10개(명세 10개 − 중복 1개 + 추가 1개), 부분 UNIQUE 인덱스 1개(주 그룹 제약), 트리거 3개(updated_at 자동 갱신 — portfolios·portfolio_items·watchlist_items)
 - 매력도 테이블(`scoring_presets`·`scoring_weights`·`stock_metric_values`·`stock_scores`, `peer_group_members.is_primary`)은 다중 팩터 모델로 바꾸며 추가·재정의했다(2026-10-07, `db/migrations/001_scoring_v2.sql`, 계산 정의는 `docs/09`).
 - 3절 테이블 정의는 테스트 DB에 DDL을 실제 적용한 뒤 시스템 카탈로그(`pg_attribute`, `pg_constraint`)에서 생성했다.
 
@@ -133,6 +133,9 @@ erDiagram
         int stock_id PK,FK
         int sort_order
         timestamptz added_at
+        varchar memo
+        numeric target_price
+        timestamptz updated_at
     }
     portfolios {
         int portfolio_id PK
@@ -396,6 +399,11 @@ erDiagram
 | stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
 | sort_order | integer | N | 0 |  | 표시 순서 |
 | added_at | timestamp with time zone | N | now() |  | 추가 시각 |
+| memo | character varying(200) | Y |  |  | 사용자 메모 (migration 004) |
+| target_price | numeric(20,4) | Y |  |  | 목표가(종목 통화 — KRW 종목은 원, USD 종목은 달러) |
+| updated_at | timestamp with time zone | N | now() |  | 수정 시각(트리거 `trg_watchlist_items_updated_at` 갱신) |
+
+제약: `CHECK ((target_price > (0)::numeric))` — NULL은 허용(목표가 없음). 기존 DB는 `python -m app.ingest migrate 004_watchlist_memo`(멱등, 컬럼 추가만 — 기존 행 값 유지)
 
 #### `portfolios`
 
@@ -514,7 +522,7 @@ erDiagram
 | 관계 | 교차 테이블 | 속성 |
 |---|---|---|
 | 종목 ↔ 경쟁 그룹 | `peer_group_members` | `is_primary` (매력도 섹터 중립화의 주 그룹, 종목당 최대 1개) |
-| 사용자 ↔ 종목 (관심종목) | `watchlist_items` | `sort_order`, `added_at` |
+| 사용자 ↔ 종목 (관심종목) | `watchlist_items` | `sort_order`, `added_at`, `memo`, `target_price`, `updated_at` |
 
 ### 4-5. 파생값은 저장하지 않음 (VIEW)
 수익률·변동성·MDD·이동평균·52주 위치·거래량 비율·영업이익률·ROE·YoY·시총 원화 환산은 원천 데이터에서 언제든 계산할 수 있으므로 테이블에 저장하지 않고 `v_stock_metrics` VIEW로 계산한다. 원천이 갱신·보정되면 지표도 자동으로 일치한다. 같은 행 값만으로 계산되는 `portfolio_items.cost_krw`는 저장형 생성 컬럼(`GENERATED ALWAYS … STORED`)으로 두어 직접 쓰기를 막는다.

@@ -110,6 +110,7 @@ export const Watchlist = {
   list: () => api.get("/watchlist", { preset: getPreset() }),
   add: (market, ticker) => api.post("/watchlist", { market, ticker }),
   remove: (market, ticker) => api.del(`/watchlist/${market}/${ticker}`),
+  update: (market, ticker, body) => api.put(`/watchlist/${market}/${ticker}`, body),
 };
 
 export const Stats = {

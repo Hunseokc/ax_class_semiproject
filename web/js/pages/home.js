@@ -1,8 +1,10 @@
 // 대시보드 홈: 지수·환율 카드(표시 지표 선택), 내 관심종목, 순위 상위 5(거래량·수익률)
 import { Market, PRESET_EVENT, Stats, Stocks, Watchlist, getPreset } from "../api.js";
-import { changeHtml, changeLabel, date, dateTime, esc, formatPriceWithChange, initials, num, price, shortDate, stockUrl, volume } from "../format.js";
+import { changeHtml, changeLabel, date, dateTime, esc, formatPriceWithChange, initials, num, pct, price, shortDate, stockUrl, volume } from "../format.js";
 import { color, destroyCharts, sparkline } from "../components/charts.js";
+import { icons } from "../components/icons.js";
 import { DEFAULT_METRICS, FX_CODE, metricPicker, storedMetrics } from "../components/metric-picker.js";
+import { openWatchNote } from "../components/watch-note.js";
 import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";
 import { emptyState, h, load, marketBadge, scoreBand, scoreGauge, segmented, skeleton } from "../components/ui.js";
@@ -120,16 +122,25 @@ $("#market-edit").addEventListener("click", () => togglePicker($("#market-edit")
 // ---------------------------------------------------------------- 관심종목
 function watchCard(w, i) {
   const band = scoreBand(w.score);
+  const target = w.target_price != null
+    ? `목표 ${price(w.target_price, w.currency)} (${w.target_gap != null ? pct(w.target_gap, { sign: true, digits: 1 }) : "–"})` : "";
   const label = `${w.name}, ${price(w.close, w.currency)}, ${changeLabel(w.change_rate)}, `
-    + (band ? `매력도 ${Math.round(w.score)}점 ${band.label}` : "매력도 데이터 부족");
+    + (band ? `매력도 ${Math.round(w.score)}점 ${band.label}` : "매력도 데이터 부족")
+    + (target ? `, ${target}` : "") + (w.memo ? `, 메모 ${w.memo}` : "");
+  // 링크 안에 버튼을 넣지 않도록 편집 버튼은 카드 링크의 형제로 둔다
   // 상세 화면이 같은 투자 성향 탭이 선택된 상태로 열리도록 preset을 링크에 싣는다
-  return h(`<a class="wl-card card--link ${i % 2 ? "card--lavender" : "card--ice"}"
+  const el = h(`<div class="wl-item"><a class="wl-card card--link ${i % 2 ? "card--lavender" : "card--ice"}"
         href="${stockUrl(w.market, w.ticker)}?preset=${encodeURIComponent(getPreset())}" aria-label="${esc(label)}">
       <div class="wl-card__gauge">${scoreGauge(w.score)}</div>
       <div class="wl-card__ticker">${esc(w.ticker)} · ${esc(w.market)}</div>
       <div class="wl-card__price">${formatPriceWithChange(w.close, w.currency, w.change_rate)}</div>
+      ${target ? `<div class="wl-card__note">${esc(target)}</div>` : ""}
+      ${w.memo ? `<div class="wl-card__note wl-card__memo" title="${esc(w.memo)}">${esc(w.memo)}</div>` : ""}
       <div class="wl-card__foot"><span class="wl-card__name">${esc(w.name)}</span></div>
-    </a>`);
+    </a>
+    <button class="wl-card__edit" type="button" aria-label="${esc(w.name)} 메모·목표가 편집" title="메모·목표가">${icons.edit}</button></div>`);
+  el.querySelector("button").addEventListener("click", () => openWatchNote(w, () => loadWatchlist()));
+  return el;
 }
 
 async function renderWatchBasis() {
