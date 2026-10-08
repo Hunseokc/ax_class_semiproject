@@ -47,13 +47,36 @@
 .gauge-mini__band .gauge-mini__ring { background: none; border: 1.5px dashed var(--text-on-pastel-2); }
 
 /* 지수·환율 카드 (라벨–스파크라인–큰 숫자) */
-.metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--sp-4); }
+/* 지수·환율 카드: 항상 한 줄 — 적으면 폭을 나눠 채우고, 많으면 이 줄만 가로 스크롤 */
+.metric-row { display: flex; gap: var(--sp-4); overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scrollbar-width: thin; padding-bottom: var(--sp-2); }
+.metric-row > * { flex: 1 0 168px; min-width: 0; scroll-snap-align: start; }
 .metric-card { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-5); border-radius: var(--r-card-sm); background: var(--card); min-height: 168px; }
 .metric-card__label { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); font-weight: var(--fw-semibold); }
 .metric-card__label > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .metric-card__value { font-size: var(--fs-xl); font-weight: var(--fw-extra); }
 .metric-card__spark { height: 44px; position: relative; }
 .metric-card__foot { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); white-space: nowrap; }
+
+/* 표시 지표 선택: 카드 줄 아래 펼침 박스. 칩 = 버튼과 같은 알약, 선택 = 세그먼트 탭과 같은 아이스 블루 */
+.picker { display: flex; flex-direction: column; gap: var(--sp-4); }
+.picker__head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap; }
+.picker__group { display: grid; grid-template-columns: 56px 1fr; gap: var(--sp-3); align-items: start; }
+.picker__group-label { padding-top: 6px; color: var(--text-3); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.picker__chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.picker__foot { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 0; border-radius: var(--r-pill); padding: 6px var(--sp-4);
+  background: var(--card-active); color: var(--text);
+  font-weight: var(--fw-semibold); font-size: var(--fs-sm);
+  transition: background .15s var(--ease), color .15s var(--ease);
+}
+.chip:hover:not([aria-pressed="true"]):not(:disabled) { background: #444; }
+.chip[aria-pressed="true"] { background: var(--ice); color: var(--text-on-pastel); }
+.chip:disabled { cursor: not-allowed; }
+.chip__check { display: none; }
+.chip[aria-pressed="true"] .chip__check { display: inline-flex; }
+@media (max-width: 767px) { .picker__group { grid-template-columns: 1fr; gap: var(--sp-2); } }
 
 /* ---------------------------------------------------------------- 세그먼트 탭 (선택 = 아이스 블루 알약) */
 .segmented { display: inline-flex; gap: var(--sp-1); padding: var(--sp-1); background: var(--surface); border-radius: var(--r-pill); }

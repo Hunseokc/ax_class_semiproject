@@ -12,6 +12,12 @@ indices:
   - {code: SPX,    name: S&P 500,            market: NYSE,   yf_symbol: "^GSPC", display_order: 3}
   - {code: IXIC,   name: NASDAQ Composite,   market: NASDAQ, yf_symbol: "^IXIC", display_order: 4}
   - {code: DJI,    name: Dow Jones,          market: NYSE,   yf_symbol: "^DJI",  display_order: 5}
+  # 대시보드에서 골라 볼 수 있는 추가 지수 (기본 화면에는 위 5개 + USD/KRW)
+  - {code: KOSPI200, name: KOSPI 200,        market: KOSPI,  pykrx: "1028", yf_symbol: "^KS200", display_order: 6}
+  - {code: NDX,    name: NASDAQ 100,         market: NASDAQ, yf_symbol: "^NDX",  display_order: 7}
+  - {code: RUT,    name: Russell 2000,       market: NYSE,   yf_symbol: "^RUT",  display_order: 8}
+  - {code: SOX,    name: 필라델피아 반도체,  market: NASDAQ, yf_symbol: "^SOX",  display_order: 9}
+  - {code: VIX,    name: VIX,                market: NYSE,   yf_symbol: "^VIX",  display_order: 10}
 
 fx:
   usd_krw: {yf_symbol: "KRW=X"}

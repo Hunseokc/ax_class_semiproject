@@ -1,4 +1,5 @@
 """수집·전처리: upsert 재실행 시 행 수 불변, 이상 행 격리, 재무 계정 매핑·보완."""
+import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -7,8 +8,10 @@ from zoneinfo import ZoneInfo
 import pytest
 from sqlalchemy import text
 
+from app.core.config import ROOT_DIR
 from app.ingest import jobs
 from app.ingest.preprocess import clean_bars, clean_fx
+from app.ingest.universe import load_universe
 from app.providers import http, yahoo
 from app.providers.base import Bar, Financial, FxPoint, ProviderError
 from app.providers.dart import DartClient
@@ -43,6 +46,23 @@ def test_failure_of_one_stock_does_not_stop_others(engine):
     statuses = jobs.load_prices(engine, p)
     assert statuses == {"005930": "SUCCESS", "000660": "FAILED", "AAPL": "SUCCESS", "NVDA": "SUCCESS"}
     assert scalar(engine, "SELECT error FROM ingestion_logs WHERE status = 'FAILED'").startswith("RuntimeError: boom")
+
+
+def test_universe_indices_are_loadable():
+    """universe.yaml 지수: code·표시 순서가 겹치지 않고, 시장이 있으며, 그 나라 소스로 조회할 심볼이 있다."""
+    u = load_universe()
+    markets = {m["code"]: m["country"] for m in u["markets"]}
+    idx = u["indices"]
+    assert len({i["code"] for i in idx}) == len(idx) and len({i["display_order"] for i in idx}) == len(idx)
+    for i in idx:
+        assert i["market"] in markets, i["code"]
+        assert i.get("yf_symbol"), i["code"]                             # US 소스·KR 대체 소스(yfinance)
+        if markets[i["market"]] == "KR":
+            assert i.get("pykrx"), i["code"]                             # KR 기본 소스(pykrx)
+    # 대시보드 기본 표시 지표(web/js/components/metric-picker.js)가 모두 universe에 있다
+    js = (ROOT_DIR / "web" / "js" / "components" / "metric-picker.js").read_text(encoding="utf-8")
+    defaults = re.findall(r'"(\w+)"', re.search(r"DEFAULT_METRICS = \[(.*?)\]", js).group(1))
+    assert defaults and set(defaults) <= {i["code"] for i in idx}
 
 
 def test_no_session_skips_empty_or_weekend_only_range():

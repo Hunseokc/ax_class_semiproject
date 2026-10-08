@@ -1,7 +1,8 @@
-// 대시보드 홈: 지수·환율 카드, 내 관심종목, 거래량 상위 5
+// 대시보드 홈: 지수·환율 카드(표시 지표 선택), 내 관심종목, 거래량 상위 5
 import { Market, PRESET_EVENT, Stocks, Watchlist, getPreset } from "../api.js";
 import { changeHtml, changeLabel, date, dateTime, esc, formatPriceWithChange, initials, num, price, shortDate, stockUrl, volume } from "../format.js";
-import { color, sparkline } from "../components/charts.js";
+import { color, destroyCharts, sparkline } from "../components/charts.js";
+import { DEFAULT_METRICS, FX_CODE, metricPicker, storedMetrics } from "../components/metric-picker.js";
 import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";
 import { emptyState, h, load, marketBadge, scoreBand, scoreGauge, segmented, skeleton } from "../components/ui.js";
@@ -38,26 +39,83 @@ function fxCard(fx) {
   return el;
 }
 
+// 마지막 응답 — 표시 지표를 바꿀 때는 다시 요청하지 않고 이 값으로 다시 그린다
+let market = { indices: null, fx: null, error: null };
+let shown = [];
+
+const availableMetrics = () => [...(market.indices || []).map((i) => i.code), FX_CODE];
+
+function metricGroups() {
+  const by = (country) => market.indices.filter((i) => i.country === country).map((i) => ({ code: i.code, name: i.name }));
+  return [{ label: "국내", items: by("KR") }, { label: "미국", items: by("US") },
+    { label: "환율", items: [{ code: FX_CODE, name: "USD/KRW" }] }].filter((g) => g.items.length);
+}
+
+function renderMarketRow() {
+  const box = $("#market");
+  destroyCharts(box);
+  const row = h('<div class="metric-row"></div>');
+  const byCode = new Map((market.indices || []).map((i) => [i.code, i]));
+  for (const code of shown) {
+    if (code === FX_CODE) { if (market.fx) row.append(fxCard(market.fx)); }
+    else if (byCode.has(code)) row.append(indexCard(byCode.get(code)));
+  }
+  if (market.error) {
+    const card = h(`<div class="state state--error" role="alert"><p class="state__title">일부 지표를 불러오지 못했습니다</p>
+      <p>${esc(market.error.message)}</p><button class="btn btn--sm" type="button">다시 시도</button></div>`);
+    card.querySelector("button").addEventListener("click", loadMarket);
+    row.append(card);
+  }
+  box.replaceChildren(row);
+}
+
+function togglePicker(open, { focus = true } = {}) {
+  const btn = $("#market-edit");
+  const panel = $("#market-picker");
+  if (!panel) return;
+  panel.hidden = !open;
+  btn.setAttribute("aria-expanded", String(open));
+  if (focus) (open ? panel.querySelector(".chip:not(:disabled)") : btn)?.focus();
+}
+
+function mountPicker() {
+  const btn = $("#market-edit");
+  const wasOpen = btn.getAttribute("aria-expanded") === "true";
+  shown = storedMetrics(availableMetrics());
+  // 지수 목록을 못 받으면 고를 수 없다(저장된 선택을 덮어쓰지 않도록 설정을 막음)
+  if (!market.indices) {
+    $("#market-picker-slot").replaceChildren();
+    btn.disabled = true;
+    btn.setAttribute("aria-expanded", "false");
+    return;
+  }
+  $("#market-picker-slot").replaceChildren(metricPicker({
+    id: "market-picker", groups: metricGroups(), selected: shown,
+    onChange: (codes) => { shown = codes; renderMarketRow(); },
+    onClose: () => togglePicker(false),
+  }));
+  btn.disabled = false;
+  togglePicker(wasOpen, { focus: false });
+}
+
 async function loadMarket() {
   const box = $("#market");
-  box.replaceChildren(skeleton("card", 6));
-  box.firstElementChild.className = "metric-grid";
+  destroyCharts(box);
+  const sk = skeleton("card", shown.length || DEFAULT_METRICS.length);
+  sk.className = "metric-row";
+  box.replaceChildren(sk);
   const [ix, fx] = await Promise.allSettled([Market.indices(), Market.fx()]);
-  const grid = h('<div class="metric-grid"></div>');
-  if (ix.status === "fulfilled") {
-    grid.append(...ix.value.indices.map(indexCard));
-    $("#as-of").textContent = `일봉 기준 · 기준일 ${date(ix.value.as_of)}`;
-  }
-  if (fx.status === "fulfilled") grid.append(fxCard(fx.value));
-  if (ix.status === "rejected" || fx.status === "rejected") {
-    const err = (ix.reason || fx.reason);
-    const card = h(`<div class="state state--error" role="alert"><p class="state__title">일부 지표를 불러오지 못했습니다</p>
-      <p>${esc(err.message)}</p><button class="btn btn--sm" type="button">다시 시도</button></div>`);
-    card.querySelector("button").addEventListener("click", loadMarket);
-    grid.append(card);
-  }
-  box.replaceChildren(grid);
+  market = {
+    indices: ix.status === "fulfilled" ? ix.value.indices : null,
+    fx: fx.status === "fulfilled" ? fx.value : null,
+    error: ix.status === "rejected" ? ix.reason : fx.status === "rejected" ? fx.reason : null,
+  };
+  if (market.indices) $("#as-of").textContent = `일봉 기준 · 기준일 ${date(ix.value.as_of)}`;
+  mountPicker();
+  renderMarketRow();
 }
+
+$("#market-edit").addEventListener("click", () => togglePicker($("#market-edit").getAttribute("aria-expanded") !== "true"));
 
 // ---------------------------------------------------------------- 관심종목
 function watchCard(w, i) {

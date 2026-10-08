@@ -32,6 +32,11 @@ export function draw(canvas, config) {
   return chart;
 }
 
+/** root 안 canvas의 차트를 정리한다 — 카드를 통째로 다시 그리기 전에 호출(Chart.js 인스턴스 누적 방지) */
+export function destroyCharts(root) {
+  root.querySelectorAll("canvas").forEach((c) => { registry.get(c)?.destroy(); registry.delete(c); });
+}
+
 /** 스파크라인: 축·툴팁 없는 얇은 선 */
 export function sparkline(canvas, values, stroke = color("--ice")) {
   return draw(canvas, {

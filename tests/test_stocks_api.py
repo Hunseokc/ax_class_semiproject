@@ -78,6 +78,20 @@ def test_indices_and_fx(client, fake_fx):
     assert fake_fx.current.count == 0                                   # TTL 이내 → 외부 호출 없음
 
 
+def test_index_without_prices_is_listed_with_empty_values(client, engine):
+    """지수를 새로 추가하고 아직 적재하지 않았어도 목록이 깨지지 않는다(대시보드 표시 지표 선택 후보)."""
+    with engine.begin() as conn:
+        conn.execute(text("""INSERT INTO indices (code, name, market_id, source_symbol, display_order)
+                             VALUES ('NDX', 'NASDAQ 100', 2, '^NDX', 7)"""))
+    r = client.get(f"{API}/market/indices")
+    assert r.status_code == 200
+    by_code = {i["code"]: i for i in r.json()["indices"]}
+    assert list(by_code) == ["KOSPI", "NDX"]                            # display_order 순
+    assert by_code["NDX"]["country"] == "US"
+    assert by_code["NDX"]["close"] is None and by_code["NDX"]["as_of"] is None and by_code["NDX"]["sparkline"] == []
+    assert r.json()["as_of"] == by_code["KOSPI"]["as_of"]               # 데이터 없는 지수는 기준일에서 빠짐
+
+
 def test_error_format(client):
     r = client.get(f"{API}/stocks?limit=0")
     assert r.status_code == 422
