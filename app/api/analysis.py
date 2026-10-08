@@ -15,6 +15,8 @@ from app.api.stocks import RANGE_MONTHS, resolve_stock
 from app.core.errors import NotFound, Unprocessable
 from app.queries import sql
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN, Num, Schema
+from app.core.config import get_settings
+from app.services.data_quality import data_quality
 from app.services.scoring import FACTORS, METRICS, default_preset
 
 router = APIRouter(prefix="/stocks", tags=["analysis"])
@@ -373,6 +375,52 @@ def stats_ranking(metric: RankingMetric = Query(description="return_1m·return_3
                                              "limit": limit}).mappings().all()
     return {"metric": metric, "country": country, "order": order, "limit": limit,
             "total": rows[0]["total"] if rows else 0, "items": [dict(r) for r in rows]}
+
+
+class QualityCounts(Schema):
+    success: int                     # 대상(종목·지수 등) 단위 성공 행
+    failed: int                      # 대상 단위 실패 행
+    partial: int                     # 일부 대상만 실패한 갱신 실행 수(작업 단위)
+    skipped: int                     # TTL 이내 등으로 건너뛴 실행
+
+
+class QualityJob(Schema):
+    job_type: str
+    last_success_at: datetime | None
+    last_failure_at: datetime | None
+    last_failure_reason: str | None
+    last_failure_target: str | None  # 실패한 종목 티커(종목 단위 작업일 때)
+    quarantined_rows: int
+    counts: QualityCounts
+    stale: bool | None               # 4시간 갱신 작업만 판단, 그 밖에는 null
+
+
+class QualityTotals(QualityCounts):
+    quarantined_rows: int
+
+
+class StaleJob(Schema):
+    job_type: str
+    last_success_at: datetime | None
+    hours_since_success: float | None
+
+
+class DataQualityOut(Schema):
+    days: int
+    since: datetime
+    generated_at: datetime
+    ttl_hours: float
+    stale_after_hours: float
+    totals: QualityTotals
+    jobs: list[QualityJob]
+    stale_jobs: list[StaleJob]
+
+
+@stats_router.get("/data-quality", response_model=DataQualityOut,
+                  summary="데이터 품질 현황: 작업 종류별 마지막 성공·실패(사유), 최근 N일 상태별 건수·격리 행 수, 오래된 갱신 작업(TTL×2 초과)")
+def stats_data_quality(days: int = Query(7, ge=1, le=90, description="건수를 셀 최근 일수"),
+                       db: Session = Depends(get_db)):
+    return data_quality(db.connection(), days=days, ttl_hours=get_settings().refresh_ttl_hours)
 
 
 @stats_router.get("/disclosure-frequency", summary="기간별 공시 빈도 (월·분기·주)")

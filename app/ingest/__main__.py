@@ -66,6 +66,19 @@ def status(engine) -> None:
             print("\n최근 실패:")
             for f in fails:
                 print("  ", *f)
+        # GET /api/v1/statistics/data-quality와 같은 기준(app/services/data_quality.py)
+        from app.core.config import get_settings
+        from app.services.data_quality import data_quality
+        dq = data_quality(conn, days=7, ttl_hours=get_settings().refresh_ttl_hours)
+        t = dq["totals"]
+        print(f"\n데이터 품질 (최근 {dq['days']}일): 성공 {t['success']} / 실패 {t['failed']} / 부분 실패 {t['partial']}"
+              f" / 건너뜀 {t['skipped']} / 격리 {t['quarantined_rows']}행")
+        if dq["stale_jobs"]:
+            print(f"   오래된 갱신 작업(TTL×2 = {dq['stale_after_hours']:g}시간 초과):",
+                  ", ".join(f"{s['job_type']}(" + (f"{s['hours_since_success']}시간 전" if s["hours_since_success"] is not None
+                                                     else "작업 단위 성공 기록 없음") + ")" for s in dq["stale_jobs"]))
+        else:
+            print(f"   오래된 갱신 작업 없음 (기준 TTL×2 = {dq['stale_after_hours']:g}시간)")
 
 
 def main(argv: list[str] | None = None) -> int:

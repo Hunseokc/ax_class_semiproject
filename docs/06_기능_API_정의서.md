@@ -60,6 +60,7 @@
 | 통계 | GET | `/statistics/disclosure-frequency` | 기간별 공시 빈도 (월·분기·주) | period, days | 200 · 422 VALIDATION_ERROR |
 | 통계 | GET | `/statistics/monthly` | 종목 월별 집계: 거래일 수·평균 종가·최고/최저·월초 대비 월말 수익률·거래량 합계/평균 (date_trunc + GROUP BY, FIRST_VALUE/LAST_VALUE 윈도우). 진행 중인 달은 `is_partial: true` | market, ticker (필수), months (1~24, 기본 12) | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
 | 통계 | GET | `/statistics/ranking` | 지표별 TOP N 랭킹(노출 종목). `v_stock_metrics` + `RANK() OVER` — 같은 값은 같은 순위(1, 1, 3), 지표값 없는 종목 제외. 수익률은 소수, 거래량은 주, 시총은 원화 환산 | metric (return_1m·return_3m·return_1y·volume·market_cap_krw, 필수), country (KR·US, 비우면 전체), order (desc·asc), limit (1~50, 기본 10) | 200 · 422 VALIDATION_ERROR, VOLUME_SORT_REQUIRES_MARKET(전체 + volume) |
+| 통계 | GET | `/statistics/data-quality` | 데이터 품질 현황: 작업 종류별 마지막 성공·실패(사유·대상 티커), 최근 N일 상태별 건수(success·failed는 대상 단위, partial은 갱신 실행 단위, skipped)·격리 행 수, 오래된 4시간 갱신 작업(`stale_jobs`, 작업 단위 성공이 TTL×2 초과). `python -m app.ingest status`와 같은 기준(`app/services/data_quality.py`) | days (1~90, 기본 7) | 200 · 422 VALIDATION_ERROR |
 
 ※ 오류 열은 엔드포인트별로 실제 발생할 수 있는 상태와 `code`다. 모든 엔드포인트는 예상하지 못한 예외 시 500 `INTERNAL_ERROR`. 코드별 조건은 [5절](#5-에러-코드).
 
@@ -1443,6 +1444,59 @@
       "as_of": "2026-10-07"
     }
   ]
+}
+```
+
+#### `GET /api/v1/statistics/data-quality?days=1` — 데이터 품질 현황 (2026-10-08 실제 호출, `jobs`는 PRICES·FINANCIALS만 발췌)
+PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 날짜 요청). `stale`은 4시간 갱신 작업만 판단하고 그 밖(FINANCIALS 등)은 `null`.
+응답 `200`:
+```json
+{
+  "days": 1,
+  "since": "2026-10-07T07:39:31.858870Z",
+  "generated_at": "2026-10-08T07:39:31.858870Z",
+  "ttl_hours": 4.0,
+  "stale_after_hours": 8.0,
+  "totals": {
+    "success": 500,
+    "failed": 60,
+    "partial": 0,
+    "skipped": 9,
+    "quarantined_rows": 176
+  },
+  "jobs": [
+    {
+      "job_type": "FINANCIALS",
+      "last_success_at": "2026-10-07T05:40:52.472834Z",
+      "last_failure_at": null,
+      "last_failure_reason": null,
+      "last_failure_target": null,
+      "quarantined_rows": 0,
+      "counts": {
+        "success": 0,
+        "failed": 0,
+        "partial": 0,
+        "skipped": 0
+      },
+      "stale": null
+    },
+    {
+      "job_type": "PRICES",
+      "last_success_at": "2026-10-08T06:10:37.230523Z",
+      "last_failure_at": "2026-10-08T01:51:09.978884Z",
+      "last_failure_reason": "ProviderError: yfinance history AMD: YFPricesMissingError: $AMD: Data doesn't exist for startDate = 1791432000, endDate = 1791518400",
+      "last_failure_target": "AMD",
+      "quarantined_rows": 164,
+      "counts": {
+        "success": 258,
+        "failed": 46,
+        "partial": 0,
+        "skipped": 2
+      },
+      "stale": false
+    }
+  ],
+  "stale_jobs": []
 }
 ```
 
