@@ -63,5 +63,11 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unhandled(_: Request, e: Exception):
+        # 대부분은 main.request_context 미들웨어가 먼저 처리한다(요청 ID 유지). 이 핸들러는 그 바깥의 최후 방어선.
         log.exception("처리되지 않은 오류")
-        return JSONResponse(_body("INTERNAL_ERROR", "서버 오류가 발생했습니다"), status_code=500)
+        return internal_error_response()
+
+
+def internal_error_response() -> JSONResponse:
+    """500 응답. 예외 메시지·스택·SQL·내부 경로는 응답에 넣지 않는다(서버 로그에만)."""
+    return JSONResponse(_body("INTERNAL_ERROR", "서버 오류가 발생했습니다"), status_code=500)

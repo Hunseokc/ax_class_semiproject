@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user_id, get_db, get_fx_service, get_hydrator, get_preset
+from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, get_fx_service, get_hydrator, get_preset
 from app.core.errors import NotFound, Unprocessable
 from app.queries import raw, sql
 from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, StockDetailOut, StockListOut
@@ -35,10 +35,10 @@ def list_stocks(
     country: Literal["KR", "US"] | None = Query(None, description="시장 탭. 비우면 전체"),
     sort: Literal["volume", "market_cap"] = Query("market_cap", description="전체 탭은 시총만 허용"),
     order: Literal["desc", "asc"] = "desc",
-    group: str | None = Query(None, description="경쟁 그룹 이름"),
+    group: str | None = Query(None, max_length=64, description="경쟁 그룹 이름"),
     q: str | None = Query(None, min_length=1, max_length=50, description="이름·티커 검색"),
     limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=10_000),
     user_id: int = Depends(get_current_user_id),
     preset: dict = Depends(get_preset),
     db: Session = Depends(get_db),
@@ -55,7 +55,7 @@ def list_stocks(
 
 
 @router.get("/{market}/{ticker}", response_model=StockDetailOut, summary="종목 기본 정보 + 최신 시세·밸류에이션·매력도")
-def stock_detail(market: str, ticker: str, user_id: int = Depends(get_current_user_id),
+def stock_detail(market: MarketPath, ticker: TickerPath, user_id: int = Depends(get_current_user_id),
                  preset: dict = Depends(get_preset), db: Session = Depends(get_db),
                  fx_service: FxService = Depends(get_fx_service), hydrator: Hydrator = Depends(get_hydrator)):
     row = db.execute(sql("stock_detail"), {"market": market.upper(), "ticker": ticker.upper(),
@@ -77,7 +77,7 @@ def stock_detail(market: str, ticker: str, user_id: int = Depends(get_current_us
 
 
 @router.get("/{market}/{ticker}/candles", response_model=CandlesOut, summary="기간 일봉")
-def candles(market: str, ticker: str, range: Literal["1m", "3m", "6m", "1y"] = "3m", db: Session = Depends(get_db)):
+def candles(market: MarketPath, ticker: TickerPath, range: Literal["1m", "3m", "6m", "1y"] = "3m", db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
     rows = db.execute(sql("candles"), {"stock_id": s["stock_id"], "months": RANGE_MONTHS[range]}).mappings().all()
     return {"market": s["market"], "ticker": s["ticker"], "currency": s["currency"], "range": range,
@@ -85,7 +85,7 @@ def candles(market: str, ticker: str, range: Literal["1m", "3m", "6m", "1y"] = "
 
 
 @router.get("/{market}/{ticker}/financials", response_model=FinancialsOut, summary="FY 재무 추이")
-def financials(market: str, ticker: str, limit: int = Query(5, ge=1, le=10), db: Session = Depends(get_db)):
+def financials(market: MarketPath, ticker: TickerPath, limit: int = Query(5, ge=1, le=10), db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
     rows = db.execute(sql("financials"), {"stock_id": s["stock_id"], "limit": limit}).mappings().all()
     return {"market": s["market"], "ticker": s["ticker"], "currency": s["currency"],
@@ -93,7 +93,7 @@ def financials(market: str, ticker: str, limit: int = Query(5, ge=1, le=10), db:
 
 
 @router.get("/{market}/{ticker}/disclosures", response_model=DisclosuresOut, summary="최근 공시")
-def disclosures(market: str, ticker: str, limit: int = Query(5, ge=1, le=50), db: Session = Depends(get_db)):
+def disclosures(market: MarketPath, ticker: TickerPath, limit: int = Query(5, ge=1, le=50), db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
     rows = db.execute(sql("disclosures"), {"stock_id": s["stock_id"], "limit": limit}).mappings().all()
     return {"market": s["market"], "ticker": s["ticker"],

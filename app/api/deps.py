@@ -4,8 +4,9 @@ from __future__ import annotations
 import importlib.util
 from collections.abc import Iterator
 from functools import lru_cache
+from typing import Annotated
 
-from fastapi import Depends, Query
+from fastapi import Depends, Path, Query
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
@@ -14,11 +15,18 @@ from app.core.db import get_engine, session_factory
 from app.core.errors import Unprocessable
 from app.ingest.benchmark import config as benchmark_config
 from app.providers.factory import Providers, default_providers
+from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN
 from app.services.fx import FxService
 from app.services.hydration import Hydrator
 from app.services.portfolio import PortfolioService
 from app.services.refresh import RefreshService
 from app.services.scoring import default_preset
+
+
+# 경로 파라미터 형식 — 형식이 틀리면 DB 조회 전에 422 VALIDATION_ERROR (근거: ASSUMPTIONS A-112)
+MarketPath = Annotated[str, Path(pattern=MARKET_PATTERN, description="시장 코드 (KOSPI·KOSDAQ·NASDAQ·NYSE)", examples=["KOSPI"])]
+TickerPath = Annotated[str, Path(pattern=TICKER_PATTERN, description="종목 코드 (005930·AAPL)", examples=["005930"])]
+IdPath = Annotated[int, Path(ge=1, le=INT_MAX, description="1 이상 PostgreSQL INT 범위")]
 
 
 def get_engine_dep() -> Engine:
@@ -38,7 +46,7 @@ def get_db(engine: Engine = Depends(get_engine_dep)) -> Iterator[Session]:
         db.close()
 
 
-def get_preset(preset: str | None = Query(None, description="투자 성향 프리셋 코드(aggressive·growth·balanced·value). 비우면 balanced, 그 외 값은 422"),
+def get_preset(preset: str | None = Query(None, max_length=20, description="투자 성향 프리셋 코드(aggressive·growth·balanced·value). 비우면 balanced, 그 외 값은 422"),
                db: Session = Depends(get_db)) -> dict:
     code = preset or default_preset()
     row = db.execute(text("SELECT preset_id, code, name, description FROM scoring_presets WHERE code = :c"),

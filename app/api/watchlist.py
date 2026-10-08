@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user_id, get_db, get_hydrator, get_preset
+from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, get_hydrator, get_preset
 from app.api.stocks import resolve_stock
 from app.core.errors import Conflict, NotFound
 from app.models import Stock, User, WatchlistItem
@@ -72,7 +72,7 @@ def reorder_watchlist(body: WatchlistOrder, user_id: int = Depends(get_current_u
 
 
 @router.delete("/{market}/{ticker}", status_code=204, summary="관심종목 삭제")
-def delete_watchlist(market: str, ticker: str, user_id: int = Depends(get_current_user_id),
+def delete_watchlist(market: MarketPath, ticker: TickerPath, user_id: int = Depends(get_current_user_id),
                      db: Session = Depends(get_db)):
     _require_user(db, user_id)
     s = resolve_stock(db, market, ticker)

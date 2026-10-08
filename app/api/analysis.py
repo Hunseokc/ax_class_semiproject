@@ -9,11 +9,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_preset
+from app.api.deps import MarketPath, TickerPath, get_db, get_preset
 from app.api.stocks import RANGE_MONTHS, resolve_stock
 from app.core.errors import NotFound
 from app.queries import sql
-from app.schemas.common import Num, Schema
+from app.schemas.common import INT_MAX, Num, Schema
 from app.services.scoring import FACTORS, METRICS, default_preset
 
 router = APIRouter(prefix="/stocks", tags=["analysis"])
@@ -191,7 +191,7 @@ def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row)
 
 @router.get("/{market}/{ticker}/analysis", response_model=AnalysisOut,
             summary="수치 분석(v_stock_metrics) + 매력도(프리셋별 점수·팩터 기여도·지표 원값/Z·국가 내 순위)")
-def analysis(market: str, ticker: str, preset: dict = Depends(get_preset), db: Session = Depends(get_db)):
+def analysis(market: MarketPath, ticker: TickerPath, preset: dict = Depends(get_preset), db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
     row = db.execute(sql("analysis"), {"stock_id": s["stock_id"], "preset_id": preset["preset_id"]}).mappings().first()
     if row is None:
@@ -225,7 +225,7 @@ def presets(db: Session = Depends(get_db)):
 # ------------------------------------------------------------------ 경쟁 비교
 @router.get("/{market}/{ticker}/peers", response_model=PeersOut,
             summary="경쟁 그룹별 비교 표 (그룹 내 RANK·AVG, 구성원 1명 그룹은 비교 대상 없음)")
-def peers(market: str, ticker: str, db: Session = Depends(get_db)):
+def peers(market: MarketPath, ticker: TickerPath, db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
     rows = db.execute(sql("peers"), {"stock_id": s["stock_id"], "preset": default_preset()}).mappings().all()
     groups: dict[int, dict] = {}
@@ -247,8 +247,8 @@ def peers(market: str, ticker: str, db: Session = Depends(get_db)):
 
 @router.get("/{market}/{ticker}/peers/chart", response_model=PeersChartOut,
             summary="경쟁 그룹 기준일=100 가격 추이 (합집합 날짜 + 휴장일 null)")
-def peers_chart(market: str, ticker: str, range: Literal["1m", "3m", "6m", "1y"] = "3m",
-                group_id: int | None = Query(None, description="비우면 종목의 첫 번째 그룹"),
+def peers_chart(market: MarketPath, ticker: TickerPath, range: Literal["1m", "3m", "6m", "1y"] = "3m",
+                group_id: int | None = Query(None, ge=1, le=INT_MAX, description="비우면 종목의 첫 번째 그룹"),
                 db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
     my_groups = [dict(r) for r in db.execute(sql("stock_groups"), {"stock_id": s["stock_id"]}).mappings()]

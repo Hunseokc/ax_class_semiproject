@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Response
 
-from app.api.deps import get_portfolio_service
+from app.api.deps import IdPath, get_portfolio_service
 from app.models import Portfolio, PortfolioItem
 from app.schemas.api import (ItemCreate, ItemInput, ItemOut, ItemsOut, PortfolioCreate, PortfolioOut,
                              PortfolioUpdate, SummaryOut)
@@ -40,29 +40,29 @@ def list_portfolios(svc: PortfolioService = Depends(get_portfolio_service)):
 
 
 @router.get("/{portfolio_id}", response_model=PortfolioOut, summary="포트폴리오 단건")
-def get_portfolio(portfolio_id: int, svc: PortfolioService = Depends(get_portfolio_service)):
+def get_portfolio(portfolio_id: IdPath, svc: PortfolioService = Depends(get_portfolio_service)):
     return _pf_out(svc, svc.get(portfolio_id))
 
 
 @router.put("/{portfolio_id}", response_model=PortfolioOut, summary="이름·시드 수정 (원가 합계 미만 시드는 409)")
-def update_portfolio(portfolio_id: int, body: PortfolioUpdate, svc: PortfolioService = Depends(get_portfolio_service)):
+def update_portfolio(portfolio_id: IdPath, body: PortfolioUpdate, svc: PortfolioService = Depends(get_portfolio_service)):
     return _pf_out(svc, svc.update(portfolio_id, body.name, body.seed_krw))
 
 
 @router.delete("/{portfolio_id}", status_code=204, summary="포트폴리오 삭제 (담은 항목 함께 삭제)")
-def delete_portfolio(portfolio_id: int, svc: PortfolioService = Depends(get_portfolio_service)):
+def delete_portfolio(portfolio_id: IdPath, svc: PortfolioService = Depends(get_portfolio_service)):
     svc.delete(portfolio_id)
     return Response(status_code=204)
 
 
 @router.post("/{portfolio_id}/items", response_model=ItemOut, status_code=201,
              summary="종목 담기 (quantity/amount/weight 모드, 시드 초과 409, 수량 0이면 422)")
-def add_item(portfolio_id: int, body: ItemCreate, svc: PortfolioService = Depends(get_portfolio_service)):
+def add_item(portfolio_id: IdPath, body: ItemCreate, svc: PortfolioService = Depends(get_portfolio_service)):
     return _item_out(svc.add_item(portfolio_id, body.market, body.ticker, body.mode, body.value, body.memo))
 
 
 @router.get("/{portfolio_id}/items", response_model=ItemsOut, summary="담은 종목과 현재 평가")
-def list_items(portfolio_id: int, svc: PortfolioService = Depends(get_portfolio_service)):
+def list_items(portfolio_id: IdPath, svc: PortfolioService = Depends(get_portfolio_service)):
     items, fx = svc.valued_items(portfolio_id)
     return {"portfolio_id": portfolio_id, "fx_rate": fx.usd_krw if fx else None,
             "fx_rate_at": fx.rate_at if fx else None, "fx_stale": fx.stale if fx else False, "items": items}
@@ -70,17 +70,17 @@ def list_items(portfolio_id: int, svc: PortfolioService = Depends(get_portfolio_
 
 @router.put("/{portfolio_id}/items/{item_id}", response_model=ItemOut,
             summary="담은 종목 수정 (기준가·환율을 현재값으로 갱신)")
-def update_item(portfolio_id: int, item_id: int, body: ItemInput, svc: PortfolioService = Depends(get_portfolio_service)):
+def update_item(portfolio_id: IdPath, item_id: IdPath, body: ItemInput, svc: PortfolioService = Depends(get_portfolio_service)):
     return _item_out(svc.update_item(portfolio_id, item_id, body.mode, body.value, body.memo))
 
 
 @router.delete("/{portfolio_id}/items/{item_id}", status_code=204, summary="담은 종목 삭제")
-def delete_item(portfolio_id: int, item_id: int, svc: PortfolioService = Depends(get_portfolio_service)):
+def delete_item(portfolio_id: IdPath, item_id: IdPath, svc: PortfolioService = Depends(get_portfolio_service)):
     svc.delete_item(portfolio_id, item_id)
     return Response(status_code=204)
 
 
 @router.get("/{portfolio_id}/summary", response_model=SummaryOut,
             summary="요약: 사용·잔여·비중·가중 매력도·평가손익(환 효과 분리)")
-def summary(portfolio_id: int, svc: PortfolioService = Depends(get_portfolio_service)):
+def summary(portfolio_id: IdPath, svc: PortfolioService = Depends(get_portfolio_service)):
     return svc.summary(portfolio_id)

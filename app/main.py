@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api import deps, market, portfolios, stocks, watchlist
 from app.core.config import ROOT_DIR, get_settings
 from app.core.db import get_engine
-from app.core.errors import NotFound, install_error_handlers
+from app.core.errors import NotFound, install_error_handlers, internal_error_response
 from app.core.logging import request_id_var, setup_logging
 from app.schemas.api import ErrorOut
 from app.services.fx import FxService
@@ -63,7 +63,13 @@ async def request_context(request: Request, call_next):
     token = request_id_var.set(request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12])
     t0 = time.perf_counter()
     try:
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:  # noqa: BLE001
+            # 예상하지 못한 예외: 스택은 요청 ID와 함께 서버 로그에만 남기고, 응답에는 형식화된 500만 보낸다.
+            # (Exception 핸들러는 이 미들웨어 바깥에서 돌아 요청 ID·헤더를 잃으므로 여기서 처리한다)
+            log.exception("처리되지 않은 오류: %s %s", request.method, request.url.path)
+            response = internal_error_response()
         response.headers["X-Request-ID"] = request_id_var.get()
         if not request.url.path.startswith("/api/"):
             # 화면·정적 파일은 매번 ETag/Last-Modified로 변경 여부를 확인(바뀌지 않았으면 304) → 수정한 CSS·JS가 바로 반영

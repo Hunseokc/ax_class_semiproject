@@ -10,48 +10,53 @@
 | Base URL | `/api/v1` |
 | 인증 | 없음 — **1차는 로컬·시연 전용 단일 사용자(데모) 모드**. 요청 사용자는 서버 의존성 `get_current_user_id()`가 정하며, 1차는 설정값 `DEFAULT_USER_ID`(기본 1 = demo)를 반환한다. 클라이언트는 `user_id`를 보내지 않으며 보내도 무시된다. 설정된 사용자가 DB에 없으면 404 `USER_NOT_FOUND`. 2차에서 이 함수를 JWT 검증으로 교체한다 |
 | 소유권 | 포트폴리오·담은 항목·관심종목은 요청 사용자 소유만 조회·변경. 다른 사용자의 리소스는 존재 여부를 드러내지 않도록 없는 리소스와 같은 404(`PORTFOLIO_NOT_FOUND`·`ITEM_NOT_FOUND`·`WATCHLIST_ITEM_NOT_FOUND`) |
-| 오류 형식 | `{"error": {"code", "message", "detail"}}` — 404 NOT_FOUND 계열, 409 CONFLICT 계열, 422 VALIDATION_ERROR·업무 검증, 503 FX_UNAVAILABLE |
+| 오류 형식 | `{"error": {"code", "message", "detail"}}` — 404 NOT_FOUND 계열, 409 CONFLICT 계열, 422 VALIDATION_ERROR·업무 검증, 503 FX_UNAVAILABLE, 500 INTERNAL_ERROR. 코드 전체는 [5절 에러 코드](#5-에러-코드) |
+| 500 처리 | 예상하지 못한 예외는 500 `INTERNAL_ERROR`와 고정 메시지만 응답한다(예외 메시지·스택·SQL·내부 경로는 응답에 넣지 않음). 스택은 서버 로그에 요청 ID와 함께 남고, 응답에도 `X-Request-ID` 헤더가 붙는다 |
+| 입력 형식 | 형식·범위가 틀리면 DB 조회 전에 422 `VALIDATION_ERROR`(`detail`에 위치·사유). `market` 영문 2~10자, `ticker` 영숫자로 시작하는 영숫자·`.`·`-` 1~16자, id(`portfolio_id`·`item_id`·`group_id`) 1~2,147,483,647, 이름 1~100자(공백만 불가), `seed_krw`·금액 0 초과 1,000조 원 이하, 수량 정수 1~2,147,483,647, 비중 0 초과 100 이하, 메모 500자, `limit`·`offset`·`range`·`period`는 엔드포인트별 범위·허용 값(Swagger). 근거 ASSUMPTIONS A-112 |
 | 숫자 | 금액·가격은 서버에서 Decimal로 계산, JSON에는 숫자. 비율은 소수(0.0523 = 5.23%) |
 | 기준 시각 | 시세 응답은 `as_of`(거래일), 환율은 `rate_at`, 통화는 `currency` |
 | 요청 ID | 모든 응답 헤더 `X-Request-ID`, 서버 로그에 같은 ID 기록 |
-| 갱신 정책 | 같은 종류 외부 호출은 `REFRESH_TTL_HOURS`(4시간)에 최대 1회. TTL 이내 요청은 저장된 값 사용 |
+| 갱신 정책 | 같은 종류 외부 호출은 `REFRESH_TTL_HOURS`(4시간)에 최대 1회. TTL 이내 요청은 저장된 값 사용. 일부 대상만 실패하면 30분 뒤 실패한 종목만 다시 받음(A-109) |
+| 외부 소스 장애 시 동작 | **조회 API는 외부 소스를 직접 부르지 않고 DB에 저장된 마지막 값을 돌려준다**(시세·지수·밸류에이션·재무·공시·점수). 실패는 대상별로 `ingestion_logs`에 FAILED로 남고 나머지 대상은 계속 적재한다. 데이터의 기준 시점은 응답의 `as_of`로, 갱신 상태는 `GET /market/refresh/status`의 작업별 `FRESH`/`STALE`로 확인한다. 작업별 차이: ① **환율** — 조회 시 TTL이 지났으면 외부 호출, 실패하면 마지막 저장값 + `fx_stale: true`, 저장값도 없으면 503 `FX_UNAVAILABLE`(USD 종목 상세·담기·평가도 같음) ② **국내 밸류에이션** — pykrx 실패 시 DART FY 기반 파생값(`DERIVED`)으로 대체(A-02) ③ **비교군 종목 상세** — 백그라운드 수집 실패 시 `detail_status: failed`, 10분 뒤 다시 시도 ④ **점수** — 계산 실패 시 직전 점수 유지 |
 
 ## 2. 엔드포인트 목록
 
-| 구분 | Method | URL | 기능 | 주요 파라미터 | 성공 / 오류 코드 |
+| 구분 | Method | URL | 기능 | 주요 파라미터 | 성공 · 오류(HTTP 상태와 `code`) |
 |---|---|---|---|---|---|
-| 시장·갱신 | GET | `/market/indices` | 지수별 최신값·등락·최근 30거래일 스파크라인 | - | 200 · 404/409/422 |
-| 시장·갱신 | GET | `/market/fx` | USD/KRW 최신값·전일 대비·최근 30일 (TTL 내에는 외부 호출 없음) | - | 200 · 404/409/422 |
-| 시장·갱신 | POST | `/market/refresh` | 환율·지수·증분 일봉·밸류에이션·점수 갱신 (작업별 TTL 이내면 SKIPPED) | - | 200 · 404/409/422 |
-| 시장·갱신 | GET | `/market/refresh/status` | 갱신 상태 조회 — 외부 호출 없음 (사이드바 '마지막 갱신 시각' 표시용) | - | 200 · 404/409/422 |
-| 종목 | GET | `/peer-groups` | 경쟁 그룹 목록 (리스트 필터용) | - | 200 · 404/409/422 |
-| 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 검색, 프리셋별 매력도). 기본은 노출 종목만, q가 있으면 매력도 비교군도(`coverage`) | country, sort, order, group, q, limit, offset, preset | 200 · 404/409/422 |
-| 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도. 비교군 종목이면 상세 데이터 수집을 예약하고 `detail_status`(ready/loading/failed) | preset | 200 · 404/409/422 |
-| 종목 | GET | `/stocks/{market}/{ticker}/candles` | 기간 일봉 | range | 200 · 404/409/422 |
-| 종목 | GET | `/stocks/{market}/{ticker}/financials` | FY 재무 추이 | limit | 200 · 404/409/422 |
-| 종목 | GET | `/stocks/{market}/{ticker}/disclosures` | 최근 공시 | limit | 200 · 404/409/422 |
-| 관심종목 | GET | `/watchlist` | 관심종목 카드 목록 (정렬순, 프리셋별 매력도) | preset | 200 · 404/409/422 |
-| 관심종목 | POST | `/watchlist` | 관심종목 추가 | body: market, ticker | 201 · 404/409/422 |
-| 관심종목 | PATCH | `/watchlist/order` | 관심종목 정렬 순서 변경 | body: items | 200 · 404/409/422 |
-| 관심종목 | DELETE | `/watchlist/{market}/{ticker}` | 관심종목 삭제 | - | 204 · 404/409/422 |
-| 모의 포트폴리오 | POST | `/portfolios` | 포트폴리오 생성 | body: name, seed_krw | 201 · 404/409/422 |
-| 모의 포트폴리오 | GET | `/portfolios` | 사용자의 포트폴리오 목록 | - | 200 · 404/409/422 |
-| 모의 포트폴리오 | GET | `/portfolios/{portfolio_id}` | 포트폴리오 단건 | - | 200 · 404/409/422 |
-| 모의 포트폴리오 | PUT | `/portfolios/{portfolio_id}` | 이름·시드 수정 (원가 합계 미만 시드는 409) | body: name, seed_krw | 200 · 404/409/422 |
-| 모의 포트폴리오 | DELETE | `/portfolios/{portfolio_id}` | 포트폴리오 삭제 (담은 항목 함께 삭제) | - | 204 · 404/409/422 |
-| 모의 포트폴리오 | POST | `/portfolios/{portfolio_id}/items` | 종목 담기 (quantity/amount/weight 모드, 시드 초과 409, 수량 0이면 422) | body: mode, value, memo, market, ticker | 201 · 404/409/422 |
-| 모의 포트폴리오 | GET | `/portfolios/{portfolio_id}/items` | 담은 종목과 현재 평가 | - | 200 · 404/409/422 |
-| 모의 포트폴리오 | PUT | `/portfolios/{portfolio_id}/items/{item_id}` | 담은 종목 수정 (기준가·환율을 현재값으로 갱신) | body: mode, value, memo | 200 · 404/409/422 |
-| 모의 포트폴리오 | DELETE | `/portfolios/{portfolio_id}/items/{item_id}` | 담은 종목 삭제 | - | 204 · 404/409/422 |
-| 모의 포트폴리오 | GET | `/portfolios/{portfolio_id}/summary` | 요약: 사용·잔여·비중·가중 매력도·평가손익(환 효과 분리) | - | 200 · 404/409/422 |
-| 분석 | GET | `/stocks/{market}/{ticker}/analysis` | 수치 분석(v_stock_metrics) + 매력도(프리셋별 점수·팩터 기여도·지표 원값/Z·국가 내 순위·백분위·데이터 충족도) | preset | 200 · 404/409/422 |
+| 시장·갱신 | GET | `/market/indices` | 지수별 최신값·등락·최근 30거래일 스파크라인 | - | 200 |
+| 시장·갱신 | GET | `/market/fx` | USD/KRW 최신값·전일 대비·최근 30일 (TTL 내에는 외부 호출 없음) | - | 200 · 503 FX_UNAVAILABLE |
+| 시장·갱신 | POST | `/market/refresh` | 환율·지수·증분 일봉·밸류에이션·점수 갱신 (작업별 TTL 이내면 SKIPPED) | - | 200 (작업별 실패는 본문 `jobs[].status`) |
+| 시장·갱신 | GET | `/market/refresh/status` | 갱신 상태 조회 — 외부 호출 없음 (사이드바 '마지막 갱신 시각' 표시용) | - | 200 |
+| 종목 | GET | `/peer-groups` | 경쟁 그룹 목록 (리스트 필터용) | - | 200 |
+| 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 검색, 프리셋별 매력도). 기본은 노출 종목만, q가 있으면 매력도 비교군도(`coverage`) | country, sort, order, group, q, limit, offset, preset | 200 · 422 VALIDATION_ERROR, VOLUME_SORT_REQUIRES_MARKET, UNKNOWN_PRESET |
+| 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도. 비교군 종목이면 상세 데이터 수집을 예약하고 `detail_status`(ready/loading/failed) | preset | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR, UNKNOWN_PRESET · 503 FX_UNAVAILABLE(USD) |
+| 종목 | GET | `/stocks/{market}/{ticker}/candles` | 기간 일봉 | range | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
+| 종목 | GET | `/stocks/{market}/{ticker}/financials` | FY 재무 추이 | limit | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
+| 종목 | GET | `/stocks/{market}/{ticker}/disclosures` | 최근 공시 | limit | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
+| 관심종목 | GET | `/watchlist` | 관심종목 카드 목록 (정렬순, 프리셋별 매력도) | preset | 200 · 404 USER_NOT_FOUND · 422 VALIDATION_ERROR, UNKNOWN_PRESET |
+| 관심종목 | POST | `/watchlist` | 관심종목 추가 | body: market, ticker | 201 · 404 STOCK_NOT_FOUND, USER_NOT_FOUND · 409 DUPLICATE_WATCHLIST · 422 VALIDATION_ERROR |
+| 관심종목 | PATCH | `/watchlist/order` | 관심종목 정렬 순서 변경 | body: items | 200 · 404 WATCHLIST_ITEM_NOT_FOUND, USER_NOT_FOUND · 422 VALIDATION_ERROR |
+| 관심종목 | DELETE | `/watchlist/{market}/{ticker}` | 관심종목 삭제 | - | 204 · 404 STOCK_NOT_FOUND, WATCHLIST_ITEM_NOT_FOUND, USER_NOT_FOUND · 422 VALIDATION_ERROR |
+| 모의 포트폴리오 | POST | `/portfolios` | 포트폴리오 생성 | body: name, seed_krw | 201 · 404 USER_NOT_FOUND · 409 DUPLICATE_PORTFOLIO_NAME · 422 VALIDATION_ERROR |
+| 모의 포트폴리오 | GET | `/portfolios` | 사용자의 포트폴리오 목록 | - | 200 · 404 USER_NOT_FOUND |
+| 모의 포트폴리오 | GET | `/portfolios/{portfolio_id}` | 포트폴리오 단건 | - | 200 · 404 PORTFOLIO_NOT_FOUND · 422 VALIDATION_ERROR |
+| 모의 포트폴리오 | PUT | `/portfolios/{portfolio_id}` | 이름·시드 수정 (원가 합계 미만 시드는 409) | body: name, seed_krw | 200 · 404 PORTFOLIO_NOT_FOUND · 409 SEED_BELOW_USED, DUPLICATE_PORTFOLIO_NAME · 422 VALIDATION_ERROR |
+| 모의 포트폴리오 | DELETE | `/portfolios/{portfolio_id}` | 포트폴리오 삭제 (담은 항목 함께 삭제) | - | 204 · 404 PORTFOLIO_NOT_FOUND · 422 VALIDATION_ERROR |
+| 모의 포트폴리오 | POST | `/portfolios/{portfolio_id}/items` | 종목 담기 (quantity/amount/weight 모드, 시드 초과 409, 수량 0이면 422) | body: mode, value, memo, market, ticker | 201 · 404 PORTFOLIO_NOT_FOUND, STOCK_NOT_FOUND · 409 SEED_EXCEEDED, DUPLICATE_ITEM · 422 VALIDATION_ERROR, QUANTITY_ZERO, NO_PRICE · 503 FX_UNAVAILABLE(USD) |
+| 모의 포트폴리오 | GET | `/portfolios/{portfolio_id}/items` | 담은 종목과 현재 평가 | - | 200 · 404 PORTFOLIO_NOT_FOUND · 422 VALIDATION_ERROR · 503 FX_UNAVAILABLE(USD 보유) |
+| 모의 포트폴리오 | PUT | `/portfolios/{portfolio_id}/items/{item_id}` | 담은 종목 수정 (기준가·환율을 현재값으로 갱신) | body: mode, value, memo | 200 · 404 PORTFOLIO_NOT_FOUND, ITEM_NOT_FOUND · 409 SEED_EXCEEDED · 422 VALIDATION_ERROR, QUANTITY_ZERO, NO_PRICE · 503 FX_UNAVAILABLE(USD) |
+| 모의 포트폴리오 | DELETE | `/portfolios/{portfolio_id}/items/{item_id}` | 담은 종목 삭제 | - | 204 · 404 PORTFOLIO_NOT_FOUND, ITEM_NOT_FOUND · 422 VALIDATION_ERROR |
+| 모의 포트폴리오 | GET | `/portfolios/{portfolio_id}/summary` | 요약: 사용·잔여·비중·가중 매력도·평가손익(환 효과 분리) | - | 200 · 404 PORTFOLIO_NOT_FOUND · 422 VALIDATION_ERROR · 503 FX_UNAVAILABLE(USD 보유) |
+| 분석 | GET | `/stocks/{market}/{ticker}/analysis` | 수치 분석(v_stock_metrics) + 매력도(프리셋별 점수·팩터 기여도·지표 원값/Z·국가 내 순위·백분위·데이터 충족도) | preset | 200 · 404 STOCK_NOT_FOUND, NO_PRICE · 422 VALIDATION_ERROR, UNKNOWN_PRESET |
 | 분석 | GET | `/scoring/presets` | 투자 성향 프리셋(sort_order 순: 위험·성장·균형·가치)과 팩터별 가중치 | - | 200 |
-| 분석 | GET | `/stocks/{market}/{ticker}/peers` | 경쟁 그룹별 비교 표 (그룹 내 RANK·AVG, 구성원 1명 그룹은 비교 대상 없음) | - | 200 · 404/409/422 |
-| 분석 | GET | `/stocks/{market}/{ticker}/peers/chart` | 경쟁 그룹 기준일=100 가격 추이 (합집합 날짜 + 휴장일 null) | range, group_id | 200 · 404/409/422 |
-| 통계 | GET | `/statistics/overview` | 데이터 개요: 행 수·기간·마지막 갱신 | - | 200 · 404/409/422 |
-| 통계 | GET | `/statistics/market-valuation` | 시장별 평균 PER/PBR/ROE (HAVING 표본 수 이상) | min_samples | 200 · 404/409/422 |
-| 통계 | GET | `/statistics/peer-group-valuation` | 경쟁 그룹별 평균·최고·최저 지표 | - | 200 · 404/409/422 |
-| 통계 | GET | `/statistics/disclosure-frequency` | 기간별 공시 빈도 (월·분기·주) | period, days | 200 · 404/409/422 |
+| 분석 | GET | `/stocks/{market}/{ticker}/peers` | 경쟁 그룹별 비교 표 (그룹 내 RANK·AVG, 구성원 1명 그룹은 비교 대상 없음) | - | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
+| 분석 | GET | `/stocks/{market}/{ticker}/peers/chart` | 경쟁 그룹 기준일=100 가격 추이 (합집합 날짜 + 휴장일 null) | range, group_id | 200 · 404 STOCK_NOT_FOUND, NO_PEER_GROUP, GROUP_NOT_FOUND · 422 VALIDATION_ERROR |
+| 통계 | GET | `/statistics/overview` | 데이터 개요: 행 수·기간·마지막 갱신 | - | 200 |
+| 통계 | GET | `/statistics/market-valuation` | 시장별 평균 PER/PBR/ROE (HAVING 표본 수 이상) | min_samples | 200 · 422 VALIDATION_ERROR |
+| 통계 | GET | `/statistics/peer-group-valuation` | 경쟁 그룹별 평균·최고·최저 지표 | - | 200 |
+| 통계 | GET | `/statistics/disclosure-frequency` | 기간별 공시 빈도 (월·분기·주) | period, days | 200 · 422 VALIDATION_ERROR |
+
+※ 오류 열은 엔드포인트별로 실제 발생할 수 있는 상태와 `code`다. 모든 엔드포인트는 예상하지 못한 예외 시 500 `INTERNAL_ERROR`. 코드별 조건은 [5절](#5-에러-코드).
 
 ※ `GET /market/refresh/status`, `GET /peer-groups`는 화면 요구로 추가한 엔드포인트(ASSUMPTIONS A-48, A-67)
 
@@ -1299,6 +1304,23 @@
 }
 ```
 ### 3-7. 공통 오류 응답
+#### `GET /api/v1/portfolios/99999999999` — id가 INT 범위 밖 → 422 (이전에는 DB 오류가 500으로 노출)
+응답 `422` (2026-10-08 실제 호출):
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "요청 값이 올바르지 않습니다",
+    "detail": [
+      {
+        "loc": ["path", "portfolio_id"],
+        "msg": "Input should be less than or equal to 2147483647",
+        "type": "less_than_equal"
+      }
+    ]
+  }
+}
+```
 #### `GET /api/v1/stocks/KOSPI/999999` — 없는 종목 → 404
 응답 `404`:
 ```json
@@ -1397,3 +1419,32 @@
 | | | 항목 수정·삭제 | `PUT/DELETE /portfolios/{id}/items/{item_id}` |
 | (보고서·발표) | — | 데이터 개요·통계 | `GET /statistics/*` |
 
+## 5. 에러 코드
+코드에서 실제로 던지는 `code` 전체(`grep -rn 'code="' app` + `app/core/errors.py` 핸들러). 응답 형식은 모두 `{"error": {"code", "message", "detail"}}`. 재현 테스트 ID는 `docs/07`.
+
+| `code` | HTTP | 발생 조건 | 발생 엔드포인트 | 메시지 예시 | 테스트 |
+|---|---|---|---|---|---|
+| `VALIDATION_ERROR` | 422 | 요청 파라미터·본문의 타입·형식·범위 위반(1절 입력 형식). `detail`에 `loc`·`msg`·`type` 목록 | 입력이 있는 모든 엔드포인트 | 요청 값이 올바르지 않습니다 | ST-09, PF-05, ERR-09~ERR-20 |
+| `NOT_FOUND` | 404 | 정의되지 않은 경로 | - | Not Found | ERR-06 |
+| `METHOD_NOT_ALLOWED` | 405 | 경로는 있으나 허용하지 않는 메서드 | - | Method Not Allowed | ERR-06 |
+| `HTTP_ERROR` | 그 밖의 4xx·5xx | 프레임워크가 낸 기타 HTTP 예외(현재 라우트에서 직접 내는 곳 없음 — 최후 방어) | - | (예외 메시지) | ERR-07 |
+| `INTERNAL_ERROR` | 500 | 처리하지 못한 예외. 응답은 고정 메시지만, 스택은 요청 ID와 함께 서버 로그 | 모든 엔드포인트 | 서버 오류가 발생했습니다 | ERR-08 |
+| `STOCK_NOT_FOUND` | 404 | (시장, 티커) 종목 없음 | `/stocks/{market}/{ticker}`·하위, `/watchlist`(POST·DELETE), 담기 | 종목 KOSPI/999999을(를) 찾을 수 없습니다 | ST-06, ERR-09 |
+| `USER_NOT_FOUND` | 404 | 요청 사용자(`DEFAULT_USER_ID`)가 DB에 없음 | `/watchlist`, `/portfolios` | 사용자(ID 99)를 찾을 수 없습니다 | WL-03 |
+| `PORTFOLIO_NOT_FOUND` | 404 | 포트폴리오 없음 또는 다른 사용자 소유 | `/portfolios/{portfolio_id}`·하위 | 포트폴리오(ID 7)를 찾을 수 없습니다 | USR-02, ERR-10 |
+| `ITEM_NOT_FOUND` | 404 | 그 포트폴리오에 항목 없음 또는 다른 사용자 소유 | `/portfolios/{id}/items/{item_id}` | 포트폴리오(ID 1)에 항목(ID 9)이 없습니다 | USR-04, ERR-10 |
+| `WATCHLIST_ITEM_NOT_FOUND` | 404 | 요청 사용자의 관심종목에 없는 종목 | `DELETE /watchlist/{market}/{ticker}`, `PATCH /watchlist/order` | 관심종목에 KOSPI/005930이(가) 없습니다 | WL-03, USR-02 |
+| `NO_PRICE` | 404 / 422 | 시세가 없는 종목을 분석(404)하거나 담음(422) | `/analysis`, 담기·담은 종목 수정 | 시세가 없어 분석할 수 없습니다 / 시세가 없어 담을 수 없습니다 | ERR-02 |
+| `NO_PEER_GROUP` | 404 | 경쟁 그룹에 속하지 않은 종목의 기준일=100 차트 | `/peers/chart` | 이 종목은 경쟁 그룹에 속해 있지 않습니다 | ERR-01 |
+| `GROUP_NOT_FOUND` | 404 | `group_id`가 그 종목이 속한 그룹이 아님 | `/peers/chart` | 이 종목은 그룹(ID 2)에 속해 있지 않습니다 | ERR-01 |
+| `DUPLICATE_WATCHLIST` | 409 | 이미 관심종목에 있는 종목 추가 | `POST /watchlist` | 이미 관심종목에 있습니다 | WL-02 |
+| `DUPLICATE_PORTFOLIO_NAME` | 409 | 같은 사용자의 같은 이름 포트폴리오 | `POST·PUT /portfolios` | 같은 이름의 포트폴리오가 이미 있습니다: 반도체 집중 | PF-07 |
+| `DUPLICATE_ITEM` | 409 | 이미 담은 종목을 다시 담기(`detail.item_id`, 수정은 PUT) | 담기 | 이미 담은 종목입니다. 수량을 바꾸려면 수정(PUT)을 사용하세요 | ERR-03 |
+| `SEED_EXCEEDED` | 409 | 담은 원가 합계가 시드 초과(`detail.max_quantity` 등) | 담기, 담은 종목 수정 | 담은 원가 합계가 시드를 넘습니다 | PF-02, ERR-13 |
+| `SEED_BELOW_USED` | 409 | 시드를 담은 원가 합계보다 작게 수정 | `PUT /portfolios/{id}` | 시드를 현재 담은 원가 합계보다 작게 줄일 수 없습니다 | ERR-03 |
+| `QUANTITY_ZERO` | 422 | 금액·비중으로 계산한 수량이 0주(`detail.min_amount_krw` 등) | 담기, 담은 종목 수정 | 계산된 수량이 0주입니다. 금액이나 비중을 늘려 주세요 | PF-04 |
+| `INVALID_QUANTITY` | 422 | 수량 모드인데 정수가 아님 — 서비스 계층 방어(API는 스키마가 먼저 `VALIDATION_ERROR`) | (서비스 직접 호출) | 수량은 정수여야 합니다 | ERR-04 |
+| `INVALID_MODE` | 422 | 지원하지 않는 담기 모드 — 서비스 계층 방어(API는 스키마가 먼저 `VALIDATION_ERROR`) | (서비스 직접 호출) | 지원하지 않는 모드: shares | ERR-04 |
+| `UNKNOWN_PRESET` | 422 | 없는 투자 성향 프리셋(`detail.presets`) | `preset`을 받는 엔드포인트 | 알 수 없는 매력도 프리셋입니다: buffett | SC-13, ERR-19 |
+| `VOLUME_SORT_REQUIRES_MARKET` | 422 | 전체 탭(country 없음)에서 거래량 정렬 | `GET /stocks` | 시장마다 거래량 단위가 달라 '전체'에서는 거래량 정렬을 할 수 없습니다 … | ST-03 |
+| `FX_UNAVAILABLE` | 503 | 환율 조회 실패 + 저장된 환율 없음 | `/market/fx`, USD 종목 상세·담기·평가 | 환율을 조회할 수 없고 저장된 값도 없습니다 | RF-04, ERR-05 |

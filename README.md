@@ -81,7 +81,7 @@ docker compose up -d          # 로컬 venv라면: uvicorn app.main:app --reload
 - 화면: http://localhost:8000/ · `/stocks` · `/stocks/KOSPI/005930` · `/portfolio`
 - API 문서(Swagger): http://localhost:8000/docs — API는 `/api/v1` 아래
 - 사용자: 인증 없음(단일 사용자·데모 모드). 요청 사용자는 서버의 `get_current_user_id()`가 `DEFAULT_USER_ID`로 정하며, API는 `user_id`를 받지 않습니다. 포트폴리오·관심종목은 소유자만 접근할 수 있고 남의 리소스는 404입니다. 로그인은 2차에서 이 함수를 JWT 검증으로 교체해 도입합니다
-- 오류 응답은 `{"error": {"code", "message", "detail"}}`, 모든 응답에 `X-Request-ID` 헤더
+- 오류 응답은 `{"error": {"code", "message", "detail"}}`, 모든 응답(500 포함)에 `X-Request-ID` 헤더. 에러 코드 전체는 [docs/06 5절](docs/06_기능_API_정의서.md#5-에러-코드)
 
 ### 매력도 비교군 (docs/09 9절)
 화면에 보이는 25종목 외에, 점수 비교 표본으로 국가별·섹터별 시가총액 상위 종목(섹터당 최대 10개, 현재 121종목)을 함께 관리합니다.
@@ -104,7 +104,7 @@ python -m app.ingest hydrate 042700       # 비교군 종목 상세 데이터 �
 
 ## 5. 테스트
 ```bash
-docker compose run --rm api pytest -q   # 150 passed (venv라면 pytest -q) — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
+docker compose run --rm api pytest -q   # 213 passed (venv라면 pytest -q) — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
 python -m app.ingest explain           # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
 ```
 DB 제약·전처리·TTL 갱신(외부 호출 횟수)·분석 SQL 손계산·포트폴리오 명세 시나리오·동시성·화면 흐름을 검증합니다. 결과는 [docs/07](docs/07_테스트_결과서.md).

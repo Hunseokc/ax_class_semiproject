@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from app.schemas.common import Num, Schema
+from app.schemas.common import INT_MAX, MONEY_MAX, Market, Num, Schema, Ticker
 
 
 # ------------------------------------------------------------------ 시장
@@ -204,18 +204,18 @@ class DisclosuresOut(Schema):
 
 # ------------------------------------------------------------------ 관심종목
 class WatchlistCreate(Schema):
-    market: str = Field(examples=["KOSPI"])
-    ticker: str = Field(examples=["005930"])
+    market: Market
+    ticker: Ticker
 
 
 class WatchlistOrderItem(Schema):
-    market: str
-    ticker: str
-    sort_order: int
+    market: Market
+    ticker: Ticker
+    sort_order: int = Field(ge=0, le=9999)
 
 
 class WatchlistOrder(Schema):
-    items: list[WatchlistOrderItem] = Field(min_length=1)
+    items: list[WatchlistOrderItem] = Field(min_length=1, max_length=500)
 
 
 class WatchlistCard(Schema):
@@ -243,13 +243,14 @@ class WatchlistOut(Schema):
 
 # ------------------------------------------------------------------ 포트폴리오
 class PortfolioCreate(Schema):
-    name: str = Field(min_length=1, max_length=100, examples=["반도체 집중"])
-    seed_krw: Decimal = Field(gt=0, max_digits=20, decimal_places=0, examples=[10_000_000])
+    # pattern \S: 공백만으로 된 이름 거부 / 100자: portfolios.name VARCHAR(100)
+    name: str = Field(min_length=1, max_length=100, pattern=r"\S", examples=["반도체 집중"])
+    seed_krw: Decimal = Field(gt=0, le=MONEY_MAX, max_digits=20, decimal_places=0, examples=[10_000_000])
 
 
 class PortfolioUpdate(Schema):
-    name: str = Field(min_length=1, max_length=100)
-    seed_krw: Decimal = Field(gt=0, max_digits=20, decimal_places=0)
+    name: str = Field(min_length=1, max_length=100, pattern=r"\S")
+    seed_krw: Decimal = Field(gt=0, le=MONEY_MAX, max_digits=20, decimal_places=0)
 
 
 class PortfolioOut(Schema):
@@ -268,21 +269,23 @@ class PortfolioOut(Schema):
 class ItemInput(Schema):
     mode: Literal["quantity", "amount", "weight"] = Field(
         description="quantity=수량(주), amount=금액(원), weight=시드 대비 비중(%)")
-    value: Decimal = Field(gt=0, examples=[3_000_000])
+    value: Decimal = Field(gt=0, le=MONEY_MAX, examples=[3_000_000])
     memo: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
     def _check(self):
         if self.mode == "quantity" and self.value != self.value.to_integral_value():
             raise ValueError("quantity 모드의 value는 정수여야 합니다")
+        if self.mode == "quantity" and self.value > INT_MAX:
+            raise ValueError(f"quantity 모드의 value는 {INT_MAX:,} 이하여야 합니다")
         if self.mode == "weight" and self.value > 100:
             raise ValueError("weight 모드의 value는 0 초과 100 이하(%)여야 합니다")
         return self
 
 
 class ItemCreate(ItemInput):
-    market: str = Field(examples=["KOSPI"])
-    ticker: str = Field(examples=["005930"])
+    market: Market
+    ticker: Ticker
 
 
 class ItemOut(Schema):
