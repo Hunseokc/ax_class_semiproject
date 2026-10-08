@@ -389,3 +389,13 @@ class ErrorBody(Schema):
 
 class ErrorOut(Schema):
     error: ErrorBody
+
+
+# ------------------------------------------------------------------ 헬스체크
+class HealthOut(Schema):
+    status: Literal["ok"] = "ok"
+
+
+class HealthDbOut(Schema):
+    status: Literal["ok"] = "ok"
+    db: Literal["ok"] = "ok"

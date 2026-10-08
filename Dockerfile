@@ -32,7 +32,7 @@ USER app
 EXPOSE 8000
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/market/refresh/status', timeout=4)"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/db', timeout=4)"
 
 ENTRYPOINT ["entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

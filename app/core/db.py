@@ -10,7 +10,8 @@ from app.core.config import get_settings
 
 @lru_cache
 def get_engine(url: str | None = None) -> Engine:
-    return create_engine(url or get_settings().database_url, pool_pre_ping=True)
+    # connect_timeout: DB가 응답하지 않을 때 요청·헬스체크가 무한정 멈추지 않도록(A-114)
+    return create_engine(url or get_settings().database_url, pool_pre_ping=True, connect_args={"connect_timeout": 10})
 
 
 def session_factory(engine: Engine | None = None) -> sessionmaker[Session]:

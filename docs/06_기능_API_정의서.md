@@ -7,7 +7,7 @@
 ## 1. 공통 규칙
 | 항목 | 내용 |
 |---|---|
-| Base URL | `/api/v1` |
+| Base URL | `/api/v1` (헬스체크 `/health`·`/health/db`만 루트, A-114) |
 | 인증 | 없음 — **1차는 로컬·시연 전용 단일 사용자(데모) 모드**. 요청 사용자는 서버 의존성 `get_current_user_id()`가 정하며, 1차는 설정값 `DEFAULT_USER_ID`(기본 1 = demo)를 반환한다. 클라이언트는 `user_id`를 보내지 않으며 보내도 무시된다. 설정된 사용자가 DB에 없으면 404 `USER_NOT_FOUND`. 2차에서 이 함수를 JWT 검증으로 교체한다 |
 | 소유권 | 포트폴리오·담은 항목·관심종목은 요청 사용자 소유만 조회·변경. 다른 사용자의 리소스는 존재 여부를 드러내지 않도록 없는 리소스와 같은 404(`PORTFOLIO_NOT_FOUND`·`ITEM_NOT_FOUND`·`WATCHLIST_ITEM_NOT_FOUND`) |
 | 오류 형식 | `{"error": {"code", "message", "detail"}}` — 404 NOT_FOUND 계열, 409 CONFLICT 계열, 422 VALIDATION_ERROR·업무 검증, 503 FX_UNAVAILABLE, 500 INTERNAL_ERROR. 코드 전체는 [5절 에러 코드](#5-에러-코드) |
@@ -23,6 +23,8 @@
 
 | 구분 | Method | URL | 기능 | 주요 파라미터 | 성공 · 오류(HTTP 상태와 `code`) |
 |---|---|---|---|---|---|
+| 헬스체크 | GET | `/health` (루트) | 프로세스 생존 확인 — DB에 접근하지 않음 | - | 200 |
+| 헬스체크 | GET | `/health/db` (루트) | DB 연결 확인(`SELECT 1`). 컨테이너 HEALTHCHECK가 사용 | - | 200 · 503 DB_UNAVAILABLE |
 | 시장·갱신 | GET | `/market/indices` | 지수별 최신값·등락·최근 30거래일 스파크라인 | - | 200 |
 | 시장·갱신 | GET | `/market/fx` | USD/KRW 최신값·전일 대비·최근 30일 (TTL 내에는 외부 호출 없음) | - | 200 · 503 FX_UNAVAILABLE |
 | 시장·갱신 | POST | `/market/refresh` | 환율·지수·증분 일봉·밸류에이션·점수 갱신 (작업별 TTL 이내면 SKIPPED) | - | 200 (작업별 실패는 본문 `jobs[].status`) |
@@ -65,6 +67,24 @@
 ※ `preset`: 투자 성향 프리셋 코드(aggressive·growth·balanced·value, 기본 balanced). 없는 코드(옛 quality 포함)는 422 `UNKNOWN_PRESET`(`detail.presets`에 사용 가능한 코드). 경쟁 비교 표(`/peers`)와 포트폴리오 요약의 매력도는 균형 프리셋 기준. 점수 정의는 docs/09.
 
 ## 3. 요청·응답 예시 (실제 호출)
+### 3-0. 헬스체크 (2026-10-08 실제 호출)
+#### `GET /health`
+응답 `200`:
+```json
+{"status": "ok"}
+```
+#### `GET /health/db`
+응답 `200`:
+```json
+{"status": "ok", "db": "ok"}
+```
+#### `GET /health/db` — DB 컨테이너를 멈춘 상태(`docker stop ax_semi_db`) → 503 (약 4초, 연결 시간 제한 10초 이내)
+응답 `503`:
+```json
+{"error": {"code": "DB_UNAVAILABLE", "message": "DB에 연결할 수 없습니다", "detail": null}}
+```
+이때 `GET /health`는 200 — 프로세스는 살아 있고 DB만 문제임을 구분한다.
+
 
 ### 3-1. 시장·갱신
 #### `GET /api/v1/market/indices`
@@ -1447,4 +1467,5 @@
 | `INVALID_MODE` | 422 | 지원하지 않는 담기 모드 — 서비스 계층 방어(API는 스키마가 먼저 `VALIDATION_ERROR`) | (서비스 직접 호출) | 지원하지 않는 모드: shares | ERR-04 |
 | `UNKNOWN_PRESET` | 422 | 없는 투자 성향 프리셋(`detail.presets`) | `preset`을 받는 엔드포인트 | 알 수 없는 매력도 프리셋입니다: buffett | SC-13, ERR-19 |
 | `VOLUME_SORT_REQUIRES_MARKET` | 422 | 전체 탭(country 없음)에서 거래량 정렬 | `GET /stocks` | 시장마다 거래량 단위가 달라 '전체'에서는 거래량 정렬을 할 수 없습니다 … | ST-03 |
+| `DB_UNAVAILABLE` | 503 | `SELECT 1` 실패(연결 거부·시간 초과 등). 접속 정보는 응답에 넣지 않고 로그에만 | `GET /health/db` | DB에 연결할 수 없습니다 | HL-03, HL-04 |
 | `FX_UNAVAILABLE` | 503 | 환율 조회 실패 + 저장된 환율 없음 | `/market/fx`, USD 종목 상세·담기·평가 | 환율을 조회할 수 없고 저장된 값도 없습니다 | RF-04, ERR-05 |

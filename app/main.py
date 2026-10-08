@@ -16,7 +16,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import deps, market, portfolios, stocks, watchlist
+from app.api import deps, health, market, portfolios, stocks, watchlist
 from app.core.config import ROOT_DIR, get_settings
 from app.core.db import get_engine
 from app.core.errors import NotFound, install_error_handlers, internal_error_response
@@ -90,6 +90,7 @@ if importlib.util.find_spec("app.api.analysis"):     # 5단계: 분석·경쟁 �
     api.include_router(analysis.stats_router)
     api.include_router(analysis.scoring_router)
 app.include_router(api)
+app.include_router(health.router)       # /health, /health/db — /api/v1 밖(A-114)
 
 # ------------------------------------------------------------------ 화면 (6단계)
 if (WEB_DIR / "css").exists():
