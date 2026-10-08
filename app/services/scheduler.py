@@ -63,10 +63,8 @@ class Scheduler:
         now = now or datetime.now(timezone.utc)
         ran = []
         svc = self.refresh_service()
-        with self.engine.connect() as conn:
-            last = svc.last_success(conn)
-        if svc.next_available(last) <= svc.clock() and self._may_try("refresh", now):   # next_available은 svc 시계 기준
-            svc.refresh()                                   # TTL이 남은 작업은 내부에서 SKIPPED
+        if svc.next_available() <= svc.clock() and self._may_try("refresh", now):   # next_available은 svc 시계 기준
+            svc.refresh()                                   # TTL·재시도 간격이 남은 작업은 내부에서 SKIPPED
             ran.append("refresh")
         if benchmark_due(last_benchmark_success(self.engine), now, self.daily_at) and self._may_try("benchmark", now):
             if benchmark.run_benchmark(self.engine, self.providers(), self.scorer) is not None:

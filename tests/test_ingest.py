@@ -1,11 +1,18 @@
 """수집·전처리: upsert 재실행 시 행 수 불변, 이상 행 격리, 재무 계정 매핑·보완."""
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
+
+import pytest
+from sqlalchemy import text
 
 from app.ingest import jobs
 from app.ingest.preprocess import clean_bars, clean_fx
-from app.providers.base import Bar, Financial, FxPoint
+from app.providers import http, yahoo
+from app.providers.base import Bar, Financial, FxPoint, ProviderError
 from app.providers.dart import DartClient
+from app.providers.http import Throttle
 from tests.conftest import scalar
 from tests.fakes import make_providers
 
@@ -36,6 +43,50 @@ def test_failure_of_one_stock_does_not_stop_others(engine):
     statuses = jobs.load_prices(engine, p)
     assert statuses == {"005930": "SUCCESS", "000660": "FAILED", "AAPL": "SUCCESS", "NVDA": "SUCCESS"}
     assert scalar(engine, "SELECT error FROM ingestion_logs WHERE status = 'FAILED'").startswith("RuntimeError: boom")
+
+
+def test_no_session_skips_empty_or_weekend_only_range():
+    fri, sat, sun = date(2026, 10, 9), date(2026, 10, 10), date(2026, 10, 11)
+    assert jobs._no_session(sat, fri) == "최신 상태"
+    assert jobs._no_session(sat, sun) == "최신 상태(주말)"
+    assert jobs._no_session(fri, sun) is None
+
+
+def test_up_to_date_us_stock_is_not_requested_for_unopened_local_day(engine):
+    """한국 오전에는 미국이 아직 전날 → 시장 현지 날짜까지 받았으면 외부 호출 없이 '최신 상태'."""
+    ny_today = datetime.now(ZoneInfo("America/New_York")).date()
+    with engine.begin() as conn:
+        conn.execute(text("""INSERT INTO daily_prices (stock_id, trade_date, open, high, low, close, volume)
+                             VALUES (3, :d, 200, 201, 199, 200, 500) ON CONFLICT DO NOTHING"""), {"d": ny_today})
+    p = make_providers()
+    assert jobs.load_prices(engine, p, tickers=["AAPL"]) == {"AAPL": "SUCCESS"}
+    assert p.kr_price.calls == []
+    assert scalar(engine, "SELECT error FROM ingestion_logs WHERE stock_id = 3 ORDER BY log_id DESC LIMIT 1") == "최신 상태"
+
+
+class YFPricesMissingError(Exception):
+    """yfinance.exceptions.YFPricesMissingError와 같은 이름(클래스 이름으로 판별)."""
+
+
+def test_yahoo_short_range_without_prices_is_holiday_not_failure(monkeypatch):
+    calls = []
+
+    class Ticker:
+        def __init__(self, symbol):
+            pass
+
+        def history(self, **kw):
+            calls.append(kw)
+            raise YFPricesMissingError("Data doesn't exist")
+
+    monkeypatch.setattr(yahoo, "_yf", lambda: SimpleNamespace(Ticker=Ticker))
+    monkeypatch.setattr(yahoo, "_throttle", Throttle(0))
+    monkeypatch.setattr(http, "BACKOFF_BASE", 0)
+    holiday = date(2026, 11, 26)
+    assert yahoo._history("AAPL", holiday, holiday, "America/New_York") == []
+    assert len(calls) == 1                                               # 재시도 없음
+    with pytest.raises(ProviderError):                                   # 긴 구간의 '데이터 없음'은 실패(상장폐지·심볼 오류)
+        yahoo._history("AAPL", holiday - timedelta(days=30), holiday, "America/New_York")
 
 
 def bar(d, o=10, h=11, l=9, c=10, v=100):

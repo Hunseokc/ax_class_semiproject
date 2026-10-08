@@ -119,6 +119,8 @@ python -m app.ingest hydrate 042700       # 비교군 종목 상세 데이터 �
 
 ### 갱신 정책 (앱 안 스케줄러)
 - 환율·지수·종목 일봉·밸류에이션·점수는 **작업 종류별 `REFRESH_TTL_HOURS`(기본 4시간)에 최대 1회**만 외부 호출합니다.
+- 일부 종목만 실패한 작업은 TTL을 시작하지 않고, 30분 뒤 **실패한 종목만** 다시 받습니다(성공한 종목은 TTL당 1회 유지). TTL은 갱신 작업 단위 기록(`ingestion_logs.source = 'REFRESH'`)으로 판단해, 비교군 갱신·상세 수집의 종목 단위 기록이 노출 종목 갱신을 막지 않습니다.
+- 증분 일봉은 시장 현지 날짜까지만 요청합니다(한국 오전의 미국은 아직 전날). 주말뿐인 구간은 호출하지 않고, 짧은 구간에서 yfinance가 '데이터 없음'을 내면 휴장일로 봅니다.
 - 사이드바 새로고침(`POST /api/v1/market/refresh`)과 `python -m app.ingest refresh`는 TTL 이내 작업을 `SKIPPED`로 기록하고 외부 호출 없이 현재 상태를 돌려줍니다.
 - 환율은 TTL이 지났을 때 한 번만 조회해 저장하며(동시 요청은 advisory lock으로 한 번만), 실패하면 마지막 값과 `fx_stale: true`를 응답합니다.
 - **앱 안 스케줄러**(`SCHEDULER_ENABLED=true`, 기본): 서버가 떠 있는 동안 5분마다 확인해 노출 종목(+관심종목·포트폴리오 종목)을 4시간 TTL로 갱신하고, 비교군은 매일 07:00(KST) 이후 한 번 갱신합니다. 실패하면 30분(갱신)·60분(비교군) 간격으로만 다시 시도하고, 여러 프로세스가 동시에 돌려도 DB 잠금으로 한 번만 실행됩니다.
@@ -127,7 +129,7 @@ python -m app.ingest hydrate 042700       # 비교군 종목 상세 데이터 �
 
 ## 5. 테스트
 ```bash
-docker compose run --rm api pytest -q   # 142 passed (venv라면 pytest -q) — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
+docker compose run --rm api pytest -q   # 148 passed (venv라면 pytest -q) — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
 python -m app.ingest explain           # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
 ```
 DB 제약·전처리·TTL 갱신(외부 호출 횟수)·분석 SQL 손계산·포트폴리오 명세 시나리오·동시성·화면 흐름을 검증합니다. 결과는 [docs/07](docs/07_테스트_결과서.md).

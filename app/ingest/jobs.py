@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import Engine, text
 
@@ -116,6 +117,20 @@ def _start_date(last: date | None, full: bool, history_days: int, today: date) -
     return last + timedelta(days=1)
 
 
+def _market_today(tz: str, today: date) -> date:
+    """시장 현지 날짜(today보다 늦지 않게). KST 오전의 미국은 아직 전날이라, 이미 최신인 종목에 열리지 않은 날을 요청하지 않는다."""
+    return min(today, datetime.now(ZoneInfo(tz)).date())
+
+
+def _no_session(start: date, end: date) -> str | None:
+    """요청할 거래일이 없으면 사유. 주말뿐인 구간은 외부 호출 없이 '최신 상태'로 둔다."""
+    if start > end:
+        return "최신 상태"
+    if all((start + timedelta(days=i)).weekday() >= 5 for i in range((end - start).days + 1)):
+        return "최신 상태(주말)"
+    return None
+
+
 def load_prices(engine: Engine, providers: Providers, *, full: bool = False,
                 tickers: list[str] | None = None, today: date | None = None, scope: str = "frequent",
                 stock_ids: list[int] | None = None, history_days: int = PRICE_HISTORY_DAYS) -> dict[str, str]:
@@ -128,12 +143,13 @@ def load_prices(engine: Engine, providers: Providers, *, full: bool = False,
     for ref in refs:
         p = providers.price(ref.country)
         with job_log(engine, source=p.source, job_type="PRICES", stock_id=ref.stock_id, label=ref.ticker) as res:
+            end = _market_today(ref.timezone, today)
             start = _start_date(last.get(ref.stock_id), full, history_days, today)
-            if start > today:
-                res.notes.append("최신 상태")
+            if skip := _no_session(start, end):
+                res.notes.append(skip)
             else:
                 # yfinance는 시작일 이전 마지막 봉을 함께 돌려줄 수 있어 요청 구간만 남긴다
-                fetched = [b for b in p.get_daily_prices(ref, start, today) if b.trade_date >= start]
+                fetched = [b for b in p.get_daily_prices(ref, start, end) if b.trade_date >= start]
                 bars, bad = clean_bars(fetched, ref.timezone, require_volume=True)
                 res.quarantined = bad
                 with engine.begin() as conn:
@@ -141,7 +157,7 @@ def load_prices(engine: Engine, providers: Providers, *, full: bool = False,
                         {"stock_id": ref.stock_id, "trade_date": b.trade_date, "open": b.open, "high": b.high,
                          "low": b.low, "close": b.close, "volume": b.volume} for b in bars],
                         ["stock_id", "trade_date"])
-                res.notes.append(f"{start}~{today}")
+                res.notes.append(f"{start}~{end}")
         statuses[ref.ticker] = res.status
     return statuses
 
@@ -155,18 +171,19 @@ def load_indices(engine: Engine, providers: Providers, *, full: bool = False, to
     for ref in refs:
         p = providers.index(ref.country)
         with job_log(engine, source=p.source, job_type="INDICES", label=ref.code) as res:
+            end = _market_today(ref.timezone, today)
             start = _start_date(last.get(ref.index_id), full, PRICE_HISTORY_DAYS, today)
-            if start > today:
-                res.notes.append("최신 상태")
+            if skip := _no_session(start, end):
+                res.notes.append(skip)
             else:
-                fetched = [b for b in p.get_index_prices(ref, start, today) if b.trade_date >= start]
+                fetched = [b for b in p.get_index_prices(ref, start, end) if b.trade_date >= start]
                 bars, bad = clean_bars(fetched, ref.timezone, require_volume=False)
                 res.quarantined = bad
                 with engine.begin() as conn:
                     res.rows = upsert(conn, "index_daily_prices", [
                         {"index_id": ref.index_id, "trade_date": b.trade_date, "open": b.open, "high": b.high,
                          "low": b.low, "close": b.close} for b in bars], ["index_id", "trade_date"])
-                res.notes.append(f"{start}~{today}")
+                res.notes.append(f"{start}~{end}")
         statuses[ref.code] = res.status
     return statuses
 

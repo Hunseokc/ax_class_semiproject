@@ -22,13 +22,29 @@ def _yf():
     return yf
 
 
+SHORT_RANGE = timedelta(days=7)   # 이 이하 증분 구간의 '데이터 없음'은 휴장일로 본다
+
+
 def _history(symbol: str, start: date, end: date, tz: str, has_volume: bool = True) -> list[Bar]:
     yf = _yf()
-    # yfinance end는 배타적 → 하루 더한다
-    df = call_with_retry(
-        lambda: yf.Ticker(symbol).history(start=start.isoformat(), end=(end + timedelta(days=1)).isoformat(),
-                                          auto_adjust=True, raise_errors=True),
-        throttle=_throttle, what=f"yfinance history {symbol}")
+
+    def fetch():
+        try:
+            # yfinance end는 배타적 → 하루 더한다
+            return yf.Ticker(symbol).history(start=start.isoformat(), end=(end + timedelta(days=1)).isoformat(),
+                                             auto_adjust=True, raise_errors=True)
+        except Exception as e:
+            # 짧은 구간이 공휴일뿐이면 yfinance는 YFPricesMissingError를 낸다 → 재시도 없이 빈 결과.
+            # 증분은 마지막 저장일 다음 날부터 다시 요청하므로 일시적 누락이어도 다음 갱신에서 채워진다.
+            # 긴 구간의 '데이터 없음'은 상장폐지·심볼 오류일 수 있어 실패로 둔다.
+            if type(e).__name__ == "YFPricesMissingError" and end - start <= SHORT_RANGE:
+                log.info("yfinance history %s: %s~%s 거래 없음(휴장)", symbol, start, end)
+                return None
+            raise
+
+    df = call_with_retry(fetch, throttle=_throttle, what=f"yfinance history {symbol}")
+    if df is None:
+        return []
     out = []
     for ts, r in df.iterrows():
         local = ts.tz_convert(tz) if ts.tzinfo else ts
