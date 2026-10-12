@@ -18,26 +18,34 @@ router = APIRouter(prefix="/market", tags=["market"])
 SEOUL = ZoneInfo("Asia/Seoul")
 
 
-@router.get("/indices", response_model=IndicesOut, summary="지수별 최신값·등락·최근 30거래일 스파크라인")
+@router.get("/indices", response_model=IndicesOut, summary="지수별 최신값·등락·최근 1년 스파크라인·52주 범위")
 def indices(db: Session = Depends(get_db)):
     rows = db.execute(sql("market_indices")).mappings().all()
     items = [{**r, "sparkline": r["sparkline"] or []} for r in rows]
     return {"as_of": max((r["as_of"] for r in rows if r["as_of"]), default=None), "indices": items}
 
 
-@router.get("/fx", response_model=FxOut, summary="USD/KRW 최신값·전일 대비·최근 30일 (TTL 내에는 외부 호출 없음)")
+@router.get("/fx", response_model=FxOut, summary="USD/KRW 최신값·전일 대비·최근 1년·52주 범위 (TTL 내에는 외부 호출 없음)")
 def fx(db: Session = Depends(get_db), fx_service: FxService = Depends(get_fx_service)):
     quote = fx_service.get_current_rate()
-    history = list(reversed(db.execute(sql("fx_daily_recent")).mappings().all()))
+    rows = db.execute(sql("fx_daily_recent")).mappings().all()
+    history = [{"date": r["date"], "usd_krw": r["usd_krw"]} for r in reversed(rows)]
     # 전일 대비: 현재 값의 기준일(서울) 이전 마지막 DAILY 종가
     quote_day = quote.rate_at.astimezone(SEOUL).date()
     prev = next((h["usd_krw"] for h in reversed(history) if h["date"] < quote_day), None)
     change = quote.usd_krw - prev if prev is not None else None
+    # 52주 범위: 1년치 DAILY가 쌓였을 때만, 현재 값까지 포함한 최고·최저 사이의 위치(0~1)
+    high = low = position = None
+    if rows and rows[0]["full_year"]:
+        values = [h["usd_krw"] for h in history] + [quote.usd_krw]
+        high, low = max(values), min(values)
+        position = round((quote.usd_krw - low) / (high - low), 6) if high > low else None
     return {
         "usd_krw": quote.usd_krw, "rate_at": quote.rate_at, "granularity": quote.granularity, "fx_stale": quote.stale,
         "prev_close": prev, "change": change,
         "change_rate": round(change / prev, 6) if change is not None and prev else None,
         "history": history, "as_of": quote.rate_at,
+        "high_52w": high, "low_52w": low, "position_52w": position,
     }
 
 

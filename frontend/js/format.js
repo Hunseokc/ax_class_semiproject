@@ -58,7 +58,7 @@ export function volume(v) {
   return `${nf(0).format(v)}주`;
 }
 
-/** 등락 표시: 색(국내 상승 빨강·하락 파랑 / 미국 상승 초록·하락 빨강) + ▲▼ 기호 */
+/** 등락 표시: 색(시장 무관 상승 빨강·하락 파랑, tokens.css의 --up/--down) + ▲▼ 기호 */
 export function change(rate, country = "KR", { digits = 2 } = {}) {
   if (!isNum(rate)) return { text: DASH, cls: "chg chg--flat", label: "등락 정보 없음" };
   const c = country === "US" ? "us" : "kr";

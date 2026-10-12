@@ -26,12 +26,35 @@ class IndexOut(Schema):
     prev_close: Num | None
     change: Num | None
     change_rate: Num | None
-    sparkline: list[SparkPoint]
+    sparkline: list[SparkPoint]              # 최근 1년 종가 (화면에서 기간별로 자른다)
+    high_52w: Num | None = None              # 52주 종가 최고·최저 — 1년치가 없으면 null
+    low_52w: Num | None = None
+    position_52w: Num | None = None          # (현재 − 저점) / (고점 − 저점), 0~1
 
 
 class IndicesOut(Schema):
     as_of: date | None
     indices: list[IndexOut]
+
+
+class HomeRankItem(Schema):
+    rank: int
+    stock_id: int
+    market: str
+    country: str
+    currency: str
+    ticker: str
+    name: str
+    value: Num                               # 거래량 급증: 배수(2.4 = 2.4배) / 매력도: 점수(0~100)
+    as_of: date | None
+    is_watched: bool
+
+
+class HomeRankingOut(Schema):
+    kind: Literal["volume_surge", "attractiveness"]
+    country: str
+    preset: str | None                       # 매력도 순위일 때만
+    items: list[HomeRankItem]
 
 
 class FxPointOut(Schema):
@@ -49,8 +72,11 @@ class FxOut(Schema):
     prev_close: Num | None
     change: Num | None
     change_rate: Num | None
-    history: list[FxPointOut]
+    history: list[FxPointOut]                # 최근 1년 DAILY
     as_of: datetime
+    high_52w: Num | None = None              # 52주 최고·최저(현재 값 포함) — 1년치가 없으면 null
+    low_52w: Num | None = None
+    position_52w: Num | None = None
 
 
 class RefreshJobOut(Schema):
@@ -254,6 +280,7 @@ class WatchlistCard(Schema):
     target_price: Num | None = None          # 종목 통화(currency) 기준
     target_gap: Num | None = None            # (목표가 − 현재가) / 현재가
     updated_at: datetime | None = None
+    sparkline: list[SparkPoint] = []         # 최근 30거래일 종가 (대시보드 컴팩트 보기)
 
 
 class WatchlistUpdate(Schema):

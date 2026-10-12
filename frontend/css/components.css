@@ -20,7 +20,9 @@
 .wl-card { display: flex; flex-direction: column; gap: var(--sp-2); min-height: 196px; padding: var(--sp-5) var(--sp-6) var(--sp-6); border-radius: var(--r-card); }
 .wl-card__gauge { display: flex; justify-content: center; margin-bottom: var(--sp-2); }
 .wl-card__ticker { font-size: calc(var(--fs-xs) - 1pt); font-weight: var(--fw-semibold); letter-spacing: .06em; text-transform: uppercase; color: var(--text-on-pastel-2); }
-.wl-card__price { font-size: var(--fs-xl); font-weight: var(--fw-extra); letter-spacing: .01em; }
+/* 가격·등락률은 보조 정보 — 매력도 게이지가 카드의 주인공 */
+.wl-card__price { font-size: var(--fs-lg); font-weight: var(--fw-bold); letter-spacing: .01em; }
+.wl-card__price .pwc__chg { font-size: var(--fs-xs); }
 .wl-card__name { font-weight: var(--fw-bold); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wl-card__foot { margin-top: auto; display: flex; align-items: center; min-width: 0; }
 /* 관심종목 메모·목표가: 카드 링크 바깥 형제 버튼(링크 안 버튼 금지), 카드 위 오른쪽에 겹쳐 둔다 */
@@ -34,6 +36,21 @@
   transition: background .15s var(--ease);
 }
 .wl-card__edit:hover { background: rgba(20, 20, 20, .16); }
+
+/* 관심종목 컴팩트 보기: 한 줄 행 (종목명 | 매력도 | 가격 | 등락률 | 스파크라인) */
+.wl-compact .row { grid-template-columns: minmax(0, 1fr) 150px minmax(96px, auto) 84px 80px; }
+.wl-compact__score { display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; font-size: var(--fs-sm); }
+.wl-compact__band { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.wl-compact__band i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+.wl-compact__price { text-align: right; font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+.wl-compact__chg { text-align: right; font-size: var(--fs-sm); }
+.wl-compact__spark { height: 28px; position: relative; }
+@media (max-width: 767px) {
+  .wl-compact .row { grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
+  .wl-compact__score { grid-column: 1; grid-row: 2; }
+  .wl-compact__chg { grid-column: 2; grid-row: 2; }
+  .wl-compact__spark { display: none; }
+}
 
 /* 가격 (등락률) — 가격 길이와 관계없이 등락률은 항상 가격 아래 줄 */
 .pwc { display: flex; flex-direction: column; align-items: flex-start; row-gap: 2px; }
@@ -61,12 +78,20 @@
 /* 지수·환율 카드: 항상 한 줄 — 적으면 폭을 나눠 채우고, 많으면 이 줄만 가로 스크롤 */
 .metric-row { display: flex; gap: var(--sp-4); overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scrollbar-width: thin; padding-bottom: var(--sp-2); }
 .metric-row > * { flex: 1 0 168px; min-width: 0; scroll-snap-align: start; }
-.metric-card { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-5); border-radius: var(--r-card-sm); background: var(--card); min-height: 168px; }
+.metric-card { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-5); border-radius: var(--r-card-sm); background: var(--card); min-height: 168px; }
 .metric-card__label { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); font-weight: var(--fw-semibold); }
 .metric-card__label > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .metric-card__value { font-size: var(--fs-xl); font-weight: var(--fw-extra); }
 .metric-card__spark { height: 44px; position: relative; }
-.metric-card__foot { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); white-space: nowrap; }
+.metric-card__foot { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); white-space: nowrap; margin-top: auto; }
+/* 스파크라인 기간 라벨 + 장 상태 배지(휴장·직전 거래일) */
+.metric-card__meta { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); min-height: 20px; font-size: 11px; color: var(--text-3); white-space: nowrap; }
+/* 52주 저점~고점 사이 현재 위치 */
+.r52 { display: flex; align-items: center; gap: var(--sp-2); height: 14px; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; }
+.r52__lbl { flex: none; }
+.r52__track { position: relative; flex: 1; height: 4px; border-radius: var(--r-pill); background: var(--card-active); }
+.r52__dot { position: absolute; top: 50%; width: 8px; height: 8px; border-radius: 50%; background: var(--text); translate: -50% -50%; }
+.metric-card__note { font-size: 11px; line-height: 1.4; color: var(--text-2); }
 
 /* 표시 지표 선택: 카드 줄 아래 펼침 박스. 칩 = 버튼과 같은 알약, 선택 = 세그먼트 탭과 같은 아이스 블루 */
 .picker { display: flex; flex-direction: column; gap: var(--sp-4); }
@@ -172,6 +197,8 @@ textarea.input { font: inherit; resize: vertical; }
 /* ---------------------------------------------------------------- 등락 (색 + ▲▼ 기호) */
 .chg { font-weight: var(--fw-bold); white-space: nowrap; }
 .chg--flat { color: var(--flat); }
+.chg--up { color: var(--up); }
+.chg--down { color: var(--down); }
 .chg--kr-up { color: var(--kr-up); }
 .chg--kr-down { color: var(--kr-down); }
 .chg--us-up { color: var(--us-up); }

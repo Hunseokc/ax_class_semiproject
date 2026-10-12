@@ -109,6 +109,11 @@ export const Stocks = {
   disclosures: (m, t) => api.get(`/stocks/${m}/${t}/disclosures`, { limit: 5 }),
 };
 
+// 대시보드 '시장 주목 종목' — kind: volume_surge(거래량 급증) · attractiveness(매력도 순위)
+export const Home = {
+  ranking: (kind, country, limit = 5) => api.get("/home/ranking", { kind, country, limit, preset: getPreset() }),
+};
+
 export const Watchlist = {
   list: () => api.get("/watchlist", { preset: getPreset() }),
   add: (market, ticker) => api.post("/watchlist", { market, ticker }),

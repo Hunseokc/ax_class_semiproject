@@ -16,7 +16,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import deps, health, market, portfolios, stocks, watchlist
+from app.api import deps, health, home, market, portfolios, stocks, watchlist
 from app.core.config import FRONTEND_DIR, get_settings
 from app.core.db import get_engine
 from app.core.errors import NotFound, install_error_handlers, internal_error_response
@@ -82,7 +82,7 @@ async def request_context(request: Request, call_next):
 
 
 api = APIRouter(prefix="/api/v1", responses={404: {"model": ErrorOut}, 409: {"model": ErrorOut}, 422: {"model": ErrorOut}})
-for r in (market.router, stocks.groups_router, stocks.router, watchlist.router, portfolios.router):
+for r in (market.router, home.router, stocks.groups_router, stocks.router, watchlist.router, portfolios.router):
     api.include_router(r)
 if importlib.util.find_spec("app.api.analysis"):     # 5단계: 분석·경쟁 비교·통계
     from app.api import analysis

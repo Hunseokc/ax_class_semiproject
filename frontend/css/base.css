@@ -36,6 +36,7 @@ button { cursor: pointer; }
 .page-head__meta { color: var(--text-3); font-size: var(--fs-sm); }
 .section { display: flex; flex-direction: column; gap: var(--sp-4); }
 .section__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.section__tools { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; }
 .section__link { color: var(--text-2); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
 .section__link:hover { color: var(--text); }
 

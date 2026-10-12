@@ -144,3 +144,15 @@
 @media (max-width: 767px) {
   .pf-summary__big { font-size: var(--fs-2xl); }
 }
+
+/* ---------------------------------------------------------------- 대시보드 홈 */
+/* 한 줄 시장 요약 + 관심종목 연결 요약 (규칙 기반 문장) */
+.market-brief { display: flex; flex-direction: column; gap: 2px; margin-top: calc(-1 * var(--sp-2)); }
+.market-brief p { margin: 0; color: var(--text-2); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.market-brief__date { color: var(--text-3); font-weight: var(--fw-regular); }
+.market-brief__sep { color: var(--text-3); }
+/* 시장 주목 종목: 관심종목 ★, 매력도 점수·라벨, 탭 하단 안내 */
+.top-star { color: #ffd166; font-size: var(--fs-sm); margin-left: 2px; }
+.top-score { display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; }
+.top-score strong { font-size: var(--fs-md); font-weight: var(--fw-extra); }
+.top-note { color: var(--text-3); font-size: var(--fs-xs); margin: calc(-1 * var(--sp-2)) 0 0; }

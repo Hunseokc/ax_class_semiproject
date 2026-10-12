@@ -27,20 +27,27 @@
 
         <section class="section" aria-labelledby="h-market">
           <div class="section__head"><h2 id="h-market">주요 지수 · 환율</h2>
-            <button class="btn btn--sm" type="button" id="market-edit" aria-expanded="false" aria-controls="market-picker" disabled>설정</button></div>
+            <div class="section__tools"><div id="spark-range"></div>
+              <button class="btn btn--sm" type="button" id="market-edit" aria-expanded="false" aria-controls="market-picker" disabled>설정</button></div></div>
+          <div class="market-brief" aria-live="polite">
+            <p id="market-summary" hidden></p>
+            <p id="watch-summary" hidden></p>
+          </div>
           <div id="market"></div>
           <div id="market-picker-slot"></div>
         </section>
 
         <section class="section" aria-labelledby="h-watch">
-          <div class="section__head"><h2 id="h-watch">내 관심종목 <span class="subtle" id="watch-basis"></span></h2><a class="section__link" href="/stocks">주식 리스트 →</a></div>
+          <div class="section__head"><h2 id="h-watch">내 관심종목 <span class="subtle" id="watch-basis"></span></h2>
+            <div class="section__tools"><div id="watch-view"></div><a class="section__link" href="/stocks">주식 리스트 →</a></div></div>
           <div id="watchlist"></div>
         </section>
 
         <section class="section" aria-labelledby="h-top">
-          <div class="section__head"><h2 id="h-top">거래량 상위 5</h2>
-            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div id="top-metric"></div><div id="top-tabs"></div><a class="section__link" id="top-more" href="/stocks">더 보기 →</a></div></div>
-          <div id="top-volume"></div>
+          <div class="section__head"><h2 id="h-top">시장 주목 종목 TOP 5</h2>
+            <div class="section__tools"><div id="top-metric"></div><div id="top-tabs"></div><a class="section__link" id="top-more" href="/stocks">더 보기 →</a></div></div>
+          <div id="top-list"></div>
+          <p class="top-note" id="top-note"></p>
         </section>
 
         <p class="disclaimer">시세는 일봉 기준이며 장중 실시간이 아닙니다. 매력도는 유니버스 안에서 같은 시장끼리 비교한 상대적 위치이며 수익률 예측·투자 권유가 아닙니다. 투자 성향은 공개된 일반적 투자 스타일을 단순화한 가중치이며 특정 인물의 판단이 아닙니다.</p>

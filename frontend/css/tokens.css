@@ -24,21 +24,24 @@
   --ice-strong: #bfe3f2;
   --lavender-strong: #cbb9e6;
 
-  /* 등락: 국내 상승 빨강·하락 파랑 / 미국 상승 초록·하락 빨강 (어두운 면용) */
-  --kr-up: #ff6b6b;
-  --kr-down: #5ea8ff;
-  --us-up: #3ddc97;
-  --us-down: #ff6b6b;
+  /* 등락: 시장(국내·미국)과 무관하게 상승 빨강·하락 파랑 — 색은 이 두 줄에서만 정한다 (어두운 면용) */
+  --up: #ff6b6b;
+  --down: #5ea8ff;
   --flat: #b3b3b3;
   /* 파스텔 면 위에서 쓰는 진한 변형 (대비 4.5:1 이상) */
-  --kr-up-on-pastel: #c0262d;
-  --kr-down-on-pastel: #1d5bbf;
-  --us-up-on-pastel: #0f7a45;
-  --us-down-on-pastel: #c0262d;
-
-  /* 관심종목 카드(파스텔 면) 가격 등락: 국내·해외 같은 규칙 — 상승 빨강·하락 파랑 */
-  --price-up: #C62D2D;
-  --price-down: #1F5BC4;
+  --up-on-pastel: #c0262d;
+  --down-on-pastel: #1d5bbf;
+  /* 시장별 이름은 위 값의 별칭 (기존 화면 코드 호환) */
+  --kr-up: var(--up);
+  --kr-down: var(--down);
+  --us-up: var(--up);
+  --us-down: var(--down);
+  --kr-up-on-pastel: var(--up-on-pastel);
+  --kr-down-on-pastel: var(--down-on-pastel);
+  --us-up-on-pastel: var(--up-on-pastel);
+  --us-down-on-pastel: var(--down-on-pastel);
+  --price-up: var(--up-on-pastel);
+  --price-down: var(--down-on-pastel);
 
   /* 투자 성향 프리셋 색 (code → 토큰 매핑은 js/components/preset-menu.js 한 곳) */
   --preset-aggressive: #E5484D; /* 위험: 빨강 */
