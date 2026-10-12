@@ -13,9 +13,9 @@ flowchart LR
     SEC["SEC EDGAR"]
   end
 
-  subgraph ING["수집·전처리 (app/ingest, app/providers)"]
+  subgraph ING["수집·전처리 (backend/app/ingest, backend/app/providers)"]
     PROV["Provider 인터페이스<br/>호출 간격·지수 백오프 재시도"]
-    PRE["전처리<br/>중복·이상 행 격리(data/quarantine)"]
+    PRE["전처리<br/>중복·이상 행 격리(backend/data/quarantine)"]
     STORE["upsert + ingestion_logs<br/>(대상별 SUCCESS/FAILED)"]
   end
 
@@ -25,14 +25,14 @@ flowchart LR
   end
 
   subgraph API["FastAPI (app)"]
-    R["라우터 app/api<br/>입력 검증·의존성"]
-    SVC["서비스 app/services<br/>환율 TTL·포트폴리오·점수·품질"]
-    Q["SQL app/queries/*.sql<br/>+ ORM app/models"]
+    R["라우터 backend/app/api<br/>입력 검증·의존성"]
+    SVC["서비스 backend/app/services<br/>환율 TTL·포트폴리오·점수·품질"]
+    Q["SQL backend/app/queries/*.sql<br/>+ ORM backend/app/models"]
     SCH["앱 안 스케줄러<br/>4시간 TTL 갱신 · 매일 07:00 비교군"]
   end
 
   subgraph CLIENT["클라이언트"]
-    WEB["웹 화면 web/<br/>바닐라 JS (ES Modules)"]
+    WEB["웹 화면 frontend/<br/>바닐라 JS (ES Modules)"]
     SW["Swagger /docs"]
   end
 
@@ -51,7 +51,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  U["config/universe.yaml<br/>노출 25종목·지수 10·경쟁 그룹·비교군 후보"] --> M["master<br/>시장·종목·그룹·지수 + DART corp_code·SEC CIK"]
+  U["backend/config/universe.yaml<br/>노출 25종목·지수 10·경쟁 그룹·비교군 후보"] --> M["master<br/>시장·종목·그룹·지수 + DART corp_code·SEC CIK"]
   M --> P["prices · indices · fx<br/>일봉 2년(증분: 마지막 저장일 다음 날 ~ 시장 현지 날짜)"]
   M --> V["valuation<br/>KR pykrx 일별 1년 · US 스냅샷 · 실패 시 DART 파생"]
   M --> F["financials · disclosures<br/>FY 5개년 · 최근 1년 공시"]
@@ -66,21 +66,21 @@ flowchart TD
   BD -.-> B
 ```
 
-- 대상마다 `ingestion_logs`에 1행을 남기고 한 종목이 실패해도 나머지는 계속 적재한다. 이상 행은 버리지 않고 `data/quarantine/*.csv`에 사유와 함께 보관한다.
+- 대상마다 `ingestion_logs`에 1행을 남기고 한 종목이 실패해도 나머지는 계속 적재한다. 이상 행은 버리지 않고 `backend/data/quarantine/*.csv`에 사유와 함께 보관한다.
 - 갱신 TTL은 작업 단위 기록(`source = 'REFRESH'`)으로 판단한다(A-109). 적재 상태는 `GET /api/v1/statistics/data-quality`·`python -m app.ingest status`로 확인한다.
 
 ## 3. 요청 흐름 예시 — 종목 상세의 매력도·수치 분석
 
 ```mermaid
 sequenceDiagram
-  participant W as 화면 (web/js/pages/stock.js)
-  participant R as 라우터 (app/api/analysis.py)
-  participant D as 의존성 (app/api/deps.py)
+  participant W as 화면 (frontend/js/pages/stock.js)
+  participant R as 라우터 (backend/app/api/analysis.py)
+  participant D as 의존성 (backend/app/api/deps.py)
   participant DB as PostgreSQL
   W->>R: ① GET /api/v1/stocks/KOSPI/005930/analysis?preset=balanced
   R->>R: ② 경로·쿼리 검증 (market·ticker 형식, 틀리면 422)
   R->>D: ③ 의존성: DB 세션, 투자 성향 프리셋 확정(없으면 422 UNKNOWN_PRESET)
-  R->>DB: ④ resolve_stock → app/queries/analysis.sql (v_stock_metrics + stock_scores, RANK·PERCENT_RANK)
+  R->>DB: ④ resolve_stock → backend/app/queries/analysis.sql (v_stock_metrics + stock_scores, RANK·PERCENT_RANK)
   DB-->>R: 지표 1행 + 점수·국가 내 순위
   R-->>W: ⑤ Pydantic 응답 모델로 JSON (Decimal → 숫자, 오류는 error 객체)
   W->>W: ⑥ 게이지·팩터 기여도·지표 표·수치 분석 렌더
@@ -88,12 +88,12 @@ sequenceDiagram
 
 | 단계 | 하는 일 | 코드 |
 |---|---|---|
-| ① 요청 | 화면이 `api.js`로 호출, 모든 응답에 `X-Request-ID` | `web/js/api.js`, `app/main.py` 미들웨어 |
-| ② 검증 | 경로·쿼리·본문의 형식·범위(A-112). 틀리면 DB에 가기 전에 422 | `app/api/deps.py` `MarketPath`·`TickerPath` |
+| ① 요청 | 화면이 `api.js`로 호출, 모든 응답에 `X-Request-ID` | `frontend/js/api.js`, `backend/app/main.py` 미들웨어 |
+| ② 검증 | 경로·쿼리·본문의 형식·범위(A-112). 틀리면 DB에 가기 전에 422 | `backend/app/api/deps.py` `MarketPath`·`TickerPath` |
 | ③ 의존성 | DB 세션·프리셋 확정. **사용자 데이터 API(관심종목·포트폴리오)는 같은 자리에서 `get_current_user_id()`로 요청 사용자를 확정**하고 소유자만 조회(남의 리소스는 404) | `get_db`, `get_preset`, `get_current_user_id` |
-| ④ SQL | 원문 SQL을 `text()`로 실행. 지표는 VIEW `v_stock_metrics`(CTE·윈도우 함수), 순위는 `RANK()` | `app/queries/analysis.sql`, `db/views.sql` |
-| ⑤ 응답 | Pydantic 모델로 직렬화, 금액·비율은 Decimal 계산 후 숫자. 예외는 `AppError` 계열 → `{"error": {"code","message","detail"}}` | `app/schemas`, `app/core/errors.py` |
-| ⑥ 화면 | 로딩·빈 상태·오류 상태는 공통 컴포넌트(`load()`) | `web/js/components/ui.js` |
+| ④ SQL | 원문 SQL을 `text()`로 실행. 지표는 VIEW `v_stock_metrics`(CTE·윈도우 함수), 순위는 `RANK()` | `backend/app/queries/analysis.sql`, `backend/db/views.sql` |
+| ⑤ 응답 | Pydantic 모델로 직렬화, 금액·비율은 Decimal 계산 후 숫자. 예외는 `AppError` 계열 → `{"error": {"code","message","detail"}}` | `backend/app/schemas`, `backend/app/core/errors.py` |
+| ⑥ 화면 | 로딩·빈 상태·오류 상태는 공통 컴포넌트(`load()`) | `frontend/js/components/ui.js` |
 
 ## 4. 주요 설계 결정
 

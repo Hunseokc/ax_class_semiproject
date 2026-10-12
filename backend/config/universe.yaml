@@ -1,0 +1,108 @@
+# 대상 유니버스 (기본값). market: markets.code / ticker: 거래소 코드
+# yf_symbol: yfinance 조회용 심볼 (KR은 .KS=코스피, .KQ=코스닥)
+markets:
+  - {code: KOSPI,  country: KR, currency: KRW, timezone: Asia/Seoul}
+  - {code: KOSDAQ, country: KR, currency: KRW, timezone: Asia/Seoul}
+  - {code: NASDAQ, country: US, currency: USD, timezone: America/New_York}
+  - {code: NYSE,   country: US, currency: USD, timezone: America/New_York}
+
+indices:
+  - {code: KOSPI,  name: KOSPI,              market: KOSPI,  pykrx: "1001", yf_symbol: "^KS11", display_order: 1}
+  - {code: KOSDAQ, name: KOSDAQ,             market: KOSDAQ, pykrx: "2001", yf_symbol: "^KQ11", display_order: 2}
+  - {code: SPX,    name: S&P 500,            market: NYSE,   yf_symbol: "^GSPC", display_order: 3}
+  - {code: IXIC,   name: NASDAQ Composite,   market: NASDAQ, yf_symbol: "^IXIC", display_order: 4}
+  - {code: DJI,    name: Dow Jones,          market: NYSE,   yf_symbol: "^DJI",  display_order: 5}
+  # 대시보드에서 골라 볼 수 있는 추가 지수 (기본 화면에는 위 5개 + USD/KRW)
+  - {code: KOSPI200, name: KOSPI 200,        market: KOSPI,  pykrx: "1028", yf_symbol: "^KS200", display_order: 6}
+  - {code: NDX,    name: NASDAQ 100,         market: NASDAQ, yf_symbol: "^NDX",  display_order: 7}
+  - {code: RUT,    name: Russell 2000,       market: NYSE,   yf_symbol: "^RUT",  display_order: 8}
+  - {code: SOX,    name: 필라델피아 반도체,  market: NASDAQ, yf_symbol: "^SOX",  display_order: 9}
+  - {code: VIX,    name: VIX,                market: NYSE,   yf_symbol: "^VIX",  display_order: 10}
+
+fx:
+  usd_krw: {yf_symbol: "KRW=X"}
+
+stocks:
+  - {market: KOSPI,  ticker: "005930", name: 삼성전자,          yf_symbol: 005930.KS}
+  - {market: KOSPI,  ticker: "000660", name: SK하이닉스,        yf_symbol: 000660.KS}
+  - {market: KOSPI,  ticker: "005380", name: 현대차,            yf_symbol: 005380.KS}
+  - {market: KOSPI,  ticker: "000270", name: 기아,              yf_symbol: 000270.KS}
+  - {market: KOSPI,  ticker: "035420", name: NAVER,             yf_symbol: 035420.KS}
+  - {market: KOSPI,  ticker: "035720", name: 카카오,            yf_symbol: 035720.KS}
+  - {market: KOSPI,  ticker: "373220", name: LG에너지솔루션,    yf_symbol: 373220.KS}
+  - {market: KOSPI,  ticker: "006400", name: 삼성SDI,           yf_symbol: 006400.KS}
+  - {market: KOSDAQ, ticker: "247540", name: 에코프로비엠,      yf_symbol: 247540.KQ}
+  - {market: KOSPI,  ticker: "207940", name: 삼성바이오로직스,  yf_symbol: 207940.KS}
+  - {market: KOSPI,  ticker: "068270", name: 셀트리온,          yf_symbol: 068270.KS}
+  - {market: KOSPI,  ticker: "005490", name: POSCO홀딩스,       yf_symbol: 005490.KS}
+  - {market: KOSPI,  ticker: "004020", name: 현대제철,          yf_symbol: 004020.KS}
+  - {market: KOSPI,  ticker: "012450", name: 한화에어로스페이스, yf_symbol: 012450.KS}
+  - {market: KOSPI,  ticker: "047810", name: 한국항공우주,      yf_symbol: 047810.KS}
+  - {market: KOSPI,  ticker: "064350", name: 현대로템,          yf_symbol: 064350.KS}
+  - {market: NASDAQ, ticker: AAPL,  name: Apple,     yf_symbol: AAPL}
+  - {market: NASDAQ, ticker: MSFT,  name: Microsoft, yf_symbol: MSFT}
+  - {market: NASDAQ, ticker: GOOGL, name: Alphabet,  yf_symbol: GOOGL}
+  - {market: NASDAQ, ticker: AMZN,  name: Amazon,    yf_symbol: AMZN}
+  - {market: NASDAQ, ticker: NVDA,  name: NVIDIA,    yf_symbol: NVDA}
+  - {market: NASDAQ, ticker: META,  name: Meta Platforms, yf_symbol: META}
+  - {market: NASDAQ, ticker: TSLA,  name: Tesla,     yf_symbol: TSLA}
+  - {market: NASDAQ, ticker: AVGO,  name: Broadcom,  yf_symbol: AVGO}
+  - {market: NASDAQ, ticker: AMD,   name: AMD,       yf_symbol: AMD}
+
+peer_groups:
+  - {name: 반도체,        members: ["005930", "000660", NVDA, AVGO, AMD]}
+  - {name: 자동차,        members: ["005380", "000270", TSLA]}
+  - {name: 인터넷·플랫폼, members: ["035420", "035720", GOOGL, META]}
+  - {name: 빅테크,        members: [AAPL, MSFT, AMZN]}
+  - {name: 2차전지,       members: ["373220", "006400", "247540"]}
+  - {name: 바이오,        members: ["207940", "068270"]}
+  - {name: 철강,          members: ["005490", "004020"]}
+  - {name: 방산,          members: ["012450", "047810", "064350"]}
+
+# ---------------------------------------------------------------------
+# 매력도 비교군(benchmark) — 화면 노출 종목(위 stocks)과 함께 점수의 비교 표본이 된다 (docs/09 9절)
+# 국가별·섹터별 비교 표본 = 그 섹터의 노출 종목 + 상장 보통주 중 시가총액 상위 (per_sector − 노출 종목 수)개
+# 섹터는 공식 업종 분류(국내 KRX 업종, 미국 SEC SIC)를 아래 sectors로 묶어 정한다. 위 peer_groups(테마)는 화면 경쟁 비교용
+benchmark:
+  per_sector: 50          # 국가별 섹터당 최대 종목 수(노출 종목 포함). 상장사가 그보다 적은 섹터는 있는 만큼
+  us_rank_pool: 1500      # 미국: 시가총액 상위 이만큼만 SIC(업종)를 조회해 섹터를 정한다(SEC 호출 절약)
+  sic_recheck_days: 365   # 미국 SIC는 거의 바뀌지 않아 1년마다만 다시 확인
+  price_days: 400         # 일봉 보관 기간(달력일) — 변동성·12-1개월 모멘텀에 거래일 253개 필요
+  fin_years: 3            # FY 재무 연수 (유효기간은 data_freshness — 공시 일정 기반 + 90일 상한)
+  reselect_days: 30       # 시가총액 순위로 다시 고르는 주기(매일 고르면 경계 종목이 들락날락)
+  daily_at_kst: "07:00"   # 매일 이 시각 이후 1회 갱신(미국 장 마감 후)
+  detail_ttl_hours: 24    # 상세 화면을 열면 가격 증분 + 유효기간이 지난 데이터만 받고, 이 시간 동안은 다시 확인하지 않음
+
+# 점수 비교 표본의 섹터(섹터 중립화 주 그룹). krx: KRX 업종명, sic: SEC SIC 코드 범위("시작-끝" 또는 단일)
+# 한 SIC가 여러 범위에 걸리면 가장 좁은 범위가 이긴다. 어느 섹터에도 없으면 비교 표본에 넣지 않는다
+# 금융·보험·부동산(KRX 기타금융·증권·보험·은행·금융·부동산, SIC 6000-6799)은 매출·영업이익 구조가 달라 제외
+sectors:
+  - name: 반도체·전자
+    krx: [전기·전자]
+    sic: ["3570-3579", "3600-3699"]
+  - name: IT·인터넷
+    krx: [IT 서비스, 통신, 출판·매체복제]
+    sic: ["2700-2799", "4800-4899", "7370-7379"]
+  - name: 헬스케어
+    krx: [제약, 의료·정밀기기]
+    sic: ["2830-2836", "3826", "3840-3851", "5047", "5122", "8000-8099", "8731"]
+  - name: 자동차·운송장비
+    krx: [운송장비·부품]
+    sic: ["3710-3716", "3740-3743", "3750-3751", "3790-3799"]
+  - name: 산업재
+    krx: [기계·장비, 건설, 운송·창고, 기타제조]
+    sic: ["1500-1799", "3400-3569", "3580-3599", "3720-3729", "3730-3732", "3760-3769", "3800-3839",
+          "4000-4799", "5000-5099", "7380-7389", "8700-8748"]
+  - name: 소재
+    krx: [화학, 금속, 비금속, 종이·목재]
+    sic: ["1000-1499", "2400-2499", "2600-2699", "2800-2829", "2850-2899", "3000-3099", "3200-3399"]
+  - name: 필수소비재
+    krx: [음식료·담배, 농업 임업 및 어업]
+    sic: ["0100-0999", "2000-2199", "2840-2844", "5140-5149", "5400-5499", "5900-5912"]
+  - name: 경기소비재
+    krx: [유통, 섬유·의류, 오락·문화, 일반서비스]
+    sic: ["2200-2399", "2500-2599", "3100-3199", "3630-3652", "3860-3999", "5100-5139", "5150-5399",
+          "5500-5899", "5913-5999", "7000-7369", "7500-7999", "8200-8299"]
+  - name: 에너지·유틸리티
+    krx: [전기·가스, 전기·가스·수도]
+    sic: ["1300-1399", "2900-2999", "4900-4999"]

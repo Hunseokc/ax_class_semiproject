@@ -29,9 +29,10 @@
 | 시장·갱신 | GET | `/market/fx` | USD/KRW 최신값·전일 대비·최근 30일 (TTL 내에는 외부 호출 없음) | - | 200 · 503 FX_UNAVAILABLE |
 | 시장·갱신 | POST | `/market/refresh` | 환율·지수·증분 일봉·밸류에이션·점수 갱신 (작업별 TTL 이내면 SKIPPED) | - | 200 (작업별 실패는 본문 `jobs[].status`) |
 | 시장·갱신 | GET | `/market/refresh/status` | 갱신 상태 조회 — 외부 호출 없음 (사이드바 '마지막 갱신 시각' 표시용) | - | 200 |
-| 종목 | GET | `/peer-groups` | 경쟁 그룹 목록 (리스트 필터용) | - | 200 |
+| 종목 | GET | `/peer-groups` | 경쟁 그룹(테마) 목록 (리스트 필터용) — 업종 섹터 그룹은 제외 | - | 200 |
 | 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 검색, 프리셋별 매력도). 기본은 노출 종목만, q가 있으면 매력도 비교군도(`coverage`) | country, sort, order, group, q, limit, offset, preset | 200 · 422 VALIDATION_ERROR, VOLUME_SORT_REQUIRES_MARKET, UNKNOWN_PRESET |
-| 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도. 비교군 종목이면 상세 데이터 수집을 예약하고 `detail_status`(ready/loading/failed) | preset | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR, UNKNOWN_PRESET · 503 FX_UNAVAILABLE(USD) |
+| 종목 | GET | `/stocks/search` | 상단 검색 자동완성 — 노출 종목·비교군·상장 종목 목록(listed) 전체에서 이름·영문명·티커 부분 일치. 정렬: 티커 완전 일치 → 티커 앞부분 → 이름 앞부분 → 부분 일치(같으면 노출·비교군 먼저, 짧은 이름 먼저). LIKE 특수문자는 글자 그대로, 비활성(상장폐지) 제외 | q (1~50자, 필수), limit (1~20, 기본 8) | 200 · 422 VALIDATION_ERROR |
+| 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도. 비교군·상장 목록 종목이면 상세 데이터 수집을 예약하고 `detail_status`(ready/loading/failed). 상장 목록 종목은 처음 열 때 시세가 없어 `close` 등이 null. `groups`는 테마 경쟁 그룹, `sector`·`industry`는 매력도 비교 업종 | preset | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR, UNKNOWN_PRESET · 503 FX_UNAVAILABLE(USD) |
 | 종목 | GET | `/stocks/{market}/{ticker}/candles` | 기간 일봉 | range | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
 | 종목 | GET | `/stocks/{market}/{ticker}/financials` | FY 재무 추이 | limit | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
 | 종목 | GET | `/stocks/{market}/{ticker}/disclosures` | 최근 공시 | limit | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
@@ -51,7 +52,7 @@
 | 모의 포트폴리오 | DELETE | `/portfolios/{portfolio_id}/items/{item_id}` | 담은 종목 삭제 | - | 204 · 404 PORTFOLIO_NOT_FOUND, ITEM_NOT_FOUND · 422 VALIDATION_ERROR |
 | 모의 포트폴리오 | GET | `/portfolios/{portfolio_id}/summary` | 요약: 사용·잔여·비중·가중 매력도·평가손익(환 효과 분리) | - | 200 · 404 PORTFOLIO_NOT_FOUND · 422 VALIDATION_ERROR · 503 FX_UNAVAILABLE(USD 보유) |
 | 모의 포트폴리오 | POST | `/portfolios/{portfolio_id}/preview/equal-weight` | 관심종목(또는 지정 종목) 균등 배분 미리보기 — **저장하지 않는 계산 전용**. 예산 ÷ 대상 종목 수 = 균등 몫, 1주 원가로 나눠 내림한 정수 수량(담기 금액 모드와 같은 환산)·원화 금액·실제 비중, 남는 금액, 제외 종목과 사유(ALREADY_IN_PORTFOLIO·NO_PRICE·PRICE_ABOVE_SHARE) | body(선택): stocks [{market, ticker}] (생략 시 관심종목 전체), budget_krw (생략 시 잔여 시드) | 200 · 404 PORTFOLIO_NOT_FOUND, STOCK_NOT_FOUND · 409 SEED_EXCEEDED(예산 > 잔여 시드, 잔여 시드 0) · 422 VALIDATION_ERROR, EMPTY_WATCHLIST · 503 FX_UNAVAILABLE(USD) |
-| 분석 | GET | `/stocks/{market}/{ticker}/analysis` | 수치 분석(v_stock_metrics) + 매력도(프리셋별 점수·팩터 기여도·지표 원값/Z·국가 내 순위·백분위·데이터 충족도) | preset | 200 · 404 STOCK_NOT_FOUND, NO_PRICE · 422 VALIDATION_ERROR, UNKNOWN_PRESET |
+| 분석 | GET | `/stocks/{market}/{ticker}/analysis` | 수치 분석(v_stock_metrics, 배당 `dps`·`dividend_yield` 포함) + 매력도(프리셋별 점수·팩터 기여도·지표 원값/Z·국가 내 순위·백분위·데이터 충족도·레이더용 주 그룹 평균 `peer_average`). 상장 목록 종목은 `reference: true` 참고 점수(`reference_note`, `z_adj` null, 순위는 비교군 N개 + 이 종목) | preset | 200 · 404 STOCK_NOT_FOUND, NO_PRICE · 422 VALIDATION_ERROR, UNKNOWN_PRESET |
 | 분석 | GET | `/scoring/presets` | 투자 성향 프리셋(sort_order 순: 위험·성장·균형·가치)과 팩터별 가중치 | - | 200 |
 | 분석 | GET | `/stocks/{market}/{ticker}/peers` | 경쟁 그룹별 비교 표 (그룹 내 RANK·AVG, 구성원 1명 그룹은 비교 대상 없음) | - | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
 | 분석 | GET | `/stocks/{market}/{ticker}/peers/chart` | 경쟁 그룹 기준일=100 가격 추이 (합집합 날짜 + 휴장일 null) | range, group_id | 200 · 404 STOCK_NOT_FOUND, NO_PEER_GROUP, GROUP_NOT_FOUND · 422 VALIDATION_ERROR |
@@ -61,11 +62,13 @@
 | 통계 | GET | `/statistics/disclosure-frequency` | 기간별 공시 빈도 (월·분기·주) | period, days | 200 · 422 VALIDATION_ERROR |
 | 통계 | GET | `/statistics/monthly` | 종목 월별 집계: 거래일 수·평균 종가·최고/최저·월초 대비 월말 수익률·거래량 합계/평균 (date_trunc + GROUP BY, FIRST_VALUE/LAST_VALUE 윈도우). 진행 중인 달은 `is_partial: true` | market, ticker (필수), months (1~24, 기본 12) | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
 | 통계 | GET | `/statistics/ranking` | 지표별 TOP N 랭킹(노출 종목). `v_stock_metrics` + `RANK() OVER` — 같은 값은 같은 순위(1, 1, 3), 지표값 없는 종목 제외. 수익률은 소수, 거래량은 주, 시총은 원화 환산 | metric (return_1m·return_3m·return_1y·volume·market_cap_krw, 필수), country (KR·US, 비우면 전체), order (desc·asc), limit (1~50, 기본 10) | 200 · 422 VALIDATION_ERROR, VOLUME_SORT_REQUIRES_MARKET(전체 + volume) |
-| 통계 | GET | `/statistics/data-quality` | 데이터 품질 현황: 작업 종류별 마지막 성공·실패(사유·대상 티커), 최근 N일 상태별 건수(success·failed는 대상 단위, partial은 갱신 실행 단위, skipped)·격리 행 수, 오래된 4시간 갱신 작업(`stale_jobs`, 작업 단위 성공이 TTL×2 초과). `python -m app.ingest status`와 같은 기준(`app/services/data_quality.py`) | days (1~90, 기본 7) | 200 · 422 VALIDATION_ERROR |
+| 통계 | GET | `/statistics/data-quality` | 데이터 품질 현황: 작업 종류별 마지막 성공·실패(사유·대상 티커), 최근 N일 상태별 건수(success·failed는 대상 단위, partial은 갱신 실행 단위, skipped)·격리 행 수, 오래된 4시간 갱신 작업(`stale_jobs`, 작업 단위 성공이 TTL×2 초과). `python -m app.ingest status`와 같은 기준(`backend/app/services/data_quality.py`) | days (1~90, 기본 7) | 200 · 422 VALIDATION_ERROR |
 
 ※ 오류 열은 엔드포인트별로 실제 발생할 수 있는 상태와 `code`다. 모든 엔드포인트는 예상하지 못한 예외 시 500 `INTERNAL_ERROR`. 코드별 조건은 [5절](#5-에러-코드).
 
-※ `GET /market/refresh/status`, `GET /peer-groups`는 화면 요구로 추가한 엔드포인트(ASSUMPTIONS A-48, A-67)
+※ `GET /market/refresh/status`, `GET /peer-groups`는 화면 요구로 추가한 엔드포인트(ASSUMPTIONS A-48, A-67). `GET /stocks/search`는 상단 검색용(2026-10-12)
+
+※ 상장 종목 목록(listed): 검색용 이름·티커 마스터(`python -m app.ingest listing`, 비교군 일일 갱신 때 함께). 주식 리스트(`/stocks`)에는 나오지 않고 상단 검색에서만 찾는다. 매력도 유니버스·통계·경쟁 비교에는 넣지 않는다.
 
 ※ 매력도 비교군(benchmark): 점수 비교 표본으로만 쓰는 종목(docs/09 9절). 경쟁 비교(`/peers`, `/peers/chart`)·통계는 노출 종목(+대상 종목) 기준이고, 관심종목에 추가하면(POST `/watchlist`) 상세 데이터 수집을 예약한다.
 
@@ -1683,6 +1686,7 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 | 화면 | URL | 영역 | 호출 API |
 |---|---|---|---|
 | 공통 | 모든 화면 | 사이드바 마지막 갱신·새로고침 | `GET /market/refresh/status`, `POST /market/refresh` |
+| 공통 | 모든 화면 | 상단 검색바(자동완성 → 종목 상세) | `GET /stocks/search?q=&limit=8` |
 | 대시보드 홈 | `/` | 지수·환율 카드(설정에서 지수 10개 + 환율 중 선택, 기본 6개) | `GET /market/indices` |
 | | | USD/KRW 카드 | `GET /market/fx` |
 | | | 투자 성향 펼침 메뉴(헤더) | `GET /scoring/presets` |
@@ -1696,9 +1700,10 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 | | | 담기 모달 | `GET /portfolios`, `GET /market/fx`(USD), `POST /portfolios/{id}/items` |
 | 종목 상세 | `/stocks/{market}/{ticker}` | 헤더·★·담기 | `GET /stocks/{market}/{ticker}` (+ 위 ★·담기 API) |
 | | | 가격 차트 (1M~1Y) | `GET /stocks/{market}/{ticker}/candles?range=` |
-| | | 핵심 지표·매력도·수치 분석 | `GET /stocks/{market}/{ticker}/analysis?preset=` |
+| | | 투자 매력도(게이지·레이더·요소별 카드·계산 근거)·핵심 정보(시총·배당수익률·52주)·투자 지표 상세(접힘) | `GET /stocks/{market}/{ticker}/analysis?preset=` |
+| | | 상장 목록·비교군 종목 수집 대기(2초마다, 일봉이 먼저 오면 가격·매력도부터 표시) | `GET /stocks/{market}/{ticker}` |
 | | | 투자 성향 펼침 메뉴(매력도 영역) | `GET /scoring/presets` |
-| | | 월별 요약(최근 12개월 표) | `GET /statistics/monthly?market=&ticker=&months=12` |
+| | | 월별 요약(최근 12개월 표, 접힘 — 펼칠 때 호출) | `GET /statistics/monthly?market=&ticker=&months=12` |
 | | | 재무 추이 | `GET /stocks/{market}/{ticker}/financials` |
 | | | 경쟁 비교 표·막대 | `GET /stocks/{market}/{ticker}/peers` |
 | | | 기준일=100 차트 | `GET /stocks/{market}/{ticker}/peers/chart?range=&group_id=` |
@@ -1711,7 +1716,7 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 | (보고서·발표) | — | 데이터 개요·통계 | `GET /statistics/*` |
 
 ## 5. 에러 코드
-코드에서 실제로 던지는 `code` 전체(`grep -rn 'code="' app` + `app/core/errors.py` 핸들러). 응답 형식은 모두 `{"error": {"code", "message", "detail"}}`. 재현 테스트 ID는 `docs/07`.
+코드에서 실제로 던지는 `code` 전체(`grep -rn 'code="' app` + `backend/app/core/errors.py` 핸들러). 응답 형식은 모두 `{"error": {"code", "message", "detail"}}`. 재현 테스트 ID는 `docs/07`.
 
 | `code` | HTTP | 발생 조건 | 발생 엔드포인트 | 메시지 예시 | 테스트 |
 |---|---|---|---|---|---|

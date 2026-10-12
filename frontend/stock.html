@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>종목 상세 · StockMind</title>
+  <meta name="description" content="종목 가격 차트, 투자 매력도, 핵심 정보, 투자 지표 상세, 재무 추이, 월별 요약, 경쟁 종목 비교, 최근 공시">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/pages.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" defer></script>
+  <script type="module" src="/static/js/pages/stock.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="main__inner">
+        <p><a class="section__link" href="/stocks">← 주식 리스트</a></p>
+        <div id="head"></div>
+
+        <section class="section card detail-section" aria-labelledby="h-price">
+          <div class="section__head"><h2 id="h-price">가격 차트</h2><div id="range-tabs"></div></div>
+          <div id="price-chart"></div>
+        </section>
+
+        <section class="section card detail-section" aria-labelledby="h-score">
+          <div class="section__head"><h2 id="h-score">투자 매력도</h2><div id="preset-menu"></div></div>
+          <div id="score"></div>
+        </section>
+
+        <section class="section detail-section" aria-labelledby="h-key">
+          <h2 id="h-key">핵심 정보</h2>
+          <div id="key-metrics"></div>
+        </section>
+
+        <!-- 복잡한 자료는 기본으로 접어 두고, 처음 펼칠 때 불러온다 -->
+        <details class="section card detail-section fold" id="fold-metrics">
+          <summary><h2>투자 지표 상세</h2><span class="subtle">PER·PBR·ROE·기간 수익률·변동성·낙폭</span></summary>
+          <div class="fold__body"><div id="detail-metrics"></div><div id="numeric"></div></div>
+        </details>
+
+        <details class="section card detail-section fold" id="fold-financials">
+          <summary><h2>재무 추이 (연간)</h2><span class="subtle">매출·영업이익 5개년</span></summary>
+          <div class="fold__body" id="financials"></div>
+        </details>
+
+        <details class="section card detail-section fold" id="fold-monthly">
+          <summary><h2>월별 요약</h2><span class="subtle">최근 12개월 거래일·평균 종가·월간 수익률</span></summary>
+          <div class="fold__body" id="monthly"></div>
+        </details>
+
+        <details class="section card detail-section fold" id="fold-peers">
+          <summary><h2>경쟁 종목 비교</h2><span class="subtle">같은 그룹의 가격 추이·지표 순위</span></summary>
+          <div class="fold__body" id="peers"></div>
+        </details>
+
+        <section class="section detail-section" aria-labelledby="h-disc">
+          <h2 id="h-disc">최근 공시</h2>
+          <div id="disclosures"></div>
+        </section>
+
+        <p class="disclaimer">시세는 일봉 기준이며 장중 실시간이 아닙니다. 매력도는 노출 종목과 매력도 비교군 안에서 같은 시장끼리 비교한 상대적 위치를 나타내는 팩터 점수이며, 수익률 예측이 아닙니다. 이 화면의 어떤 정보도 투자 권유가 아닙니다.</p>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,8 +1,8 @@
 # 05. ERD 및 DB 설계서
 
-- DDL 원문: `db/schema.sql` → `db/indexes.sql` → `db/views.sql` 순서로 실행
+- DDL 원문: `backend/db/schema.sql` → `backend/db/indexes.sql` → `backend/db/views.sql` 순서로 실행
 - DBMS: PostgreSQL 16 / 테이블 20개, VIEW 3개, 보조 인덱스 10개(명세 10개 − 중복 1개 + 추가 1개), 부분 UNIQUE 인덱스 1개(주 그룹 제약), 트리거 3개(updated_at 자동 갱신 — portfolios·portfolio_items·watchlist_items)
-- 매력도 테이블(`scoring_presets`·`scoring_weights`·`stock_metric_values`·`stock_scores`, `peer_group_members.is_primary`)은 다중 팩터 모델로 바꾸며 추가·재정의했다(2026-10-07, `db/migrations/001_scoring_v2.sql`, 계산 정의는 `docs/09`).
+- 매력도 테이블(`scoring_presets`·`scoring_weights`·`stock_metric_values`·`stock_scores`, `peer_group_members.is_primary`)은 다중 팩터 모델로 바꾸며 추가·재정의했다(2026-10-07, `backend/db/migrations/001_scoring_v2.sql`, 계산 정의는 `docs/09`).
 - 3절 테이블 정의는 테스트 DB에 DDL을 실제 적용한 뒤 시스템 카탈로그(`pg_attribute`, `pg_constraint`)에서 생성했다.
 
 ## 1. ERD
@@ -260,10 +260,10 @@ erDiagram
 | corp_code | character varying(16) | Y |  |  | OpenDART 고유번호 (KR) |
 | cik | character varying(10) | Y |  |  | SEC CIK 10자리 (US) |
 | is_active | boolean | N | true |  | 수집·점수 계산 대상 여부 (false면 데이터만 보존) |
-| coverage | character varying(10) | N | 'featured' |  | featured(화면 노출, 4시간 갱신) / benchmark(매력도 비교군, 1일 갱신) |
+| coverage | character varying(10) | N | 'featured' |  | featured(화면 노출, 4시간 갱신) / benchmark(매력도 비교군, 1일 갱신) / listed(상장 보통주 목록 — 이름·티커만, 열 때 수집, 점수 유니버스 제외. migration 005) |
 | detail_synced_at | timestamp with time zone | Y |  |  | 비교군 종목 상세(공시·2년 일봉·5개년 재무)를 마지막으로 받은 시각 |
 
-제약: `UNIQUE (market_id, ticker)` / `CHECK (coverage IN ('featured','benchmark'))`
+제약: `UNIQUE (market_id, ticker)` / `CHECK (coverage IN ('featured','benchmark','listed'))`
 
 #### `peer_groups`
 
@@ -297,7 +297,12 @@ erDiagram
 
 제약: `CHECK ((volume >= 0))` / `CHECK ((high >= low))` / `CHECK ((low > (0)::numeric))`
 
+> 2026-10-12 migration 006: `stocks.industry·sic·sector·industry_checked_at`(업종), `peer_groups.kind`(theme/sector), `data_freshness`(종목·종류별 유효기간, PK (stock_id, kind)), `fundamental_bases`(미국 기초값: 발행주식수·FY 주당 배당, PK stock_id) 추가. 섹터 그룹(kind = sector)의 `is_primary` 구성원이 섹터 중립화 표본이다(docs/09 9절).
+
 #### `valuation_snapshots`
+
+> 2026-10-12 `dps NUMERIC(18,4) CHECK (dps >= 0)` 추가(migration 005): 연간 주당배당금(국내 KRX DPS, 미국 yfinance dividendRate). 0 = 무배당, NULL = 미제공. `v_stock_metrics`에 `dps`, `dividend_yield`(= dps ÷ 최신 종가)를 끝 열로 붙였다(`CREATE OR REPLACE VIEW`는 끝에 붙인 열만 허용).
+
 
 | 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
@@ -446,7 +451,7 @@ erDiagram
 | description | text | Y |  |  | 설명 |
 | sort_order | smallint | N | 0 |  | 화면 표시 순서 (위험 1 → 가치 4) |
 
-`config/scoring.yaml`에서 적재(init-db·migrate·scores 실행 시). 프리셋별 가중치 합 = 1은 행 간 제약이라 적재 시 검증한다.
+`backend/config/scoring.yaml`에서 적재(init-db·migrate·scores 실행 시). 프리셋별 가중치 합 = 1은 행 간 제약이라 적재 시 검증한다.
 
 #### `scoring_weights`
 
@@ -611,36 +616,36 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | 제약 위반 12건(수량 0, 중복 담기, 생성 컬럼 쓰기, RESTRICT 삭제, 시드 0, 고가<저가, 음수 거래량, 없는 FK, 잘못된 granularity, 환율 0, 잘못된 period_type, 점수 101) | 12/12 거부 |
 | updated_at 트리거, 포트폴리오 삭제 시 항목 CASCADE | 확인 |
 
-이 검증은 pytest로 옮겼다: `tests/test_schema.py`(제약조건·생성 컬럼·트리거·삭제 규칙), `tests/test_analysis.py`(v_stock_metrics 손계산).
+이 검증은 pytest로 옮겼다: `backend/tests/test_schema.py`(제약조건·생성 컬럼·트리거·삭제 규칙), `backend/tests/test_analysis.py`(v_stock_metrics 손계산).
 
 ## 9. 분석 쿼리와 SQL 요소
-조회·분석 쿼리는 모두 `app/queries/*.sql`에 원문으로 두고 SQLAlchemy `text()`로 실행한다. 아래 표는 각 파일의 주석을 뺀 본문을 스캔해 만들었다(필수 요소 중 누락 없음).
+조회·분석 쿼리는 모두 `backend/app/queries/*.sql`에 원문으로 두고 SQLAlchemy `text()`로 실행한다. 아래 표는 각 파일의 주석을 뺀 본문을 스캔해 만들었다(필수 요소 중 누락 없음).
 
 | SQL 파일 | SELECT | WHERE | JOIN | GROUP BY | HAVING | ORDER BY | AVG | SUM | COUNT | MAX | MIN | 윈도우 함수 | CTE | LATERAL | 사용한 윈도우 함수 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `app/queries/analysis.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  | ✓ | ✓ |  | COUNT, PERCENT_RANK, RANK |
-| `app/queries/candles.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  | ✓ |  |  |  |  |  |
-| `app/queries/disclosures.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  |  |  |  |  |  |  |
-| `app/queries/financials.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  |  |  |  |  |  |  |
-| `app/queries/fx_daily_recent.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  |  |  |  |  |  |  |
-| `app/queries/market_indices.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  | ✓ | ✓ | ✓ | ROW_NUMBER |
-| `app/queries/peers.sql` | ✓ | ✓ | ✓ |  |  | ✓ | ✓ |  | ✓ |  |  | ✓ | ✓ | ✓ | AVG, COUNT, RANK |
-| `app/queries/peers_chart.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  | ✓ |  | ✓ | ✓ |  | FIRST_VALUE |
-| `app/queries/portfolio_items_valued.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
-| `app/queries/score_aggregate.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | AVG, STDDEV_SAMP |
-| `app/queries/score_metrics.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ |  |  |  | ✓ |  | ✓ | ✓ | ✓ | LAG, ROW_NUMBER |
-| `app/queries/score_neutralize.sql` | ✓ | ✓ | ✓ |  |  |  | ✓ |  | ✓ |  |  | ✓ | ✓ |  | AVG, COUNT |
-| `app/queries/score_zscore.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | ✓ |  |  |  | ✓ |  |  |
-| `app/queries/stats_disclosure_frequency.sql` | ✓ | ✓ |  | ✓ |  | ✓ |  | ✓ | ✓ |  |  | ✓ | ✓ |  | SUM |
-| `app/queries/stats_market_excluded.sql` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |
-| `app/queries/stats_market_valuation.sql` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |  |  |  |
-| `app/queries/stats_overview.sql` | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ | ✓ |  |  |  |  |
-| `app/queries/stats_peer_group_valuation.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  | ✓ |  |  |
-| `app/queries/stock_detail.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
-| `app/queries/stock_groups.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  |  |  |  |  |
-| `app/queries/stock_list.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  | ✓ | ✓ | ✓ | COUNT, RANK |
-| `app/queries/watchlist.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
-| `db/views.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | LAG, MAX, ROW_NUMBER |
+| `backend/app/queries/analysis.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  | ✓ | ✓ |  | COUNT, PERCENT_RANK, RANK |
+| `backend/app/queries/candles.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  | ✓ |  |  |  |  |  |
+| `backend/app/queries/disclosures.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  |  |  |  |  |  |  |
+| `backend/app/queries/financials.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  |  |  |  |  |  |  |
+| `backend/app/queries/fx_daily_recent.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  |  |  |  |  |  |  |
+| `backend/app/queries/market_indices.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  | ✓ | ✓ | ✓ | ROW_NUMBER |
+| `backend/app/queries/peers.sql` | ✓ | ✓ | ✓ |  |  | ✓ | ✓ |  | ✓ |  |  | ✓ | ✓ | ✓ | AVG, COUNT, RANK |
+| `backend/app/queries/peers_chart.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  | ✓ |  | ✓ | ✓ |  | FIRST_VALUE |
+| `backend/app/queries/portfolio_items_valued.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| `backend/app/queries/score_aggregate.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | AVG, STDDEV_SAMP |
+| `backend/app/queries/score_metrics.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ |  |  |  | ✓ |  | ✓ | ✓ | ✓ | LAG, ROW_NUMBER |
+| `backend/app/queries/score_neutralize.sql` | ✓ | ✓ | ✓ |  |  |  | ✓ |  | ✓ |  |  | ✓ | ✓ |  | AVG, COUNT |
+| `backend/app/queries/score_zscore.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | ✓ |  |  |  | ✓ |  |  |
+| `backend/app/queries/stats_disclosure_frequency.sql` | ✓ | ✓ |  | ✓ |  | ✓ |  | ✓ | ✓ |  |  | ✓ | ✓ |  | SUM |
+| `backend/app/queries/stats_market_excluded.sql` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |
+| `backend/app/queries/stats_market_valuation.sql` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |  |  |  |
+| `backend/app/queries/stats_overview.sql` | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ | ✓ |  |  |  |  |
+| `backend/app/queries/stats_peer_group_valuation.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  | ✓ |  |  |
+| `backend/app/queries/stock_detail.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| `backend/app/queries/stock_groups.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  |  |  |  |  |
+| `backend/app/queries/stock_list.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  | ✓ | ✓ | ✓ | COUNT, RANK |
+| `backend/app/queries/watchlist.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| `backend/db/views.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | LAG, MAX, ROW_NUMBER |
 | **사용 파일 수** | 23 | 23 | 17 | 8 | 2 | 21 | 7 | 4 | 13 | 8 | 4 | 10 | 12 | 8 | |
 
 
@@ -648,7 +653,7 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 주요 쿼리:
 | 쿼리 | 용도 | 핵심 기법 |
 |---|---|---|
-| `db/views.sql` `v_stock_metrics` | 종목별 수익률·변동성·MDD·이동평균·52주·재무 지표 | CTE 9단계, ROW_NUMBER로 최근 N거래일, LAG 일수익률, 누적 MAX OVER(MDD), STDDEV_SAMP, AVG FILTER, LATERAL 기준일 종가 |
+| `backend/db/views.sql` `v_stock_metrics` | 종목별 수익률·변동성·MDD·이동평균·52주·재무 지표 | CTE 9단계, ROW_NUMBER로 최근 N거래일, LAG 일수익률, 누적 MAX OVER(MDD), STDDEV_SAMP, AVG FILTER, LATERAL 기준일 종가 |
 | `score_metrics.sql` | 매력도 지표 원값 9종 | CTE, LAG(직전 FY), ROW_NUMBER(t−21·126·252거래일), MAX FILTER 피벗, CROSS JOIN LATERAL (VALUES …)로 지표 행 펼치기 |
 | `score_zscore.sql` | 국가 내 로버스트 Z | `PERCENTILE_CONT(0.5) WITHIN GROUP` CTE로 중앙값·MAD, 표본·MAD 조건부 평균·표준편차 대체, LEAST/GREATEST 클리핑, UPDATE … FROM |
 | `score_neutralize.sql` | 섹터 중립화 | 주 그룹(부분 UNIQUE) LEFT JOIN, COUNT·AVG OVER (PARTITION BY 그룹, 지표)로 n/(n+k) 축소 |

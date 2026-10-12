@@ -7,9 +7,9 @@ services:
     environment:
       WATCHFILES_FORCE_POLLING: "true"   # Windows 폴더 bind mount는 파일 변경 알림이 전달되지 않아 polling으로 감지
     volumes:
-      - ./app:/srv/app
-      - ./config:/srv/config
-      - ./db:/srv/db
-      - ./web:/srv/web
-      - ./tests:/srv/tests
+      - ./backend/app:/srv/app
+      - ./backend/config:/srv/config
+      - ./backend/db:/srv/db
+      - ./frontend:/srv/frontend
+      - ./backend/tests:/srv/tests
       - ./docs:/srv/docs                 # python -m app.ingest explain 결과 기록
