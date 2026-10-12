@@ -26,6 +26,7 @@ docker compose run --rm api python -m app.ingest seed-demo
 #    서버의 스케줄러가 이미 시작했다면 "다른 프로세스가 비교군 갱신 중 — 건너뜀"으로 바로 끝난다(정상, 중복 실행 방지).
 #    그때는 서버가 끝낼 때까지 기다린 뒤 status의 '데이터 품질' 줄에서 실패 0건을 확인한다
 docker compose run --rm api python -m app.ingest benchmark
+docker compose run --rm api python -m app.ingest listing   # 상단 검색용 상장 보통주 목록(약 10초)
 docker compose run --rm api python -m app.ingest status
 
 # 4) 상태 확인 → {"status":"ok","db":"ok"}
@@ -55,16 +56,16 @@ cp .env.example .env          # 아래 환경변수 입력 (DATABASE_URL은 comp
 docker compose up -d --build  # db(PostgreSQL 16, localhost:5433) + api(http://localhost:8000), 둘 다 healthcheck
 ```
 - 적재·관리 명령은 컨테이너에서 실행합니다: `docker compose run --rm api python -m app.ingest <명령>` (아래 3절의 `python -m app.ingest …` 앞에 `docker compose run --rm api`를 붙임)
-- 개발(소스 수정 즉시 반영): `docker compose -f compose.yml -f compose.dev.yml up -d --build` — `app/`·`config/`·`web/` 등을 bind mount하고 uvicorn `--reload`(Windows용 polling)
+- 개발(소스 수정 즉시 반영): `docker compose -f compose.yml -f compose.dev.yml up -d --build` — `backend/app/`·`backend/config/`·`frontend/` 등을 bind mount하고 uvicorn `--reload`(Windows용 polling)
 - 로그: `docker compose logs -f api` · 중지: `docker compose down` (데이터는 `semi_pgdata` 볼륨에 유지)
 - **TLS 검사(백신·사내 프록시) 환경**: 호스트에서 HTTPS가 가로채져 인증서 오류가 나면, 그 루트 인증서(`*.pem`·`*.crt`)를 `certs/`에 두거나 `.env`에 `EXTRA_CA_DIR=<폴더>`를 지정합니다. entrypoint가 시스템 CA 번들에 합쳐 requests·curl_cffi(yfinance)·ssl 모두에 적용합니다. 예) Norton: `C:/ProgramData/Norton/Antivirus/wscert.pem`
 
 로컬 venv로 실행할 수도 있습니다(DB만 컨테이너).
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 docker compose up -d db
-uvicorn app.main:app --reload
+cd backend && uvicorn app.main:app --reload   # 적재 CLI·pytest도 backend/에서 실행
 ```
 
 ## 2. 환경변수 (`.env`)
@@ -113,13 +114,22 @@ docker compose up -d          # 로컬 venv라면: uvicorn app.main:app --reload
 - 오류 응답은 `{"error": {"code", "message", "detail"}}`, 모든 응답(500 포함)에 `X-Request-ID` 헤더. 에러 코드 전체는 [docs/06 5절](docs/06_기능_API_정의서.md#5-에러-코드)
 
 ### 매력도 비교군 (docs/09 9절)
-화면에 보이는 25종목 외에, 점수 비교 표본으로 국가별·섹터별 시가총액 상위 종목(섹터당 최대 10개, 현재 121종목)을 함께 관리합니다.
-- 평시에는 점수 계산에 필요한 데이터(일봉 400일·최신 밸류에이션·FY 3개년)만 하루 한 번 갱신합니다.
-- 주식 리스트에서 검색하면 비교군 종목도 나오고(배지 "비교군"), 상세를 열거나 관심종목에 담을 때 공시·2년 시세·5개년 재무를 받습니다.
+화면에 보이는 25종목 외에, 점수 비교 표본으로 **공식 업종 9개 섹터(국내 KRX 업종·미국 SEC SIC)별 국가당 시가총액 상위 50종목**(최대 약 860종목, 금융·부동산 제외)을 함께 관리합니다.
+- 평시 데이터는 하루 한 번 대량으로 받습니다: 국내 일봉·밸류에이션은 날짜별 전 종목 조회, 미국 일봉은 묶음 다운로드, 미국 PER·PBR은 SEC 기초값 × 종가로 계산합니다.
+- 가격 외 데이터는 **유효기간** 안이면 다시 받지 않습니다. 재무는 다음 사업보고서·10-K 예상일까지(최대 90일), 공시는 1일입니다. 그래서 상세를 다시 열면 보통 일봉 증분만 받습니다.
+- 주식 리스트에서 검색하면 비교군 종목도 나오고(배지 "비교군"), 상세를 열거나 관심종목에 담으면 유효기간이 지난 데이터만 받습니다.
+- 기존 DB는 `migrate 006_sector_freshness` 후 `benchmark --reselect`로 다시 고릅니다. 첫 실행은 재무 백필 때문에 수십 분 걸리므로 서버 스케줄러보다 CLI로 한 번 돌리기를 권합니다.
 ```bash
 python -m app.ingest benchmark            # 오늘 갱신(30일마다 다시 선정), --reselect: 지금 다시 선정
-python -m app.ingest hydrate 042700       # 비교군 종목 상세 데이터 받기
+python -m app.ingest hydrate 042700       # 비교군·상장 목록 종목 상세 데이터 받기(유효기간이 지난 것만)
 ```
+
+### 상장 종목 전체 검색 (docs/09 10절)
+모든 화면 상단 검색바는 국내 코스피·코스닥, 미국 NASDAQ·NYSE 보통주 전체(약 8천 종목, 우선주·스팩·ETF·펀드 제외)를 찾습니다.
+- 목록은 이름·티커만 저장하고(coverage=listed) 비교군 일일 갱신 때 함께 맞춥니다. 수동 실행: `python -m app.ingest listing`
+- 목록 종목을 열면 일봉 → 밸류에이션 → 재무 → 공시 순서로 받고(보통 10~30초), 가격 차트부터 표시합니다.
+- 매력도는 유니버스에 넣지 않고 같은 시장 비교군 분포에 대입한 **참고 점수**로 보여 줍니다(섹터 중립화 없음).
+- 기존 DB는 `python -m app.ingest migrate 005_listed_dividend`를 먼저 실행합니다(listed 계층, 주당배당금 컬럼).
 
 ### 갱신 정책 (앱 안 스케줄러)
 - 환율·지수·종목 일봉·밸류에이션·점수는 **작업 종류별 `REFRESH_TTL_HOURS`(기본 4시간)에 최대 1회**만 외부 호출합니다.
@@ -159,7 +169,7 @@ curl "http://localhost:8000/api/v1/stocks?country=KR&sort=volume&limit=2"
 | DB | `docker compose logs db` |
 | 프론트 | 브라우저 개발자 도구(F12) → Console(스크립트 오류), Network(실패한 요청의 상태 코드·응답 본문·`X-Request-ID` 헤더) |
 | 요청 하나 추적 | 응답 헤더 `X-Request-ID` 값으로 서버 로그 검색. 직접 지정도 가능: `curl -H "X-Request-ID: my-check-01" http://localhost:8000/api/v1/market/fx` → `docker compose logs api \| grep my-check-01` → `INFO [my-check-01] app.request: GET /api/v1/market/fx → 200 (5ms)` |
-| 격리된 이상 데이터 | 저장소의 `data/quarantine/<작업>_<날짜>.csv`(컨테이너 `/srv/data` 마운트) — 행마다 사유(중복·고가<저가·장 마감 전 미확정 봉 등). 최근 N일 격리 행 수는 `GET /api/v1/statistics/data-quality`의 `quarantined_rows` |
+| 격리된 이상 데이터 | `backend/data/quarantine/<작업>_<날짜>.csv`(컨테이너 `/srv/data` 마운트) — 행마다 사유(중복·고가<저가·장 마감 전 미확정 봉 등). 최근 N일 격리 행 수는 `GET /api/v1/statistics/data-quality`의 `quarantined_rows` |
 | 적재·수집 결과 | `docker compose run --rm api python -m app.ingest status` — 테이블별 행 수, 최근 실패 10건, 데이터 품질 요약(오래된 갱신 작업) |
 
 ### 데이터 갱신 확인
@@ -178,7 +188,7 @@ docker compose up -d --build                                       # 이미지 �
 curl http://localhost:8000/health/db                               # {"status":"ok","db":"ok"}
 curl http://localhost:8000/api/v1/market/fx                        # 대표 API 200
 ```
-마지막으로 화면(`/`, `/stocks`, `/portfolio`)을 열어 확인합니다. 마이그레이션 목록: `001_scoring_v2`·`002_presets`·`003_benchmark`·`004_watchlist_memo`(관심종목 메모·목표가). 새로 `init-db`하는 DB는 필요 없습니다.
+마지막으로 화면(`/`, `/stocks`, `/portfolio`)을 열어 확인합니다. 마이그레이션 목록: `001_scoring_v2`·`002_presets`·`003_benchmark`·`004_watchlist_memo`(관심종목 메모·목표가)·`005_listed_dividend`·`006_sector_freshness`. 새로 `init-db`하는 DB는 필요 없습니다.
 
 ### 장애 시 점검 순서
 1. `GET /health` — 실패하면 API 프로세스 문제: `docker compose ps`, `docker compose logs api`
@@ -193,29 +203,32 @@ curl http://localhost:8000/api/v1/market/fx                        # 대표 API 
 
 ## 6. 테스트
 ```bash
-docker compose run --rm api pytest -q   # 275 passed (venv라면 pytest -q) — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
+docker compose run --rm api pytest -q   # 301개(결과는 docs/07 1절) (venv라면 pytest -q) — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
 python -m app.ingest explain           # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
 ```
 DB 제약·전처리·TTL 갱신(외부 호출 횟수)·분석 SQL 손계산·포트폴리오 명세 시나리오·동시성·오류 응답·입력 경계값을 검증합니다. 결과는 [docs/07](docs/07_테스트_결과서.md). 코드를 고친 뒤에는 `docker compose -f compose.yml -f compose.dev.yml run --rm api pytest -q`로 실행해야 이미지가 아닌 현재 소스가 테스트됩니다.
 
 ## 7. 저장소 구조
 ```
-app/
-  api/        라우터 — market, stocks, watchlist, portfolios, analysis(분석·통계), health
-  core/       설정, DB 세션, 오류 형식, 요청 ID 로깅
-  models/     SQLAlchemy 모델 (db/schema.sql과 1:1)
-  schemas/    Pydantic 요청·응답, 입력 제약
-  providers/  외부 소스 인터페이스 + pykrx·yfinance·DART·SEC 구현
-  services/   환율(TTL·lock)·갱신·포트폴리오 계산·매력도 점수·데이터 품질·비교군 상세 수집(hydration)·앱 안 스케줄러
-  ingest/     수집·전처리·적재 CLI (python -m app.ingest), 매력도 비교군(benchmark)
-  queries/    조회·분석 SQL 원문 (text()로 실행)
-web/          index.html · stocks.html · stock.html · portfolio.html, css/(tokens·base·components·pages), js/
-db/           schema.sql · indexes.sql · views.sql · init/(테스트 DB 생성) · migrations/(기존 DB 갱신 001~004)
-config/       universe.yaml(노출 종목·지수·경쟁 그룹·비교군 후보, 첫 소속 그룹 = 주 그룹) · scoring.yaml(투자 성향 프리셋·축소 계수)
-docker/       entrypoint.sh(추가 CA 번들) — Dockerfile·compose.yml·compose.dev.yml은 저장소 루트
-sample_data/  재현용 소량 CSV
+backend/      FastAPI 서버 (컨테이너의 /srv)
+  app/
+    api/        라우터 — market, stocks, watchlist, portfolios, analysis(분석·통계), health
+    core/       설정, DB 세션, 오류 형식, 요청 ID 로깅
+    models/     SQLAlchemy 모델 (db/schema.sql과 1:1)
+    schemas/    Pydantic 요청·응답, 입력 제약
+    providers/  외부 소스 인터페이스 + pykrx·yfinance·DART·SEC 구현
+    services/   환율(TTL·lock)·갱신·포트폴리오 계산·매력도 점수·데이터 품질·비교군 상세 수집(hydration)·앱 안 스케줄러
+    ingest/     수집·전처리·적재 CLI (python -m app.ingest), 매력도 비교군(benchmark)
+    queries/    조회·분석 SQL 원문 (text()로 실행)
+  db/           schema.sql · indexes.sql · views.sql · init/(테스트 DB 생성) · migrations/(기존 DB 갱신 001~006)
+  config/       universe.yaml(노출 종목·지수·경쟁 그룹·비교군 후보, 첫 소속 그룹 = 주 그룹) · scoring.yaml(투자 성향 프리셋·축소 계수)
+  docker/       entrypoint.sh(추가 CA 번들)
+  sample_data/  재현용 소량 CSV
+  tests/        pytest
+  Dockerfile · requirements.txt
+frontend/     index.html · stocks.html · stock.html · portfolio.html, css/(tokens·base·components·pages), js/ (FastAPI가 /static으로 서빙)
 docs/         문서 01~09, architecture, troubleshooting, ASSUMPTIONS, smoke test·EXPLAIN 결과, screenshots/
-tests/        pytest
+compose.yml · compose.dev.yml · .env   저장소 루트
 ```
 
 ## 8. 문서
