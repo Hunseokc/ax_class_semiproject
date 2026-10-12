@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>대시보드 · StockMind</title>
+  <meta name="description" content="국내·미국 주요 지수, 환율, 관심종목 요약 (일봉 기준)">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/pages.css">
+  <!-- Stage 1: 담당(A)이 아래 인라인 스크립트를 js/pages/home.js 로 바꾸고(mountSidebar 호출 포함) Chart.js CDN을 추가한다 -->
+  <script type="module">
+    import { mountSidebar } from "/static/js/components/sidebar.js";
+    mountSidebar("home");
+  </script>
+</head>
+<body>
+  <div class="app">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="main__inner">
+        <h1 class="sr-only">대시보드</h1>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

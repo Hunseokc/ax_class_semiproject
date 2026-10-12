@@ -1,0 +1,103 @@
+/* 디자인 토큰 — 다크 핀테크 (docs/assets/design_reference.png 기준)
+   면의 명도 차이로 구분하고 그림자는 쓰지 않는다. 파스텔 위 글자는 어두운 색. */
+:root {
+  color-scheme: dark;
+
+  /* 면 */
+  --bg: #141414;            /* 페이지 */
+  --surface: #1e1e1e;       /* 사이드바·큰 패널 */
+  --card: #2a2a2a;          /* 카드·리스트 행 */
+  --card-hover: #333333;
+  --card-active: #3a3a3a;   /* 선택된 행 */
+  --line: #3a3a3a;          /* 점선 기준선·구분선 */
+
+  /* 글자 */
+  --text: #ffffff;
+  --text-2: #b3b3b3;        /* 보조 (대비 9.0:1 on --bg) */
+  --text-3: #8c8c8c;        /* 부제·날짜 (대비 5.6:1 on --bg, 4.6:1 on --card) */
+  --text-on-pastel: #141414;
+  --text-on-pastel-2: #4a4a4a;
+
+  /* 강조 파스텔 */
+  --ice: #e6f4fa;
+  --lavender: #e6ddf2;
+  --ice-strong: #bfe3f2;
+  --lavender-strong: #cbb9e6;
+
+  /* 등락: 시장(국내·미국)과 무관하게 상승 빨강·하락 파랑 — 색은 이 두 줄에서만 정한다 (어두운 면용) */
+  --up: #ff6b6b;
+  --down: #5ea8ff;
+  --flat: #b3b3b3;
+  /* 파스텔 면 위에서 쓰는 진한 변형 (대비 4.5:1 이상) */
+  --up-on-pastel: #c0262d;
+  --down-on-pastel: #1d5bbf;
+  /* 시장별 이름은 위 값의 별칭 (기존 화면 코드 호환) */
+  --kr-up: var(--up);
+  --kr-down: var(--down);
+  --us-up: var(--up);
+  --us-down: var(--down);
+  --kr-up-on-pastel: var(--up-on-pastel);
+  --kr-down-on-pastel: var(--down-on-pastel);
+  --us-up-on-pastel: var(--up-on-pastel);
+  --us-down-on-pastel: var(--down-on-pastel);
+  --heat-up: var(--up-on-pastel);           /* 섹터 히트맵 타일(흰 글자) */
+  --heat-down: var(--down-on-pastel);
+  --price-up: var(--up-on-pastel);
+  --price-down: var(--down-on-pastel);
+
+  /* 투자 성향 프리셋 색 (code → 토큰 매핑은 js/components/preset-menu.js 한 곳) */
+  --preset-aggressive: #E5484D; /* 위험: 빨강 */
+  --preset-growth:     #F2832A; /* 성장: 주황 */
+  --preset-balanced:   #F5C431; /* 균형: 노랑 */
+  --preset-value:      #30A46C; /* 가치: 초록 */
+
+  /* 매력도 게이지 5구간 (매우 낮음 → 매우 높음, 테라코타 ~ 청록) */
+  --gauge-1: #C8553D;
+  --gauge-2: #E39B3A;
+  --gauge-3: #9AA5A8;
+  --gauge-4: #2A9D8F;
+  --gauge-5: #1E6B57;
+
+  --danger: #ff6b6b;
+  --warning: #f5c26b;
+  --success: #3ddc97;
+
+  /* 모서리 */
+  --r-card: 28px;
+  --r-card-sm: 24px;
+  --r-row: 16px;
+  --r-pill: 999px;
+  --r-input: 14px;
+
+  /* 간격 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  /* 글꼴 */
+  --font: "Plus Jakarta Sans", "Pretendard", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 24px;
+  --fs-2xl: 32px;
+  --fs-3xl: 40px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-extra: 800;
+
+  /* 레이아웃 */
+  --sidebar-w: 248px;
+  --tabbar-h: 72px;
+  --content-max: 1280px;
+  --focus: 0 0 0 3px rgba(230, 221, 242, 0.55);
+  --ease: cubic-bezier(.2, .7, .2, 1);
+}
