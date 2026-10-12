@@ -144,6 +144,34 @@ CREATE TABLE index_daily_prices (
   PRIMARY KEY (index_id, trade_date)
 );
 
+-- 섹터 등락률 (대시보드 섹터 히트맵, 캐시 성격 — 30일 지난 행은 갱신 작업이 정리). 가중치는 코드 상수
+CREATE TABLE sector_performance_daily (
+  id          BIGSERIAL    PRIMARY KEY,
+  market      CHAR(2)      NOT NULL CHECK (market IN ('KR','US')),
+  sector_code VARCHAR(16)  NOT NULL,                        -- 미국 섹터 ETF 티커(XLK…) / KRX 섹터 지수 코드
+  sector_name VARCHAR(40)  NOT NULL,
+  trade_date  DATE         NOT NULL,
+  change_pct  NUMERIC(8,4),                                 -- 전일 대비 %(1.23 = 1.23%)
+  fetched_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  UNIQUE (market, sector_code, trade_date)
+);
+
+-- 시장 심리 지수 (StockMind 간이 계산, 0~100 높을수록 탐욕). 구성요소 점수도 0~100
+CREATE TABLE market_sentiment_daily (
+  id              BIGSERIAL     PRIMARY KEY,
+  market          CHAR(2)       NOT NULL CHECK (market IN ('KR','US')),
+  trade_date      DATE          NOT NULL,                   -- 기준 지수(KOSPI·S&P 500)의 거래일
+  score           NUMERIC(5,2)  NOT NULL CHECK (score BETWEEN 0 AND 100),
+  label           VARCHAR(10)   NOT NULL,
+  price_position  NUMERIC(5,2)  CHECK (price_position BETWEEN 0 AND 100),
+  ma_gap_score    NUMERIC(5,2)  CHECK (ma_gap_score BETWEEN 0 AND 100),
+  rsi_score       NUMERIC(5,2)  CHECK (rsi_score BETWEEN 0 AND 100),
+  vix_score       NUMERIC(5,2)  CHECK (vix_score BETWEEN 0 AND 100),   -- 미국만
+  formula_version SMALLINT      NOT NULL,
+  computed_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  UNIQUE (market, trade_date)
+);
+
 -- USD/KRW 환율. SNAPSHOT: 조회 시각 / DAILY: 해당 일자 00:00 Asia/Seoul
 CREATE TABLE fx_rates (
   fx_id       SERIAL PRIMARY KEY,
@@ -291,7 +319,8 @@ CREATE TABLE ingestion_logs (
   log_id      SERIAL PRIMARY KEY,
   source      VARCHAR(20) NOT NULL,                              -- PYKRX / YFINANCE / DART / SEC / INTERNAL
   job_type    VARCHAR(30) NOT NULL CHECK (job_type IN
-                ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','SCORES','MASTER','BENCHMARK','HYDRATE')),
+                ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','SCORES','MASTER','BENCHMARK','HYDRATE',
+                 'SECTORS_US','SECTORS_KR')),
   stock_id    INT         REFERENCES stocks ON DELETE SET NULL,  -- 종목 단위 작업일 때만
   status      VARCHAR(10) NOT NULL CHECK (status IN ('SUCCESS','FAILED','SKIPPED')),
   rows_loaded INT         NOT NULL DEFAULT 0 CHECK (rows_loaded >= 0),

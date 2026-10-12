@@ -58,6 +58,51 @@ class HomeRankingOut(Schema):
     items: list[HomeRankItem]
 
 
+SessionStatus = Literal["today", "holiday", "previous_session"]
+
+
+class SectorTileOut(Schema):
+    code: str                                # 미국 섹터 ETF 티커 / KRX 섹터 지수 코드
+    name: str
+    weight: float                            # 타일 크기용 근사 비중(%) — 코드 상수
+    change_pct: Num | None                   # 전일 대비 %(1.23 = 1.23%), 그날 값이 없으면 null
+
+
+class SectorsOut(Schema):
+    country: Literal["KR", "US"]
+    available: bool                          # 저장된 값이 하나도 없으면 false('데이터 준비 중')
+    as_of: date | None
+    session_status: SessionStatus | None
+    fetched_at: datetime | None
+    sectors: list[SectorTileOut]
+
+
+class SentimentPointOut(Schema):
+    trade_date: date
+    score: Num
+    label: str
+
+
+class SentimentComponentsOut(Schema):
+    price_position: Num | None               # 52주 범위 안 위치
+    ma_gap_score: Num | None                 # 125일 이동평균 괴리
+    rsi_score: Num | None                    # RSI(14)
+    vix_score: Num | None                    # VIX(미국만)
+
+
+class SentimentOut(Schema):
+    market: Literal["KR", "US"]
+    index_code: str                          # 기준 지수 (KOSPI · SPX)
+    formula_version: int
+    as_of: date | None
+    session_status: SessionStatus | None
+    score: Num | None                        # 0~100, 높을수록 탐욕. 구성요소 2개 미만이면 null
+    label: str
+    components: SentimentComponentsOut
+    previous: SentimentPointOut | None       # 직전 거래일
+    week_ago: SentimentPointOut | None       # 5거래일 전
+
+
 class FxPointOut(Schema):
     date: date
     usd_krw: Num
@@ -281,7 +326,6 @@ class WatchlistCard(Schema):
     target_price: Num | None = None          # 종목 통화(currency) 기준
     target_gap: Num | None = None            # (목표가 − 현재가) / 현재가
     updated_at: datetime | None = None
-    sparkline: list[SparkPoint] = []         # 최근 30거래일 종가 (대시보드 컴팩트 보기)
 
 
 class WatchlistUpdate(Schema):

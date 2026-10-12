@@ -19,14 +19,13 @@
   <div class="app">
     <aside id="sidebar" class="sidebar"></aside>
     <main class="main" id="main">
-      <div class="main__inner">
-        <header class="page-head">
-          <div><p class="subtle">Overview</p><h1>대시보드</h1><p class="page-head__meta" id="as-of">일봉 기준</p></div>
-          <div class="page-head__actions" id="preset-menu"></div>
-        </header>
+      <div class="main__inner home">
+        <h1 class="sr-only">대시보드</h1>
+        <!-- 투자 성향 메뉴는 home.js가 상단 검색바 줄(.topbar)로 옮긴다 -->
+        <div class="page-head__actions" id="preset-menu"></div>
 
         <section class="section" aria-labelledby="h-market">
-          <div class="section__head"><h2 id="h-market">주요 지수 · 환율</h2>
+          <div class="section__head"><h2 id="h-market">주요 지수 · 환율 <span class="section__meta" id="as-of">일봉 기준</span></h2>
             <div class="section__tools"><div id="spark-range"></div>
               <button class="btn btn--sm" type="button" id="market-edit" aria-expanded="false" aria-controls="market-picker" disabled>설정</button></div></div>
           <div class="market-brief" aria-live="polite">
@@ -37,11 +36,28 @@
           <div id="market-picker-slot"></div>
         </section>
 
-        <section class="section" aria-labelledby="h-watch">
-          <div class="section__head"><h2 id="h-watch">내 관심종목 <span class="subtle" id="watch-basis"></span></h2>
-            <div class="section__tools"><div id="watch-view"></div><a class="section__link" href="/stocks">주식 리스트 →</a></div></div>
-          <div id="watchlist"></div>
-        </section>
+        <!-- 2열: 좌 관심종목(약 60%) · 우 섹터 히트맵 + 시장 심리 지수(약 40%). 1100px 이하에서는 한 열 -->
+        <div class="home-split">
+          <section class="section home-watch" aria-labelledby="h-watch">
+            <div class="section__head"><h2 id="h-watch">내 관심종목 <span class="subtle" id="watch-basis"></span></h2>
+              <div class="section__tools"><div id="watch-view"></div><a class="section__link" href="/stocks">주식 리스트 →</a></div></div>
+            <div class="home-watch__body" id="watchlist"></div>
+            <a class="section__link home-watch__more" id="watch-more" href="/stocks" hidden></a>
+          </section>
+
+          <div class="home-side">
+            <section class="card home-widget" aria-labelledby="h-sector">
+              <div class="section__head"><h2 id="h-sector">섹터 히트맵</h2><div id="sector-tabs"></div></div>
+              <div class="home-widget__body" id="sectors"></div>
+              <p class="home-widget__foot" id="sector-foot"></p>
+            </section>
+
+            <section class="card home-widget" aria-labelledby="h-sentiment">
+              <div class="section__head"><h2 id="h-sentiment">시장 심리 지수 <span class="section__meta">StockMind 간이 계산</span></h2><div id="sentiment-tabs"></div></div>
+              <div class="home-widget__body" id="sentiment"></div>
+            </section>
+          </div>
+        </div>
 
         <section class="section" aria-labelledby="h-top">
           <div class="section__head"><h2 id="h-top">시장 주목 종목 TOP 5</h2>
@@ -50,7 +66,7 @@
           <p class="top-note" id="top-note"></p>
         </section>
 
-        <p class="disclaimer">시세는 일봉 기준이며 장중 실시간이 아닙니다. 매력도는 유니버스 안에서 같은 시장끼리 비교한 상대적 위치이며 수익률 예측·투자 권유가 아닙니다. 투자 성향은 공개된 일반적 투자 스타일을 단순화한 가중치이며 특정 인물의 판단이 아닙니다.</p>
+        <p class="disclaimer">시세는 일봉 기준이며 장중 실시간이 아닙니다. 매력도는 유니버스 안에서 같은 시장끼리 비교한 상대적 위치이며 수익률 예측·투자 권유가 아닙니다. 투자 성향은 공개된 일반적 투자 스타일을 단순화한 가중치이며 특정 인물의 판단이 아닙니다.<br>시장 심리 지수는 StockMind가 지수 가격·변동성 데이터로 계산한 간이 지표이며 CNN Fear &amp; Greed 지수와 다릅니다.</p>
       </div>
     </main>
   </div>

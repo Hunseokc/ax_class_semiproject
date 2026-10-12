@@ -37,19 +37,30 @@
 }
 .wl-card__edit:hover { background: rgba(20, 20, 20, .16); }
 
-/* 관심종목 컴팩트 보기: 한 줄 행 (종목명 | 매력도 | 가격 | 등락률 | 스파크라인) */
-.wl-compact .row { grid-template-columns: minmax(0, 1fr) 150px minmax(96px, auto) 84px 80px; }
-.wl-compact__score { display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; font-size: var(--fs-sm); }
-.wl-compact__band { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
-.wl-compact__band i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+/* 관심종목 컴팩트 보기: 종목명 | 소형 게이지·점수·라벨 | 현재가 | 등락률 | 편집 — 열 폭을 고정해 종목명과 게이지가 벌어지지 않게 */
+.wl-crow { display: grid; grid-template-columns: minmax(0, 1fr) 36px; align-items: center; gap: var(--sp-1); }
+.wl-compact .row { grid-template-columns: minmax(96px, 168px) 168px minmax(0, 1fr) 84px; gap: var(--sp-3); padding-block: var(--sp-2); }
+.wl-compact .wl-card__edit { position: static; background: transparent; color: var(--text-2); }
+.wl-compact .wl-card__edit:hover { background: var(--card-active); color: var(--text); }
+.wl-compact__score .gauge-mini { width: auto; flex-direction: row; gap: var(--sp-2); }
+.wl-compact__score .gauge-mini svg { width: 48px; height: 28px; }
+.wl-compact__score .gauge-mini__value { margin-top: 0; }
+.wl-compact__score .gauge-mini__value strong { font-size: var(--fs-md); }
+.wl-compact__score .gauge-mini__band { color: var(--text-2); }
+.wl-compact__score .gauge-mini__ticks { stroke: var(--text-3); }
+.wl-compact__score .gauge-mini__needle line { stroke: var(--text); }
+.wl-compact__score .gauge-mini__needle circle { fill: var(--text); }
+.wl-compact__score .gauge-mini__ring { border-color: var(--text-3); }
 .wl-compact__price { text-align: right; font-weight: var(--fw-bold); font-size: var(--fs-sm); }
 .wl-compact__chg { text-align: right; font-size: var(--fs-sm); }
-.wl-compact__spark { height: 28px; position: relative; }
+/* 홈 카드 보기: 3열 × 2줄(좁은 화면 2열), 행은 영역 높이에 맞춰 늘어난다 */
+.wl-grid--home { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; grid-auto-rows: 1fr; }
+.wl-grid--home .wl-card { min-height: 0; padding: var(--sp-4) var(--sp-4) var(--sp-5); }
+@media (max-width: 599px) { .wl-grid--home { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
 @media (max-width: 767px) {
   .wl-compact .row { grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
   .wl-compact__score { grid-column: 1; grid-row: 2; }
   .wl-compact__chg { grid-column: 2; grid-row: 2; }
-  .wl-compact__spark { display: none; }
 }
 
 /* 가격 (등락률) — 가격 길이와 관계없이 등락률은 항상 가격 아래 줄 */

@@ -31,7 +31,7 @@ from app.main import app
 from app.services.hydration import ON_DEMAND
 from tests.fakes import FakeFx, make_providers
 
-TABLES = ["portfolio_items", "portfolios", "watchlist_items", "users", "stock_scores", "stock_metric_values",
+TABLES = ["sector_performance_daily", "market_sentiment_daily", "portfolio_items", "portfolios", "watchlist_items", "users", "stock_scores", "stock_metric_values",
           "data_freshness", "fundamental_bases",
           "ingestion_logs", "fx_rates",
           "index_daily_prices", "indices", "disclosures", "financial_statements", "valuation_snapshots",

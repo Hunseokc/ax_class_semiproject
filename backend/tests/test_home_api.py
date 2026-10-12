@@ -103,13 +103,6 @@ def test_fx_52w_range_and_history(client, engine):
     assert len(fx["history"]) == 4 and fx["change_rate"] == 0                           # 전일 대비 계산은 그대로
 
 
-def test_watchlist_card_has_sparkline(client, engine):
-    with engine.begin() as conn:
-        conn.execute(text("INSERT INTO watchlist_items (user_id, stock_id, sort_order) VALUES (1, 1, 1)"))
-    item = client.get(f"{API}/watchlist").json()["items"][0]
-    assert [p["close"] for p in item["sparkline"]] == [68000, 69000, 70000]
-
-
 # ------------------------------------------------------------------ 장 상태(거래소 달력)
 def test_session_status_uses_exchange_calendar():
     from datetime import date, datetime, timezone

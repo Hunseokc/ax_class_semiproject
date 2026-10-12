@@ -20,6 +20,7 @@ from app.services.fx import FxService
 from app.services.hydration import Hydrator
 from app.services.portfolio import PortfolioService
 from app.services.refresh import RefreshService
+from app.services.sectors import load_sectors
 from app.services.scoring import default_preset
 
 
@@ -80,7 +81,7 @@ def get_scorer():
 
 def get_refresh_service(engine: Engine = Depends(get_engine_dep), providers: Providers = Depends(get_providers),
                         fx: FxService = Depends(get_fx_service), scorer=Depends(get_scorer)) -> RefreshService:
-    return RefreshService(engine, providers, fx, get_settings().refresh_ttl_hours, scorer=scorer)
+    return RefreshService(engine, providers, fx, get_settings().refresh_ttl_hours, scorer=scorer, sector_loader=load_sectors)
 
 
 @lru_cache

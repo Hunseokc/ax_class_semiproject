@@ -123,6 +123,28 @@ erDiagram
         varchar granularity
         varchar source
     }
+    sector_performance_daily {
+        bigint id PK
+        char market UK
+        varchar sector_code UK
+        varchar sector_name
+        date trade_date UK
+        numeric change_pct
+        timestamptz fetched_at
+    }
+    market_sentiment_daily {
+        bigint id PK
+        char market UK
+        date trade_date UK
+        numeric score
+        varchar label
+        numeric price_position
+        numeric ma_gap_score
+        numeric rsi_score
+        numeric vix_score
+        smallint formula_version
+        timestamptz computed_at
+    }
     users {
         int user_id PK
         varchar nickname UK
@@ -207,6 +229,7 @@ erDiagram
 ```
 
 `fx_rates`는 FK 관계가 없는 독립 테이블이다(조회 시점에 참조하며, 담은 시점 환율은 `portfolio_items`에 복사 — 5절).
+대시보드 홈 위젯용 `sector_performance_daily`(섹터 히트맵)·`market_sentiment_daily`(시장 심리 지수)도 FK 없는 독립 테이블이다(migration 007).
 
 ## 2. 테이블 목록
 행 수는 2026-10-06 전체 적재 후 운영 DB(`python -m app.ingest status`) 기준이다.
@@ -224,6 +247,8 @@ erDiagram
 | 배경 | indices | 지수 정의 | index_id | 5 |
 | 배경 | index_daily_prices | 지수 일봉 | (index_id, trade_date) | 2,472 |
 | 배경 | fx_rates | USD/KRW | fx_id | DAILY 517 + SNAPSHOT |
+| 홈 위젯 | sector_performance_daily | 섹터 전일 대비 등락률(캐시, 30일 보관) | id, UQ (market, sector_code, trade_date) | 시장별 섹터 11 × 거래일 |
+| 홈 위젯 | market_sentiment_daily | 시장 심리 지수(StockMind 간이 계산) | id, UQ (market, trade_date) | 시장별 거래일당 1 |
 | 사용자 | users | 사용자(인증 없음) | user_id | 1 (demo) |
 | 사용자 | watchlist_items | 관심종목 N:M | (user_id, stock_id) | 8 |
 | 사용자 | portfolios | 모의 포트폴리오 | portfolio_id | 2 |
@@ -388,6 +413,42 @@ erDiagram
 
 제약: `CHECK ((usd_krw > (0)::numeric))` / `CHECK (((granularity)::text = ANY ((ARRAY['SNAPSHOT'::character varying, 'DAILY'::character varying])::text[])))` / `UNIQUE (granularity, rate_at)`
 
+#### `sector_performance_daily`
+
+대시보드 섹터 히트맵. 갱신 작업 `SECTORS_US`(섹터 ETF 11개 묶음 다운로드)·`SECTORS_KR`(KRX 코스피 200 섹터 지수)만 쓰고 홈 화면은 읽기만 한다. 섹터 가중치(타일 크기)는 저장하지 않고 `app/services/sectors.py` 상수로 둔다. 캐시 성격이라 30일 지난 행은 갱신 작업이 지운다.
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| id | bigint | N | 자동 증가 | PK | 행 ID |
+| market | character(2) | N |  | UQ(복합) | KR / US |
+| sector_code | character varying(16) | N |  | UQ(복합) | 미국 섹터 ETF 티커(XLK…) / KRX 섹터 지수 코드 |
+| sector_name | character varying(40) | N |  |  | 화면 표시용 한글명 |
+| trade_date | date | N |  | UQ(복합) | 거래일(현지) |
+| change_pct | numeric(8,4) | Y |  |  | 전일 대비 %(1.23 = 1.23%) |
+| fetched_at | timestamp with time zone | N | now() |  | 받은 시각 |
+
+제약: `CHECK (market IN ('KR','US'))` / `UNIQUE (market, sector_code, trade_date)` — upsert 대상
+
+#### `market_sentiment_daily`
+
+시장 심리 지수(0~100, 높을수록 탐욕). 기준 지수(국내 KOSPI, 미국 S&P 500)와 VIX 일봉(`index_daily_prices`)으로 계산해 저장한다 — 새 외부 호출 없음. CNN Fear & Greed 지수가 아니다. 계산식은 `app/services/sentiment.py`, 저장된 행의 `formula_version`이 현재 상수와 다르면 다시 계산해 덮어쓴다. 직전 거래일·5거래일 전 행이 없으면 그 시점까지 자른 시계열로 계산해 채운다(백필). 구성요소가 2개 미만('데이터 부족')인 날은 저장하지 않는다.
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| id | bigint | N | 자동 증가 | PK | 행 ID |
+| market | character(2) | N |  | UQ(복합) | KR / US |
+| trade_date | date | N |  | UQ(복합) | 기준 지수 거래일 |
+| score | numeric(5,2) | N |  |  | 구성요소 점수 단순 평균(0~100) |
+| label | character varying(10) | N |  |  | 극단적 공포·공포·중립·탐욕·극단적 탐욕 |
+| price_position | numeric(5,2) | Y |  |  | 52주(252거래일) 범위 안 위치 × 100 |
+| ma_gap_score | numeric(5,2) | Y |  |  | clamp(50 + 125일 이동평균 괴리율(%) × 5) |
+| rsi_score | numeric(5,2) | Y |  |  | RSI(14, Wilder) |
+| vix_score | numeric(5,2) | Y |  |  | clamp((35 − VIX) / 23 × 100), 미국만 |
+| formula_version | smallint | N |  |  | 계산식 버전 |
+| computed_at | timestamp with time zone | N | now() |  | 계산 시각 |
+
+제약: `CHECK (market IN ('KR','US'))` / `CHECK (score BETWEEN 0 AND 100)`(구성요소도 0~100) / `UNIQUE (market, trade_date)` — upsert 대상
+
 #### `users`
 
 | 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
@@ -510,7 +571,7 @@ erDiagram
 | started_at | timestamp with time zone | N |  |  | 시작 시각 |
 | finished_at | timestamp with time zone | Y |  |  | 종료 시각 |
 
-제약: `CHECK (((job_type)::text = ANY ((ARRAY['PRICES'::character varying, 'INDICES'::character varying, 'FX'::character varying, 'VALUATION'::character varying, 'FINANCIALS'::character varying, 'DISCLOSURES'::character varying, 'SCORES'::character varying, 'MASTER'::character varying, 'BENCHMARK'::character varying, 'HYDRATE'::character varying])::text[])))` / `CHECK (((status)::text = ANY ((ARRAY['SUCCESS'::character varying, 'FAILED'::character varying, 'SKIPPED'::character varying])::text[])))` / `CHECK ((rows_loaded >= 0))` / `CHECK (((finished_at IS NULL) OR (finished_at >= started_at)))`
+제약: `CHECK (((job_type)::text = ANY ((ARRAY['PRICES'::character varying, 'INDICES'::character varying, 'FX'::character varying, 'VALUATION'::character varying, 'FINANCIALS'::character varying, 'DISCLOSURES'::character varying, 'SCORES'::character varying, 'MASTER'::character varying, 'BENCHMARK'::character varying, 'HYDRATE'::character varying, 'SECTORS_US'::character varying, 'SECTORS_KR'::character varying])::text[])))` / `CHECK (((status)::text = ANY ((ARRAY['SUCCESS'::character varying, 'FAILED'::character varying, 'SKIPPED'::character varying])::text[])))` / `CHECK ((rows_loaded >= 0))` / `CHECK (((finished_at IS NULL) OR (finished_at >= started_at)))`
 
 ## 4. 정규화
 

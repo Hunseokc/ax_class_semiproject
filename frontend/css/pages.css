@@ -146,6 +146,27 @@
 }
 
 /* ---------------------------------------------------------------- 대시보드 홈 */
+/* 영역 사이 간격을 다른 화면보다 좁게 */
+.home { gap: var(--sp-6); }
+/* 상단 바: 검색(남는 폭) + 투자 성향(우측) 한 줄 — 홈에서만 home.js가 .topbar에 붙인다 */
+.topbar--home { justify-content: space-between; align-items: center; gap: var(--sp-4); margin-bottom: 0; }
+.topbar--home .gsearch { flex: 1; width: auto; }
+.section__meta { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-sm); font-weight: var(--fw-regular); }
+/* 2열: 관심종목(약 60%) · 섹터 히트맵 + 시장 심리 지수(약 40%), 두 열 높이를 맞춘다 */
+.home-split { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--sp-5); align-items: stretch; }
+.home-watch { min-width: 0; }
+.home-watch__body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.home-watch__body > * { flex: 1; }
+.home-watch__more { align-self: flex-end; }
+.home-side { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.home-side > :last-child { flex: 1; }                 /* 좌측이 더 길면 아래 위젯이 남는 높이를 채운다 */
+.home-widget { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-5); }
+.home-widget__body { min-width: 0; }
+.home-widget__foot { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
+.home-widget__foot:empty { display: none; }
+@media (max-width: 1100px) { .home-split { grid-template-columns: 1fr; } }
+@media (max-width: 767px) { .topbar--home { flex-wrap: wrap; } }
+
 /* 한 줄 시장 요약 + 관심종목 연결 요약 (규칙 기반 문장) */
 .market-brief { display: flex; flex-direction: column; gap: 2px; margin-top: calc(-1 * var(--sp-2)); }
 .market-brief p { margin: 0; color: var(--text-2); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
@@ -156,3 +177,45 @@
 .top-score { display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; }
 .top-score strong { font-size: var(--fs-md); font-weight: var(--fw-extra); }
 .top-note { color: var(--text-3); font-size: var(--fs-xs); margin: calc(-1 * var(--sp-2)) 0 0; }
+
+/* 섹터 히트맵: 가중치 비율로 늘어나는 타일(정교한 트리맵 아님). 진한 색은 흰 글자 대비 4.5:1 이상인 --*-on-pastel */
+.heat { display: flex; flex-wrap: wrap; gap: 4px; }
+.heat__tile {
+  min-width: 76px; height: 54px; padding: 6px 8px; border-radius: 10px;
+  display: flex; flex-direction: column; justify-content: center; gap: 2px; overflow: hidden;
+  color: var(--text);
+}
+.heat__name { font-size: var(--fs-xs); font-weight: var(--fw-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.heat__chg { font-size: var(--fs-sm); font-weight: var(--fw-extra); }
+.heat-skeleton { height: 172px; border-radius: var(--r-row); }
+
+/* 시장 심리 지수: 매력도 게이지를 크게 + 5구간 라벨 + 구성요소 툴팁 */
+.senti { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-3) var(--sp-4); align-items: center; }
+.senti__gauge { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); border-radius: var(--r-row); outline: none; }
+.senti__gauge:focus-visible { box-shadow: var(--focus); }
+.senti .gauge-mini { width: auto; }
+.senti .gauge-mini svg { width: 184px; height: 108px; }
+.senti .gauge-mini__value strong { font-size: var(--fs-2xl); }
+.senti .gauge-mini__band { font-size: var(--fs-sm); color: var(--text-2); }
+.senti .gauge-mini__ticks { stroke: var(--text-3); }
+.senti .gauge-mini__needle line { stroke: var(--text); }
+.senti .gauge-mini__needle circle { fill: var(--text); }
+.senti__scale { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px var(--sp-2); margin: 0; padding: 0; list-style: none; font-size: 11px; color: var(--text-3); }
+.senti__scale li { display: inline-flex; align-items: center; gap: 4px; }
+.senti__scale i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+.senti__scale .is-current { color: var(--text); font-weight: var(--fw-bold); }
+.senti__tip {
+  position: absolute; left: 50%; top: 100%; translate: -50% 6px; z-index: 20; width: max-content; max-width: 260px;
+  display: none; grid-template-columns: 1fr auto; gap: 4px var(--sp-4);
+  padding: var(--sp-3) var(--sp-4); border-radius: 12px; background: #ffffff; color: var(--text-on-pastel);
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+}
+.senti__tip strong { grid-column: 1 / -1; }
+.senti__gauge:hover .senti__tip, .senti__gauge:focus-visible .senti__tip { display: grid; }
+.senti__hist { display: flex; flex-direction: column; gap: var(--sp-3); margin: 0; }
+.senti__hist-item dt { color: var(--text-3); font-size: var(--fs-xs); }
+.senti__hist-item dd { margin: 0; font-size: var(--fs-sm); color: var(--text-2); white-space: nowrap; }
+.senti__hist-item strong { color: var(--text); font-size: var(--fs-md); }
+.senti__foot { grid-column: 1 / -1; }
+.senti-skeleton { height: 200px; border-radius: var(--r-row); }
+@media (max-width: 420px) { .senti { grid-template-columns: 1fr; } .senti__hist { flex-direction: row; justify-content: center; gap: var(--sp-6); } }

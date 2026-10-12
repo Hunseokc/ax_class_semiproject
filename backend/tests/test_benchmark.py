@@ -360,6 +360,7 @@ def test_migration_003_is_idempotent(engine):
         check = conn.execute(text("""SELECT pg_get_constraintdef(oid) FROM pg_constraint
                                      WHERE conname = 'ingestion_logs_job_type_check'""")).scalar()
     assert {"coverage", "detail_synced_at"} <= cols and "BENCHMARK" in check and "HYDRATE" in check
+    assert "SECTORS_US" in check                                       # 007이 넓힌 값이 003 재실행으로 사라지지 않음
 
 
 def test_migration_005_is_idempotent_and_survives_003_rerun(engine):

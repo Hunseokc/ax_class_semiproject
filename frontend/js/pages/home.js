@@ -7,7 +7,7 @@ import { DEFAULT_METRICS, FX_CODE, metricPicker, storedMetrics } from "../compon
 import { openWatchNote } from "../components/watch-note.js";
 import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";
-import { emptyState, h, load, marketBadge, scoreBadge, scoreBand, scoreGauge, segmented, skeleton } from "../components/ui.js";
+import { emptyState, errorState, h, load, marketBadge, scoreBand, scoreGauge, segmented, skeleton } from "../components/ui.js";
 
 mountSidebar("home");
 
@@ -248,9 +248,8 @@ function watchCard(w) {
       ${target ? `<div class="wl-card__note">${esc(target)}</div>` : ""}
       ${w.memo ? `<div class="wl-card__note wl-card__memo" title="${esc(w.memo)}">${esc(w.memo)}</div>` : ""}
       <div class="wl-card__foot"><span class="wl-card__name">${esc(w.name)}</span></div>
-    </a>
-    <button class="wl-card__edit" type="button" aria-label="${esc(w.name)} 메모·목표가 편집" title="메모·목표가">${icons.edit}</button></div>`);
-  el.querySelector("button").addEventListener("click", () => openWatchNote(w, () => loadWatchlist()));
+    </a></div>`);
+  el.append(editButton(w));
   return el;
 }
 
@@ -260,53 +259,60 @@ async function renderWatchBasis() {
   $("#watch-basis").textContent = p ? `· ${p.name}형 기준` : "";
 }
 
-// .wl-grid의 미디어 쿼리(768/1024/1440px)와 맞춘 열 수 — 항상 2줄만 보이도록 자른다
-function watchCols() {
-  const w = window.innerWidth;
-  if (w >= 1440) return 5;
-  if (w >= 1024) return 4;
-  if (w >= 768) return 3;
-  return 2;
+// 모드별 표시 한도 — 컴팩트 최대 8행, 카드 3열×2줄(좁은 화면 2열×2줄). 넘으면 정렬 순서대로 자르고 '+N개 더'
+const COMPACT_LIMIT = 8;
+const cardCols = () => (window.innerWidth < 600 ? 2 : 3);       // .wl-grid--home 미디어 쿼리와 맞춤
+const watchLimit = () => (watchView === "compact" ? COMPACT_LIMIT : cardCols() * 2);
+
+// 편집 버튼(메모·목표가) — 링크 안에 버튼을 넣지 않도록 행·카드 링크의 형제로 둔다
+function editButton(w) {
+  const b = h(`<button class="wl-card__edit" type="button" aria-label="${esc(w.name)} 메모·목표가 편집" title="메모·목표가">${icons.edit}</button>`);
+  b.addEventListener("click", () => openWatchNote(w, () => loadWatchlist()));
+  return b;
 }
 
-// 컴팩트 보기 한 줄: 종목명 | 매력도 점수·라벨 | 가격 | 등락률 | 작은 스파크라인
+// 컴팩트 보기 한 줄: 종목명(코드·시장) | 소형 매력도 게이지·점수·라벨 | 현재가 | 등락률 | 편집
 function watchRow(w) {
-  const band = scoreBand(w.score);
-  const el = h(`<li><a class="row" href="${watchHref(w)}" aria-label="${esc(watchLabel(w))}">
+  const el = h(`<li class="wl-crow"><a class="row" href="${watchHref(w)}" aria-label="${esc(watchLabel(w))}">
       <span class="row__main"><span class="row__title">${esc(w.name)}</span>
         <span class="row__sub">${esc(w.ticker)} ${marketBadge(w.market, w.country)}</span></span>
-      <span class="wl-compact__score">${scoreBadge(w.score)}<span class="wl-compact__band">${band
-        ? `<i style="background:var(--gauge-${band.index})"></i>${band.label}` : "데이터 부족"}</span></span>
+      <span class="wl-compact__score">${scoreGauge(w.score)}</span>
       <span class="wl-compact__price num">${price(w.close, w.currency)}</span>
       <span class="wl-compact__chg num">${changeHtml(w.change_rate, w.country)}</span>
-      <span class="wl-compact__spark" aria-hidden="true"><canvas></canvas></span>
     </a></li>`);
-  const closes = (w.sparkline || []).map((p) => p.close);
-  if (closes.length > 1) queueMicrotask(() => sparkline(el.querySelector("canvas"), closes, trendColor(w.change_rate)));
+  el.append(editButton(w));
   return el;
 }
 
-// 보기 방식(카드/컴팩트)은 브라우저에 저장 — 기본은 카드
-const WATCH_VIEW_KEY = "watchView";
+// 보기 방식은 브라우저에 저장 — 기본은 컴팩트. 이전 키(watchView, 기본 카드)의 값이 새 기본값을 덮지 않도록 새 키를 쓴다
+const WATCH_VIEW_KEY = "watchViewHome";
 function storedWatchView() {
-  try { return localStorage.getItem(WATCH_VIEW_KEY) === "compact" ? "compact" : "card"; } catch { return "card"; }
+  try { return localStorage.getItem(WATCH_VIEW_KEY) === "card" ? "card" : "compact"; } catch { return "compact"; }
 }
 let watchView = storedWatchView();
 let watchItems = null;
 
+function renderWatchMore(items) {
+  const more = $("#watch-more");
+  const extra = (items?.length || 0) - watchLimit();
+  more.hidden = extra <= 0;
+  more.textContent = extra > 0 ? `+${extra}개 더 · 주식 리스트 →` : "";
+}
+
 function renderWatch(items) {
-  destroyCharts($("#watchlist"));
+  renderWatchMore(items);
+  const shownItems = items.slice(0, watchLimit());
   if (watchView === "compact") {
     const ul = h('<ul class="list card card--flush wl-compact"></ul>');
-    ul.append(...items.map(watchRow));
+    ul.append(...shownItems.map(watchRow));
     return ul;
   }
-  const grid = h('<div class="wl-grid"></div>');
-  grid.append(...items.slice(0, watchCols() * 2).map(watchCard));
+  const grid = h('<div class="wl-grid wl-grid--home"></div>');
+  grid.append(...shownItems.map(watchCard));
   return grid;
 }
 
-$("#watch-view").append(segmented([{ value: "card", label: "카드" }, { value: "compact", label: "컴팩트" }], watchView, (v) => {
+$("#watch-view").append(segmented([{ value: "compact", label: "컴팩트" }, { value: "card", label: "카드" }], watchView, (v) => {
   watchView = v;
   try { localStorage.setItem(WATCH_VIEW_KEY, v); } catch { /* 저장 불가면 이번 화면에서만 유지 */ }
   if (watchItems && watchItems.length) $("#watchlist").replaceChildren(renderWatch(watchItems));
@@ -314,30 +320,133 @@ $("#watch-view").append(segmented([{ value: "card", label: "카드" }, { value: 
 
 async function loadWatchlist() {
   const items = await load($("#watchlist"), {
-    skeleton: skeleton("card", 4),
+    skeleton: skeleton("row", 6),
     fetch: async () => (await Watchlist.list()).items,
     render: (items) => {
       watchItems = items;
       return renderWatch(items);
     },
-    empty: emptyState({ title: "관심종목이 없습니다", body: "주식 리스트에서 ★로 추가하세요.", action: '<a class="btn btn--primary" href="/stocks">주식 리스트로 가기</a>' }),
+    empty: emptyState({ title: "관심종목이 없습니다",
+      body: "주식 리스트나 상단 검색에서 종목을 찾아 ★를 누르면 여기에 모입니다.",
+      action: '<a class="btn btn--primary" href="/stocks">주식 리스트로 가기</a>' }),
   });
   watchItems = items;
+  if (!items?.length) renderWatchMore(null);
   renderWatchSummary(items);
   return items;
 }
 
-let watchCols_last = watchCols();
+// 카드 열 수가 바뀌는 폭(600px)을 넘나들면 한도가 달라지므로 다시 그린다
+let watchCols_last = cardCols();
 let watchResizeTimer;
 window.addEventListener("resize", () => {
   clearTimeout(watchResizeTimer);
   watchResizeTimer = setTimeout(() => {
-    const cols = watchCols();
+    const cols = cardCols();
     if (cols === watchCols_last || watchView !== "card" || !watchItems || !watchItems.length) return;
     watchCols_last = cols;
     $("#watchlist").replaceChildren(renderWatch(watchItems));
   }, 150);
 });
+
+// ---------------------------------------------------------------- 섹터 히트맵 (GET /home/sectors — DB만 읽음, 수집은 갱신 작업)
+// 타일 = 섹터명 + 등락률. 크기는 섹터 가중치(근사치, 서버 상수), 색은 부호(상승 --up / 하락 --down)와 크기(±3%에서 최대 농도)
+const HEAT_FULL = 3;
+let sectorCountry = "KR";
+
+function heatTile(s) {
+  const c = s.change_pct;
+  const label = isNum(c) ? `${s.name} ${changeLabel(c / 100)}` : `${s.name} 데이터 없음`;
+  let bg = "var(--card-active)";
+  if (isNum(c) && c !== 0) {
+    const mix = Math.round(18 + 72 * Math.min(Math.abs(c) / HEAT_FULL, 1));
+    bg = `color-mix(in srgb, var(${c > 0 ? "--heat-up" : "--heat-down"}) ${mix}%, var(--surface))`;
+  }
+  const chg = !isNum(c) ? "–" : `${c > 0 ? "▲" : c < 0 ? "▼" : ""}${pct(Math.abs(c) / 100)}`;
+  return `<div class="heat__tile" role="listitem" aria-label="${esc(label)}"
+      style="flex:${s.weight} 1 ${(s.weight * 0.9).toFixed(1)}%;background:${bg}">
+      <span class="heat__name">${esc(s.name)}</span><span class="heat__chg num">${chg}</span></div>`;
+}
+
+function renderSectors(d) {
+  const foot = $("#sector-foot");
+  if (!d.available) {
+    foot.replaceChildren();
+    return emptyState({ title: `${d.country === "KR" ? "국내" : "미국"} 섹터 데이터 준비 중`,
+      body: d.country === "KR" ? "KRX 섹터 지수를 아직 받지 못했습니다. 미국 탭은 볼 수 있습니다." : "다음 갱신 때 섹터 등락률을 받습니다." });
+  }
+  foot.innerHTML = `<span>기준일 ${esc(monthDay(d.as_of))}</span>${sessionBadge({ as_of: d.as_of, country: d.country, session_status: d.session_status })}`;
+  const el = h(`<div class="heat" role="list" aria-label="${d.country === "KR" ? "국내" : "미국"} 섹터 전일 대비 등락률"></div>`);
+  el.innerHTML = [...d.sectors].sort((a, b) => b.weight - a.weight).map(heatTile).join("");
+  return el;
+}
+
+const sectorTabs = segmented([{ value: "KR", label: "국내" }, { value: "US", label: "미국" }], sectorCountry,
+  (v) => { sectorCountry = v; loadSectors(); }, { label: "섹터 시장 선택" });
+$("#sector-tabs").append(sectorTabs);
+
+async function loadSectors({ fallback = false } = {}) {
+  const box = $("#sectors");
+  box.replaceChildren(h('<div class="skeleton heat-skeleton" aria-busy="true" aria-label="불러오는 중"></div>'));
+  try {
+    let d = await Home.sectors(sectorCountry);
+    // 처음 열 때 국내 데이터가 없으면 미국으로 시작
+    if (fallback && !d.available && sectorCountry === "KR") {
+      const us = await Home.sectors("US");
+      if (us.available) { sectorCountry = "US"; sectorTabs.setValue("US"); d = us; }
+    }
+    box.replaceChildren(renderSectors(d));
+  } catch (err) {
+    $("#sector-foot").replaceChildren();
+    box.replaceChildren(errorState(err, () => loadSectors()));
+  }
+}
+
+// ---------------------------------------------------------------- 시장 심리 지수 (GET /home/sentiment — StockMind 간이 계산, CNN Fear & Greed 아님)
+const SENTIMENT_LABELS = ["극단적 공포", "공포", "중립", "탐욕", "극단적 탐욕"];
+let sentimentCountry = "KR";
+
+function sentimentHistory(name, p) {
+  return `<div class="senti__hist-item"><dt>${name}</dt><dd>${p
+    ? `<strong class="num">${Math.round(p.score)}</strong> <span>${esc(p.label)}</span>` : "–"}</dd></div>`;
+}
+
+function renderSentiment(d) {
+  if (!isNum(d.score)) {
+    return emptyState({ title: "데이터 부족", body: "심리 지수를 계산할 지수 일봉이 부족합니다." });
+  }
+  const c = d.components;
+  const parts = [["가격 위치 (52주)", c.price_position], ["이동평균 괴리 (125일)", c.ma_gap_score], ["RSI (14일)", c.rsi_score]];
+  if (d.market === "US") parts.push(["변동성 (VIX)", c.vix_score]);
+  const band = scoreBand(d.score);
+  const index = d.index_code === "SPX" ? "S&P 500" : "KOSPI";
+  return h(`<div class="senti">
+      <div class="senti__gauge" tabindex="0" aria-describedby="senti-tip"
+           aria-label="시장 심리 지수 ${Math.round(d.score)}점 ${esc(d.label)}">
+        ${scoreGauge(d.score, { labels: SENTIMENT_LABELS })}
+        <ol class="senti__scale" aria-hidden="true">${SENTIMENT_LABELS.map((l, i) =>
+          `<li class="${band && band.index === i + 1 ? "is-current" : ""}"><i style="background:var(--gauge-${i + 1})"></i>${l}</li>`).join("")}</ol>
+        <div class="senti__tip" role="tooltip" id="senti-tip"><strong>구성요소 점수 (0~100)</strong>
+          ${parts.map(([n, v]) => `<span>${n}</span><span class="num">${isNum(v) ? Math.round(v) : "계산 불가"}</span>`).join("")}
+        </div>
+      </div>
+      <dl class="senti__hist">${sentimentHistory("어제", d.previous)}${sentimentHistory("지난주", d.week_ago)}</dl>
+      <p class="home-widget__foot senti__foot"><span>${index} 기준 · 기준일 ${esc(monthDay(d.as_of))}</span>${
+        sessionBadge({ as_of: d.as_of, country: d.market, session_status: d.session_status })}</p>
+    </div>`);
+}
+
+$("#sentiment-tabs").append(segmented([{ value: "KR", label: "국내" }, { value: "US", label: "미국" }], sentimentCountry,
+  (v) => { sentimentCountry = v; loadSentiment(); }, { label: "심리 지수 시장 선택" }));
+
+function loadSentiment() {
+  return load($("#sentiment"), {
+    skeleton: h('<div class="skeleton senti-skeleton" aria-busy="true" aria-label="불러오는 중"></div>'),
+    fetch: () => Home.sentiment(sentimentCountry),
+    render: renderSentiment,
+    isEmpty: () => false,
+  });
+}
 
 // ---------------------------------------------------------------- 시장 주목 종목 TOP 5 (GET /home/ranking)
 // 행 = 순위 · 종목명(종목코드·시장 배지, 관심종목이면 ★) · 그 탭의 순위 근거 값 하나. 가격·등락률은 관심종목·리스트에 있으므로 넣지 않는다
@@ -393,9 +502,14 @@ $("#top-tabs").append(segmented([{ value: "KR", label: "국내" }, { value: "US"
 function loadAll() {
   loadMarket();
   loadWatchlist();
+  loadSectors({ fallback: true });
+  loadSentiment();
   loadTop();
 }
 
+// 상단 바: 공용 검색바 줄(.topbar, mountSidebar가 붙임)에 투자 성향 메뉴를 같이 둔다 — 다른 화면의 검색바는 그대로
+const topbar = document.querySelector(".topbar");
+if (topbar) { topbar.classList.add("topbar--home"); topbar.append($("#preset-menu")); }
 mountPresetMenu($("#preset-menu"));
 renderWatchBasis();
 document.addEventListener(PRESET_EVENT, () => { renderWatchBasis(); loadWatchlist(); if (topKind === "attractiveness") loadTop(); });

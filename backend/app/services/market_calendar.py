@@ -13,6 +13,7 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 
 import exchange_calendars as xcals
+import pandas as pd
 
 log = logging.getLogger(__name__)
 
@@ -39,3 +40,18 @@ def session_status(country: str | None, as_of: date | None, now: datetime | None
         log.warning("거래소 달력 판정 실패(%s %s): %s", country, today, e)
         return None
     return "previous_session" if open_today else "holiday"
+
+
+def last_closed_session(country: str, now: datetime | None = None) -> date | None:
+    """그 시장에서 가장 최근에 마감된 거래일(현지 날짜). 장중이면 직전 거래일. 판정할 수 없으면 None.
+
+    갱신 작업이 '마감 이후 값이 이미 있으면 다음 거래일까지 다시 받지 않는다'를 판단할 때 쓴다(주말·휴장 포함).
+    """
+    if country not in CALENDARS:
+        return None
+    try:
+        close = _calendar(CALENDARS[country]).previous_close(pd.Timestamp(now or datetime.now(timezone.utc)))
+    except Exception as e:  # noqa: BLE001 — 달력 범위 밖 등: 판정을 포기하면 호출 측은 평소대로 받는다
+        log.warning("거래소 달력 마감 판정 실패(%s): %s", country, e)
+        return None
+    return close.tz_convert(TIMEZONES[country]).date()

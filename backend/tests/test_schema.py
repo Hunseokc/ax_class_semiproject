@@ -24,7 +24,7 @@ def test_orm_matches_schema(engine):
             if d["nullable"] != c.nullable and not c.primary_key:
                 diffs.append(f"{t.name}.{c.name} NULL 허용 불일치")
         diffs += [f"{t.name}.{x} ORM에 없음" for x in db_cols]
-    assert len(Base.metadata.tables) == 22
+    assert len(Base.metadata.tables) == 24
     assert diffs == []
 
 

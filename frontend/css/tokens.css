@@ -40,6 +40,8 @@
   --kr-down-on-pastel: var(--down-on-pastel);
   --us-up-on-pastel: var(--up-on-pastel);
   --us-down-on-pastel: var(--down-on-pastel);
+  --heat-up: var(--up-on-pastel);           /* 섹터 히트맵 타일(흰 글자) */
+  --heat-down: var(--down-on-pastel);
   --price-up: var(--up-on-pastel);
   --price-down: var(--down-on-pastel);
 

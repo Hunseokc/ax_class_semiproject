@@ -149,6 +149,37 @@ class FxRate(Base):
     __table_args__ = (UniqueConstraint("granularity", "rate_at"),)
 
 
+
+class SectorPerformanceDaily(Base):
+    """섹터 히트맵 — 섹터별 전일 대비 등락률(캐시 성격). 가중치는 app/services/sectors.py 상수."""
+    __tablename__ = "sector_performance_daily"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    market: Mapped[str] = mapped_column(CHAR(2))
+    sector_code: Mapped[str] = mapped_column(String(16))
+    sector_name: Mapped[str] = mapped_column(String(40))
+    trade_date: Mapped[date] = mapped_column(Date)
+    change_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    fetched_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    __table_args__ = (UniqueConstraint("market", "sector_code", "trade_date"), CheckConstraint("market IN ('KR','US')"))
+
+
+class MarketSentimentDaily(Base):
+    """시장 심리 지수(StockMind 간이 계산) — 계산식은 app/services/sentiment.py, 버전은 formula_version."""
+    __tablename__ = "market_sentiment_daily"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    market: Mapped[str] = mapped_column(CHAR(2))
+    trade_date: Mapped[date] = mapped_column(Date)
+    score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    label: Mapped[str] = mapped_column(String(10))
+    price_position: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    ma_gap_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    rsi_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    vix_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    formula_version: Mapped[int] = mapped_column(SmallInteger)
+    computed_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    __table_args__ = (UniqueConstraint("market", "trade_date"), CheckConstraint("market IN ('KR','US')"),
+                      CheckConstraint("score BETWEEN 0 AND 100"))
+
 # ------------------------------------------------------------------ 사용자
 class User(Base):
     __tablename__ = "users"

@@ -112,6 +112,8 @@ export const Stocks = {
 // 대시보드 '시장 주목 종목' — kind: volume_surge(거래량 급증) · attractiveness(매력도 순위)
 export const Home = {
   ranking: (kind, country, limit = 5) => api.get("/home/ranking", { kind, country, limit, preset: getPreset() }),
+  sectors: (country) => api.get("/home/sectors", { country }),
+  sentiment: (country) => api.get("/home/sentiment", { country }),
 };
 
 export const Watchlist = {

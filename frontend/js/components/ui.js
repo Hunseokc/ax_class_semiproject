@@ -144,8 +144,9 @@ const GX = 46, GY = 48, GR = 36;
 const gp = (deg) => `${(GX + GR * Math.cos((deg * Math.PI) / 180)).toFixed(2)} ${(GY - GR * Math.sin((deg * Math.PI) / 180)).toFixed(2)}`;
 const garc = (from, to) => `M ${gp(from)} A ${GR} ${GR} 0 0 1 ${gp(to)}`;
 
-/** 반원 게이지: 5구간(테라코타~청록, 현재 구간만 진하게) + 바늘 + 점수·구간 라벨. 점수 없으면 점선 + '데이터 부족' */
-export function scoreGauge(score) {
+/** 반원 게이지: 5구간(테라코타~청록, 현재 구간만 진하게) + 바늘 + 점수·구간 라벨. 점수 없으면 점선 + '데이터 부족'
+ *  labels: 구간 라벨 5개(기본 매력도 '매우 낮음'~'매우 높음') — 시장 심리 지수처럼 다른 의미로 쓸 때 바꾼다 */
+export function scoreGauge(score, { labels = BANDS } = {}) {
   const band = scoreBand(score);
   if (!band) {
     return `<div class="gauge-mini gauge-mini--na">
@@ -161,7 +162,7 @@ export function scoreGauge(score) {
         <g class="gauge-mini__needle" style="transform:rotate(${angle.toFixed(1)}deg)">
           <line x1="${GX}" y1="${GY}" x2="${GX}" y2="${GY - 29}"/><circle cx="${GX}" cy="${GY}" r="3.5"/></g></svg>
       <div class="gauge-mini__value"><strong class="num">${Math.round(score)}</strong>
-        <span class="gauge-mini__band"><i style="background:var(--gauge-${band.index})"></i>${band.label}</span></div>
+        <span class="gauge-mini__band"><i style="background:var(--gauge-${band.index})"></i>${labels[band.index - 1]}</span></div>
     </div>`;
 }
 
