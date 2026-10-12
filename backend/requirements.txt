@@ -9,5 +9,6 @@ pytest==9.1.1
 PyYAML==6.0.3
 pandas==2.3.3
 pykrx==1.2.9
+exchange-calendars==4.13.2
 yfinance==1.7.0
 python-dotenv==1.2.4

@@ -108,3 +108,28 @@ def test_watchlist_card_has_sparkline(client, engine):
         conn.execute(text("INSERT INTO watchlist_items (user_id, stock_id, sort_order) VALUES (1, 1, 1)"))
     item = client.get(f"{API}/watchlist").json()["items"][0]
     assert [p["close"] for p in item["sparkline"]] == [68000, 69000, 70000]
+
+
+# ------------------------------------------------------------------ 장 상태(거래소 달력)
+def test_session_status_uses_exchange_calendar():
+    from datetime import date, datetime, timezone
+
+    from app.services.market_calendar import session_status
+
+    def at(y, m, d, hour_utc=3):
+        return datetime(y, m, d, hour_utc, tzinfo=timezone.utc)
+
+    assert session_status("KR", date(2026, 10, 8), at(2026, 10, 9)) == "holiday"           # 한글날(금)
+    assert session_status("US", date(2026, 10, 8), at(2026, 10, 9, 15)) == "previous_session"   # 미국은 개장
+    assert session_status("KR", date(2026, 9, 23), at(2026, 9, 25)) == "holiday"           # 추석 연휴
+    assert session_status("US", date(2026, 11, 25), at(2026, 11, 26, 15)) == "holiday"     # 추수감사절
+    assert session_status("KR", date(2026, 10, 8), at(2026, 10, 10)) == "holiday"          # 토요일
+    assert session_status("KR", date(2026, 10, 8), at(2026, 10, 12)) == "previous_session"
+    assert session_status("KR", date(2026, 10, 12), at(2026, 10, 12)) == "today"
+    assert session_status("JP", date(2026, 10, 8)) is None and session_status("KR", None) is None
+    assert session_status("KR", date(2020, 1, 1), at(2099, 1, 2)) is None                   # 달력 범위 밖 → 판정 포기
+
+
+def test_indices_include_session_status(client):
+    idx = client.get(f"{API}/market/indices").json()["indices"][0]
+    assert idx["session_status"] in {"holiday", "previous_session"}                        # 픽스처 기준일은 4일 전

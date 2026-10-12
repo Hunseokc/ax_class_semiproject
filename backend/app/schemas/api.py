@@ -30,6 +30,7 @@ class IndexOut(Schema):
     high_52w: Num | None = None              # 52주 종가 최고·최저 — 1년치가 없으면 null
     low_52w: Num | None = None
     position_52w: Num | None = None          # (현재 − 저점) / (고점 − 저점), 0~1
+    session_status: Literal["today", "holiday", "previous_session"] | None = None   # 거래소 달력 기준 장 상태
 
 
 class IndicesOut(Schema):

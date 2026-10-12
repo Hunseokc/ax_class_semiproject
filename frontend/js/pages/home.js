@@ -34,14 +34,19 @@ const FLAT_FX = 0.001;   // 환율 변동이 ±0.1% 미만이면 '보합'으로 
 const isNum = (v) => typeof v === "number" && Number.isFinite(v);
 const localDay = (tz, at = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(at);   // YYYY-MM-DD
 
-/** 최신 데이터 날짜가 그 시장의 오늘이 아니면 배지: 주말이면 '휴장', 평일이면 '직전 거래일'(공휴일 달력은 없음) */
+/** 최신 데이터 날짜가 그 시장의 오늘이 아니면 배지. 판정은 서버의 거래소 달력(session_status),
+ *  서버가 판정하지 못하면(null) 주말 여부로만 판단한다 */
 function sessionBadge(ix) {
   if (!ix.as_of) return "";
-  const today = localDay(ix.country === "US" ? "America/New_York" : "Asia/Seoul");
-  if (ix.as_of >= today) return "";
-  const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
-  const [text, why] = dow === 0 || dow === 6
-    ? ["휴장", "오늘은 휴장일이라 마지막 거래일 종가를 표시합니다"]
+  let status = ix.session_status;
+  if (!status) {
+    const today = localDay(ix.country === "US" ? "America/New_York" : "Asia/Seoul");
+    const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
+    status = ix.as_of >= today ? "today" : dow === 0 || dow === 6 ? "holiday" : "previous_session";
+  }
+  if (status === "today") return "";
+  const [text, why] = status === "holiday"
+    ? ["휴장", "오늘은 휴장일(거래소 달력 기준)이라 마지막 거래일 종가를 표시합니다"]
     : ["직전 거래일", "오늘 일봉이 아직 없어 직전 거래일 종가를 표시합니다(일봉 기준)"];
   return `<span class="badge badge--market" title="${why}">${text}</span>`;
 }

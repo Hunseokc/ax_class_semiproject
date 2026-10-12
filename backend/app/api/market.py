@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.queries import sql
 from app.schemas.api import FxOut, IndicesOut, RefreshJobOut, RefreshOut
 from app.services.fx import FxService
+from app.services.market_calendar import session_status
 from app.services.refresh import RefreshResult, RefreshService
 
 router = APIRouter(prefix="/market", tags=["market"])
@@ -21,7 +22,8 @@ SEOUL = ZoneInfo("Asia/Seoul")
 @router.get("/indices", response_model=IndicesOut, summary="지수별 최신값·등락·최근 1년 스파크라인·52주 범위")
 def indices(db: Session = Depends(get_db)):
     rows = db.execute(sql("market_indices")).mappings().all()
-    items = [{**r, "sparkline": r["sparkline"] or []} for r in rows]
+    items = [{**r, "sparkline": r["sparkline"] or [], "session_status": session_status(r["country"], r["as_of"])}
+             for r in rows]
     return {"as_of": max((r["as_of"] for r in rows if r["as_of"]), default=None), "indices": items}
 
 
