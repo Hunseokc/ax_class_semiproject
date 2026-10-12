@@ -150,7 +150,8 @@
 .home { gap: var(--sp-6); }
 /* 상단 바: 검색(남는 폭) + 투자 성향(우측) 한 줄 — 홈에서만 home.js가 .topbar에 붙인다 */
 .topbar--home { justify-content: space-between; align-items: center; gap: var(--sp-4); margin-bottom: 0; }
-.topbar--home .gsearch { flex: 1; width: auto; }
+.topbar--home { flex-wrap: wrap; }
+.topbar--home .gsearch { flex: 1 1 260px; width: auto; }       /* 좁은 화면에서는 검색이 한 줄을 다 쓰고 투자 성향이 아래 줄로 */
 .section__meta { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-sm); font-weight: var(--fw-regular); }
 /* 2열: 관심종목(약 60%) · 섹터 히트맵 + 시장 심리 지수(약 40%), 두 열 높이를 맞춘다 */
 .home-split { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--sp-5); align-items: stretch; }
@@ -165,7 +166,6 @@
 .home-widget__foot { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
 .home-widget__foot:empty { display: none; }
 @media (max-width: 1100px) { .home-split { grid-template-columns: 1fr; } }
-@media (max-width: 767px) { .topbar--home { flex-wrap: wrap; } }
 
 /* 한 줄 시장 요약 + 관심종목 연결 요약 (규칙 기반 문장) */
 .market-brief { display: flex; flex-direction: column; gap: 2px; margin-top: calc(-1 * var(--sp-2)); }

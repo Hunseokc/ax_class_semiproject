@@ -1,7 +1,7 @@
 # 05. ERD 및 DB 설계서
 
 - DDL 원문: `backend/db/schema.sql` → `backend/db/indexes.sql` → `backend/db/views.sql` 순서로 실행
-- DBMS: PostgreSQL 16 / 테이블 20개, VIEW 3개, 보조 인덱스 10개(명세 10개 − 중복 1개 + 추가 1개), 부분 UNIQUE 인덱스 1개(주 그룹 제약), 트리거 3개(updated_at 자동 갱신 — portfolios·portfolio_items·watchlist_items)
+- DBMS: PostgreSQL 16 / 테이블 24개, VIEW 3개, 보조 인덱스 10개(명세 10개 − 중복 1개 + 추가 1개), 부분 UNIQUE 인덱스 1개(주 그룹 제약), 트리거 3개(updated_at 자동 갱신 — portfolios·portfolio_items·watchlist_items)
 - 매력도 테이블(`scoring_presets`·`scoring_weights`·`stock_metric_values`·`stock_scores`, `peer_group_members.is_primary`)은 다중 팩터 모델로 바꾸며 추가·재정의했다(2026-10-07, `backend/db/migrations/001_scoring_v2.sql`, 계산 정의는 `docs/09`).
 - 3절 테이블 정의는 테스트 DB에 DDL을 실제 적용한 뒤 시스템 카탈로그(`pg_attribute`, `pg_constraint`)에서 생성했다.
 

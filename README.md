@@ -39,7 +39,7 @@ curl http://localhost:8000/health/db
 
 | 화면 | 기능 |
 |---|---|
-| 대시보드 홈 `/` | 투자 성향(위험·성장·균형·가치) 선택, 주요 지수·USD/KRW(30일 스파크라인, 지수 10개 + 환율 중 표시할 지표를 ‘설정’에서 선택 — 한 줄, 넘치면 가로 스크롤), 내 관심종목 카드(매력도 게이지·가격 등락·목표가 대비 괴리율·메모, 카드에서 메모·목표가 편집), 순위 상위 5(거래량·1개월·1년 수익률 × 국내/미국) |
+| 대시보드 홈 `/` | 상단 한 줄에 검색 + 투자 성향(위험·성장·균형·가치). 주요 지수·USD/KRW(지수 10개 + 환율 중 ‘설정’에서 선택, 스파크라인 1개월·3개월·1년, 52주 범위 위치 바, 휴장·직전 거래일 배지, 규칙 기반 한 줄 시장 요약). 그 아래 2열: 내 관심종목(컴팩트 행 기본·카드 보기, 매력도 게이지·가격 등락·메모·목표가 편집) / 섹터 히트맵(국내 코스피 200 섹터·미국 섹터 ETF 11개)과 시장 심리 지수(StockMind 간이 계산, CNN Fear & Greed 아님). 시장 주목 종목 TOP 5(거래량 급증·매력도 순위 × 국내/미국) |
 | 주식 리스트 `/stocks` | 시장 탭·거래량/시가총액(원화 환산) 순위·검색·경쟁 그룹 필터, 투자 성향 선택, ★ 관심 토글, 포트폴리오 담기 |
 | 종목 상세 `/stocks/{market}/{ticker}` | 가격 차트, 핵심 지표, 매력도(투자 성향 메뉴, 국가 내 순위, 팩터 기여도, 지표 원값·Z), 수치 분석(수익률·변동성·MDD·120일선 괴리율), 월별 요약(최근 12개월 평균·최고·최저·월간 수익률·거래량), FY 재무 추이, 경쟁 종목 비교(그룹 내 순위·평균, 기준일=100 추이), 최근 공시 |
 | 모의 포트폴리오 `/portfolio` | 시드 설정, 수량/금액/비중으로 담기(미리보기), 관심종목 균등 배분 미리보기(저장 안 함, '모두 담기'로 연결), 시드 초과 방어, 평가손익과 환율 효과 분리, 비중 차트 |
@@ -137,6 +137,8 @@ python -m app.ingest hydrate 042700       # 비교군·상장 목록 종목 상�
 - 증분 일봉은 시장 현지 날짜까지만 요청합니다(한국 오전의 미국은 아직 전날). 주말뿐인 구간은 호출하지 않고, 짧은 구간에서 yfinance가 '데이터 없음'을 내면 휴장일로 봅니다.
 - 사이드바 새로고침(`POST /api/v1/market/refresh`)과 `python -m app.ingest refresh`는 TTL 이내 작업을 `SKIPPED`로 기록하고 외부 호출 없이 현재 상태를 돌려줍니다.
 - 환율은 TTL이 지났을 때 한 번만 조회해 저장하며(동시 요청은 advisory lock으로 한 번만), 실패하면 마지막 값과 `fx_stale: true`를 응답합니다.
+- 대시보드 섹터 히트맵의 등락률도 같은 갱신 작업(`SECTORS_US`·`SECTORS_KR`)이 받습니다: 미국은 섹터 ETF 11개를 묶음 다운로드 1회, 국내는 KRX 코스피 200 섹터 지수입니다. 그 시장의 마지막 마감 거래일 값이 이미 있으면 다음 거래일까지 호출하지 않습니다(주말·휴장 포함, 거래소 달력 `exchange-calendars`).
+- 시장 심리 지수는 이미 저장된 KOSPI·S&P 500·VIX 일봉으로 계산하므로 외부 호출이 없습니다. **홈 화면을 몇 번 열어도 새 외부 호출은 생기지 않습니다**(환율 현재값만 위 TTL 규칙).
 - **앱 안 스케줄러**(`SCHEDULER_ENABLED=true`, 기본): 서버가 떠 있는 동안 5분마다 확인해 노출 종목(+관심종목·포트폴리오 종목)을 4시간 TTL로 갱신하고, 비교군은 매일 07:00(KST) 이후 한 번 갱신합니다. 실패하면 30분(갱신)·60분(비교군) 간격으로만 다시 시도하고, 여러 프로세스가 동시에 돌려도 DB 잠금으로 한 번만 실행됩니다.
 - DART는 분당 100회 이상 호출하면 이용이 제한될 수 있어, 60초에 90회 이하로 호출합니다.
 - 서버를 띄우지 않을 때는 `SCHEDULER_ENABLED=false`로 두고 `python -m app.ingest refresh` / `benchmark`를 직접 실행합니다.
@@ -188,7 +190,7 @@ docker compose up -d --build                                       # 이미지 �
 curl http://localhost:8000/health/db                               # {"status":"ok","db":"ok"}
 curl http://localhost:8000/api/v1/market/fx                        # 대표 API 200
 ```
-마지막으로 화면(`/`, `/stocks`, `/portfolio`)을 열어 확인합니다. 마이그레이션 목록: `001_scoring_v2`·`002_presets`·`003_benchmark`·`004_watchlist_memo`(관심종목 메모·목표가)·`005_listed_dividend`·`006_sector_freshness`. 새로 `init-db`하는 DB는 필요 없습니다.
+마지막으로 화면(`/`, `/stocks`, `/portfolio`)을 열어 확인합니다. 마이그레이션 목록: `001_scoring_v2`·`002_presets`·`003_benchmark`·`004_watchlist_memo`(관심종목 메모·목표가)·`005_listed_dividend`·`006_sector_freshness`·`007_home_widgets`(섹터 히트맵·시장 심리 지수 테이블). 새로 `init-db`하는 DB는 필요 없습니다.
 
 ### 장애 시 점검 순서
 1. `GET /health` — 실패하면 API 프로세스 문제: `docker compose ps`, `docker compose logs api`
@@ -203,7 +205,7 @@ curl http://localhost:8000/api/v1/market/fx                        # 대표 API 
 
 ## 6. 테스트
 ```bash
-docker compose run --rm api pytest -q   # 301개(결과는 docs/07 1절) (venv라면 pytest -q) — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
+docker compose run --rm api pytest -q   # 335개(결과는 docs/07 1절) (venv라면 pytest -q) — TEST_DATABASE_URL(stockdb_test), 외부 호출 없음(fake provider)
 python -m app.ingest explain           # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
 ```
 DB 제약·전처리·TTL 갱신(외부 호출 횟수)·분석 SQL 손계산·포트폴리오 명세 시나리오·동시성·오류 응답·입력 경계값을 검증합니다. 결과는 [docs/07](docs/07_테스트_결과서.md). 코드를 고친 뒤에는 `docker compose -f compose.yml -f compose.dev.yml run --rm api pytest -q`로 실행해야 이미지가 아닌 현재 소스가 테스트됩니다.
@@ -212,15 +214,16 @@ DB 제약·전처리·TTL 갱신(외부 호출 횟수)·분석 SQL 손계산·�
 ```
 backend/      FastAPI 서버 (컨테이너의 /srv)
   app/
-    api/        라우터 — market, stocks, watchlist, portfolios, analysis(분석·통계), health
+    api/        라우터 — market, home(대시보드 순위·섹터·심리 지수), stocks, watchlist, portfolios, analysis(분석·통계), health
     core/       설정, DB 세션, 오류 형식, 요청 ID 로깅
     models/     SQLAlchemy 모델 (db/schema.sql과 1:1)
     schemas/    Pydantic 요청·응답, 입력 제약
     providers/  외부 소스 인터페이스 + pykrx·yfinance·DART·SEC 구현
-    services/   환율(TTL·lock)·갱신·포트폴리오 계산·매력도 점수·데이터 품질·비교군 상세 수집(hydration)·앱 안 스케줄러
+    services/   환율(TTL·lock)·갱신·포트폴리오 계산·매력도 점수·데이터 품질·비교군 상세 수집(hydration)·앱 안 스케줄러,
+                대시보드 홈(시장 주목 종목 순위·섹터 히트맵·시장 심리 지수·거래소 휴장 달력)
     ingest/     수집·전처리·적재 CLI (python -m app.ingest), 매력도 비교군(benchmark)
     queries/    조회·분석 SQL 원문 (text()로 실행)
-  db/           schema.sql · indexes.sql · views.sql · init/(테스트 DB 생성) · migrations/(기존 DB 갱신 001~006)
+  db/           schema.sql · indexes.sql · views.sql · init/(테스트 DB 생성) · migrations/(기존 DB 갱신 001~007)
   config/       universe.yaml(노출 종목·지수·경쟁 그룹·비교군 후보, 첫 소속 그룹 = 주 그룹) · scoring.yaml(투자 성향 프리셋·축소 계수)
   docker/       entrypoint.sh(추가 CA 번들)
   sample_data/  재현용 소량 CSV
@@ -250,8 +253,9 @@ compose.yml · compose.dev.yml · .env   저장소 루트
 ## 9. 데이터 출처와 이용 조건
 | 출처 | 용도 | 비고 |
 |---|---|---|
-| pykrx (KRX 정보데이터시스템, 비공식) | KR 일봉·지수·시총·PER/PBR (기본) | 1.2.x는 시총·펀더멘털·지수에 KRX 회원 로그인 필요 |
-| yfinance (Yahoo Finance, 비공식) | US 일봉·지수·밸류에이션, 환율, KR 대체 소스 | 개인·학습 목적, 원본 재배포 안 함 |
+| pykrx (KRX 정보데이터시스템, 비공식) | KR 일봉·지수·코스피 200 섹터 지수·시총·PER/PBR (기본) | 1.2.x는 시총·펀더멘털·지수에 KRX 회원 로그인 필요 |
+| yfinance (Yahoo Finance, 비공식) | US 일봉·지수(VIX 포함)·밸류에이션, 환율, 미국 섹터 ETF 11개(히트맵), KR 대체 소스 | 개인·학습 목적, 원본 재배포 안 함 |
+| exchange-calendars (라이브러리) | 거래소 휴장 달력(XKRX·XNYS) — 휴장·직전 거래일 판정 | 네트워크 호출 없음. 임시공휴일처럼 뒤늦게 정해진 휴장은 라이브러리 버전을 올려야 반영 |
 | OpenDART (금융감독원) | KR 재무(연결)·공시 | 인증키 필요, 일일 호출 한도·분당 100회 이상 시 이용 제한 → 60초 90회 이하로 호출 |
 | SEC EDGAR | US 재무(XBRL companyfacts)·공시 | API 키 없음, 이메일 포함 User-Agent 필수 |
 
@@ -265,5 +269,6 @@ pykrx·yfinance는 비공식 라이브러리로 사이트 변경 시 동작하�
 - KRX 제공 PER/EPS의 산정 기준은 DART 연결 재무 기반 계산과 다를 수 있음(A-38)
 - 매력도는 비교 표본(노출 25 + 비교군 121종목) 안에서 같은 시장끼리 비교한 상대적 위치(팩터 점수)이며 수익률 예측이 아님. 재무는 최신 FY 1개년 기준(docs/09 8절)
 - 비교군 후보 풀은 직접 정의(섹터가 KRX 업종·GICS와 1:1이 아님). 미국 2차전지처럼 적자 소형주가 많은 그룹은 섹터 중립화로 그룹 안 상위 종목 점수가 크게 오를 수 있음 — 시장 특성으로 보고 그대로 둠(ASSUMPTIONS A-107)
-- 대시보드에서 고른 지수·환율 지표는 브라우저(localStorage)에 저장되어 기기·브라우저마다 따로 설정됨(A-111). 관심종목 메모·목표가는 DB에 저장
+- 대시보드에서 고른 지수·환율 지표와 관심종목 보기 방식(컴팩트/카드)은 브라우저(localStorage)에 저장되어 기기·브라우저마다 따로 설정됨(A-111·A-134). 관심종목 메모·목표가는 DB에 저장
+- 시장 심리 지수는 지수 가격·변동성으로 만든 StockMind 간이 지표이며 CNN Fear & Greed 지수가 아님. 섹터 히트맵의 타일 크기는 근사 비중 상수(A-135·A-136)
 - 미구현 선택 기능: 분기 재무, 투자 스타일 체크리스트, 시나리오 API, 관심종목 정렬 변경 화면(API는 있음)

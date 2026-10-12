@@ -2,6 +2,7 @@
 
 - 기준: 실행 중인 서버의 OpenAPI(`/openapi.json`)와 **실제 호출 응답**(생성 시각 2026-10-06T22:11:16+09:00, 운영 DB). 배열은 앞 2개만 표시
 - 매력도 관련 예시(`/analysis`, `/scoring/presets`, 없는 프리셋 422)는 다중 팩터 모델 적용 후 2026-10-07 실제 호출 응답
+- 시장·갱신(3-1)과 대시보드 홈(3-7) 예시는 대시보드 개편 후 2026-10-12 실제 호출 응답
 - Swagger UI: `http://localhost:8000/docs`
 
 ## 1. 공통 규칙
@@ -25,10 +26,13 @@
 |---|---|---|---|---|---|
 | 헬스체크 | GET | `/health` (루트) | 프로세스 생존 확인 — DB에 접근하지 않음 | - | 200 |
 | 헬스체크 | GET | `/health/db` (루트) | DB 연결 확인(`SELECT 1`). 컨테이너 HEALTHCHECK가 사용 | - | 200 · 503 DB_UNAVAILABLE |
-| 시장·갱신 | GET | `/market/indices` | 지수별 최신값·등락·최근 30거래일 스파크라인 | - | 200 |
-| 시장·갱신 | GET | `/market/fx` | USD/KRW 최신값·전일 대비·최근 30일 (TTL 내에는 외부 호출 없음) | - | 200 · 503 FX_UNAVAILABLE |
-| 시장·갱신 | POST | `/market/refresh` | 환율·지수·증분 일봉·밸류에이션·점수 갱신 (작업별 TTL 이내면 SKIPPED) | - | 200 (작업별 실패는 본문 `jobs[].status`) |
+| 시장·갱신 | GET | `/market/indices` | 지수별 최신값·등락·최근 1년 스파크라인·52주 범위(종가 기준, 1년치 있을 때만)·장 상태 `session_status`(거래소 휴장 달력: today·holiday·previous_session) | - | 200 |
+| 시장·갱신 | GET | `/market/fx` | USD/KRW 최신값·전일 대비·최근 1년 DAILY·52주 범위 (TTL 내에는 외부 호출 없음) | - | 200 · 503 FX_UNAVAILABLE |
+| 시장·갱신 | POST | `/market/refresh` | 환율·지수·섹터 등락률(SECTORS_US·SECTORS_KR)·증분 일봉·밸류에이션·점수 갱신 (작업별 TTL 이내면 SKIPPED) | - | 200 (작업별 실패는 본문 `jobs[].status`) |
 | 시장·갱신 | GET | `/market/refresh/status` | 갱신 상태 조회 — 외부 호출 없음 (사이드바 '마지막 갱신 시각' 표시용) | - | 200 |
+| 대시보드 홈 | GET | `/home/ranking` | 시장 주목 종목 TOP N — `volume_surge`: 당일 거래량 ÷ 직전 20거래일 평균(배수), `attractiveness`: 프리셋별 최신 매력도 점수. 대상 = 노출 종목 + 관심종목, `is_watched`로 ★ 표시 | kind (volume_surge·attractiveness, 필수), country (KR·US, 기본 KR), limit (1~20, 기본 5), preset | 200 · 422 VALIDATION_ERROR, UNKNOWN_PRESET |
+| 대시보드 홈 | GET | `/home/sectors` | 섹터 히트맵 — 저장된 섹터 전일 대비 등락률(%)만 읽음(수집은 갱신 작업). 가장 최근 거래일 기준, 그날 값이 없는 섹터는 `change_pct: null`, 저장값이 없으면 `available: false` | country (KR·US, 기본 KR) | 200 · 422 VALIDATION_ERROR |
+| 대시보드 홈 | GET | `/home/sentiment` | 시장 심리 지수(StockMind 간이 계산, CNN Fear & Greed 아님) — 저장된 KOSPI·S&P 500·VIX 일봉으로 계산·저장, 외부 호출 없음. 점수·라벨·구성요소, 직전 거래일·5거래일 전 값 | country (KR·US, 기본 KR) | 200 · 422 VALIDATION_ERROR |
 | 종목 | GET | `/peer-groups` | 경쟁 그룹(테마) 목록 (리스트 필터용) — 업종 섹터 그룹은 제외 | - | 200 |
 | 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 검색, 프리셋별 매력도). 기본은 노출 종목만, q가 있으면 매력도 비교군도(`coverage`) | country, sort, order, group, q, limit, offset, preset | 200 · 422 VALIDATION_ERROR, VOLUME_SORT_REQUIRES_MARKET, UNKNOWN_PRESET |
 | 종목 | GET | `/stocks/search` | 상단 검색 자동완성 — 노출 종목·비교군·상장 종목 목록(listed) 전체에서 이름·영문명·티커 부분 일치. 정렬: 티커 완전 일치 → 티커 앞부분 → 이름 앞부분 → 부분 일치(같으면 노출·비교군 먼저, 짧은 이름 먼저). LIKE 특수문자는 글자 그대로, 비활성(상장폐지) 제외 | q (1~50자, 필수), limit (1~20, 기본 8) | 200 · 422 VALIDATION_ERROR |
@@ -95,31 +99,35 @@
 
 
 ### 3-1. 시장·갱신
-#### `GET /api/v1/market/indices`
+#### `GET /api/v1/market/indices` — 최근 1년 스파크라인(화면에서 1개월·3개월·1년으로 자름), 52주 범위, 장 상태
 응답 `200`:
 ```json
 {
-  "as_of": "2026-10-06",
+  "as_of": "2026-10-09",
   "indices": [
     {
       "code": "KOSPI",
       "name": "KOSPI",
       "country": "KR",
       "currency": "KRW",
-      "as_of": "2026-10-06",
-      "close": 6941.39,
-      "prev_close": 7003.74,
-      "change": -62.35,
-      "change_rate": -0.008902,
+      "as_of": "2026-10-08",
+      "close": 6625.93,
+      "prev_close": 6803.9,
+      "change": -177.97,
+      "change_rate": -0.026157,
       "sparkline": [
         {
-          "date": "2026-08-21",
-          "close": 6912.95
+          "date": "2025-10-10",
+          "close": 3610.6
         },
-        "… 외 29개"
-      ]
+        "… 외 243개"
+      ],
+      "high_52w": 9114.55,
+      "low_52w": 3561.81,
+      "position_52w": 0.551821,
+      "session_status": "previous_session"
     },
-    "… 외 4개"
+    "… 외 9개"
   ]
 }
 ```
@@ -129,50 +137,53 @@
 {
   "pair": "USD/KRW",
   "currency": "KRW",
-  "usd_krw": 1339.08,
-  "rate_at": "2026-10-06T12:16:55.504460Z",
+  "usd_krw": 1333.98,
+  "rate_at": "2026-10-12T13:18:24.886505+09:00",
   "granularity": "SNAPSHOT",
   "fx_stale": false,
-  "prev_close": 1342.5601,
-  "change": -3.4801,
-  "change_rate": -0.002592,
+  "prev_close": 1342.99,
+  "change": -9.01,
+  "change_rate": -0.006709,
   "history": [
     {
-      "date": "2026-08-26",
-      "usd_krw": 1381.49
+      "date": "2025-10-13",
+      "usd_krw": 1429.03
     },
     {
-      "date": "2026-08-27",
-      "usd_krw": 1383.49
+      "date": "2025-10-14",
+      "usd_krw": 1426.0699
     },
-    "… 외 28개"
+    "… 외 257개"
   ],
-  "as_of": "2026-10-06T12:16:55.504460Z"
+  "as_of": "2026-10-12T13:18:24.886505+09:00",
+  "high_52w": 1554.48,
+  "low_52w": 1333.98,
+  "position_52w": 0
 }
 ```
 #### `GET /api/v1/market/refresh/status`
 응답 `200`:
 ```json
 {
-  "refreshed_at": "2026-10-06T12:45:18.945590Z",
-  "next_refresh_available_at": "2026-10-06T15:50:13.067876Z",
+  "refreshed_at": "2026-10-12T15:08:35.130869+09:00",
+  "next_refresh_available_at": "2026-10-12T17:18:25.035205+09:00",
   "ttl_hours": 4.0,
   "jobs": [
     {
       "job_type": "FX",
       "status": "FRESH",
       "detail": null,
-      "last_success_at": "2026-10-06T12:16:55.505868Z",
+      "last_success_at": "2026-10-12T13:18:25.035205+09:00",
       "counts": {}
     },
     {
       "job_type": "INDICES",
       "status": "FRESH",
       "detail": null,
-      "last_success_at": "2026-10-06T11:50:13.067876Z",
+      "last_success_at": "2026-10-12T13:18:39.418969+09:00",
       "counts": {}
     },
-    "… 외 3개"
+    "… 외 5개"
   ],
   "basis": "일봉 기준"
 }
@@ -181,43 +192,57 @@
 응답 `200`:
 ```json
 {
-  "refreshed_at": "2026-10-06T13:11:16.818338Z",
-  "next_refresh_available_at": "2026-10-06T15:50:13.067876Z",
+  "refreshed_at": "2026-10-12T06:27:31.141007Z",
+  "next_refresh_available_at": "2026-10-12T17:18:25.035205+09:00",
   "ttl_hours": 4.0,
   "jobs": [
     {
       "job_type": "FX",
       "status": "SKIPPED",
-      "detail": "TTL 이내 (마지막 성공 2026-10-06T12:16:55.505868+00:00)",
-      "last_success_at": "2026-10-06T12:16:55.505868Z",
+      "detail": "TTL 이내 — 마지막 성공 2026-10-12T13:18:25.035205+09:00",
+      "last_success_at": "2026-10-12T13:18:25.035205+09:00",
       "counts": {}
     },
     {
       "job_type": "INDICES",
       "status": "SKIPPED",
-      "detail": "TTL 이내 (마지막 성공 2026-10-06T11:50:13.067876+00:00)",
-      "last_success_at": "2026-10-06T11:50:13.067876Z",
+      "detail": "TTL 이내 — 마지막 성공 2026-10-12T13:18:39.418969+09:00",
+      "last_success_at": "2026-10-12T13:18:39.418969+09:00",
+      "counts": {}
+    },
+    {
+      "job_type": "SECTORS_US",
+      "status": "SKIPPED",
+      "detail": "TTL 이내 — 마지막 성공 2026-10-12T15:08:17.965561+09:00",
+      "last_success_at": "2026-10-12T15:08:17.965561+09:00",
+      "counts": {}
+    },
+    {
+      "job_type": "SECTORS_KR",
+      "status": "SKIPPED",
+      "detail": "TTL 이내 — 마지막 성공 2026-10-12T15:08:35.130869+09:00",
+      "last_success_at": "2026-10-12T15:08:35.130869+09:00",
       "counts": {}
     },
     {
       "job_type": "PRICES",
       "status": "SKIPPED",
-      "detail": "TTL 이내 (마지막 성공 2026-10-06T12:00:09.123135+00:00)",
-      "last_success_at": "2026-10-06T12:00:09.123135Z",
+      "detail": "TTL 이내 — 마지막 성공 2026-10-12T13:18:55.994997+09:00",
+      "last_success_at": "2026-10-12T13:18:55.994997+09:00",
       "counts": {}
     },
     {
       "job_type": "VALUATION",
       "status": "SKIPPED",
-      "detail": "TTL 이내 (마지막 성공 2026-10-06T11:53:35.598216+00:00)",
-      "last_success_at": "2026-10-06T11:53:35.598216Z",
+      "detail": "TTL 이내 — 마지막 성공 2026-10-12T13:19:22.821645+09:00",
+      "last_success_at": "2026-10-12T13:19:22.821645+09:00",
       "counts": {}
     },
     {
       "job_type": "SCORES",
       "status": "SKIPPED",
-      "detail": "TTL 이내 (마지막 성공 2026-10-06T12:45:18.945590+00:00)",
-      "last_success_at": "2026-10-06T12:45:18.945590Z",
+      "detail": "TTL 이내 — 마지막 성공 2026-10-12T13:19:24.072844+09:00",
+      "last_success_at": "2026-10-12T13:19:24.072844+09:00",
       "counts": {}
     }
   ],
@@ -1594,7 +1619,135 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 }
 ```
 
-### 3-7. 공통 오류 응답
+### 3-7. 대시보드 홈 (외부 호출 없음 — DB만 사용)
+#### `GET /api/v1/home/ranking?kind=volume_surge&country=KR&limit=5` — 거래량 급증(배수)
+응답 `200`:
+```json
+{
+  "kind": "volume_surge",
+  "country": "KR",
+  "preset": null,
+  "items": [
+    {
+      "rank": 1,
+      "stock_id": 7,
+      "market": "KOSPI",
+      "country": "KR",
+      "currency": "KRW",
+      "ticker": "373220",
+      "name": "LG에너지솔루션",
+      "value": 3.181,
+      "as_of": "2026-10-08",
+      "is_watched": true
+    },
+    {
+      "rank": 2,
+      "stock_id": 14,
+      "market": "KOSPI",
+      "country": "KR",
+      "currency": "KRW",
+      "ticker": "012450",
+      "name": "한화에어로스페이스",
+      "value": 2.4753,
+      "as_of": "2026-10-08",
+      "is_watched": false
+    },
+    "… 외 3개"
+  ]
+}
+```
+#### `GET /api/v1/home/ranking?kind=attractiveness&country=US&limit=5` — 매력도 순위(균형 프리셋)
+응답 `200`:
+```json
+{
+  "kind": "attractiveness",
+  "country": "US",
+  "preset": "balanced",
+  "items": [
+    {
+      "rank": 1,
+      "stock_id": 21,
+      "market": "NASDAQ",
+      "country": "US",
+      "currency": "USD",
+      "ticker": "NVDA",
+      "name": "NVIDIA",
+      "value": 95.28,
+      "as_of": "2026-10-12",
+      "is_watched": true
+    },
+    {
+      "rank": 2,
+      "stock_id": 19,
+      "market": "NASDAQ",
+      "country": "US",
+      "currency": "USD",
+      "ticker": "GOOGL",
+      "name": "Alphabet",
+      "value": 92.39,
+      "as_of": "2026-10-12",
+      "is_watched": false
+    },
+    "… 외 3개"
+  ]
+}
+```
+#### `GET /api/v1/home/sectors?country=KR` — 코스피 200 섹터 지수 11개 (가중치는 타일 크기용 근사치)
+응답 `200`:
+```json
+{
+  "country": "KR",
+  "available": true,
+  "as_of": "2026-10-08",
+  "session_status": "previous_session",
+  "fetched_at": "2026-10-12T15:08:17.969736+09:00",
+  "sectors": [
+    {
+      "code": "1155",
+      "name": "정보기술",
+      "weight": 35.0,
+      "change_pct": -3.4975
+    },
+    {
+      "code": "1156",
+      "name": "금융",
+      "weight": 12.0,
+      "change_pct": -3.1413
+    },
+    "… 외 9개"
+  ]
+}
+```
+#### `GET /api/v1/home/sentiment?country=US` — S&P 500 + VIX 기준
+응답 `200`:
+```json
+{
+  "market": "US",
+  "index_code": "SPX",
+  "formula_version": 1,
+  "as_of": "2026-10-09",
+  "session_status": "previous_session",
+  "score": 79.25,
+  "label": "탐욕",
+  "components": {
+    "price_position": 99.5,
+    "ma_gap_score": 69.91,
+    "rsi_score": 59.93,
+    "vix_score": 87.65
+  },
+  "previous": {
+    "trade_date": "2026-10-08",
+    "score": 76.27,
+    "label": "탐욕"
+  },
+  "week_ago": {
+    "trade_date": "2026-10-02",
+    "score": 75.49,
+    "label": "탐욕"
+  }
+}
+```
+### 3-8. 공통 오류 응답
 #### `GET /api/v1/portfolios/99999999999` — id가 INT 범위 밖 → 422 (이전에는 DB 오류가 500으로 노출)
 응답 `422` (2026-10-08 실제 호출):
 ```json
@@ -1687,12 +1840,14 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 |---|---|---|---|
 | 공통 | 모든 화면 | 사이드바 마지막 갱신·새로고침 | `GET /market/refresh/status`, `POST /market/refresh` |
 | 공통 | 모든 화면 | 상단 검색바(자동완성 → 종목 상세) | `GET /stocks/search?q=&limit=8` |
-| 대시보드 홈 | `/` | 지수·환율 카드(설정에서 지수 10개 + 환율 중 선택, 기본 6개) | `GET /market/indices` |
+| 대시보드 홈 | `/` | 지수·환율 카드(설정에서 지수 10개 + 환율 중 선택, 기본 6개) — 스파크라인 기간 1개월·3개월·1년, 52주 위치 바, 장 상태 배지, 한 줄 시장 요약 | `GET /market/indices` |
 | | | USD/KRW 카드 | `GET /market/fx` |
-| | | 투자 성향 펼침 메뉴(헤더) | `GET /scoring/presets` |
-| | | 내 관심종목 카드(카드 클릭 → 상세 `?preset=`, 목표가·괴리율·메모 표시) | `GET /watchlist?preset=` |
-| | | 관심종목 카드 편집 버튼 → 메모·목표가 모달 | `PUT /watchlist/{market}/{ticker}` |
-| | | 순위 상위 5 — 지표 탭(거래량·1개월·1년 수익률) × 국내/미국 | 거래량 `GET /stocks?country=&sort=volume&limit=5`, 수익률 `GET /statistics/ranking?metric=&country=&limit=5` |
+| | | 투자 성향 펼침 메뉴(상단 검색바 줄) | `GET /scoring/presets` |
+| | | 내 관심종목 — 컴팩트 행(기본, 최대 8)·카드(3열×2줄) 보기, 클릭 → 상세 `?preset=`, 목표가·괴리율·메모 표시, 관심종목 등락 요약 | `GET /watchlist?preset=` |
+| | | 관심종목 편집 버튼 → 메모·목표가 모달 | `PUT /watchlist/{market}/{ticker}` |
+| | | 섹터 히트맵(국내/미국) | `GET /home/sectors?country=` |
+| | | 시장 심리 지수(국내/미국) | `GET /home/sentiment?country=` |
+| | | 시장 주목 종목 TOP 5 — 거래량 급증·매력도 순위 × 국내/미국 | `GET /home/ranking?kind=&country=&limit=5&preset=` |
 | 주식 리스트 | `/stocks` | 순위 리스트·탭·정렬·검색 | `GET /stocks?country=&sort=&order=&group=&q=&preset=` |
 | | | 투자 성향 펼침 메뉴(헤더) | `GET /scoring/presets` |
 | | | 경쟁 그룹 필터 | `GET /peer-groups` |
