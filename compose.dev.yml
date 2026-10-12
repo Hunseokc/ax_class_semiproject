@@ -1,0 +1,15 @@
+# 개발용 덮어쓰기: 소스를 bind mount하고 수정하면 uvicorn이 자동 재시작한다
+#   docker compose -f compose.yml -f compose.dev.yml up --build
+services:
+  api:
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload",
+              "--reload-dir", "app", "--reload-dir", "config"]
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"   # Windows 폴더 bind mount는 파일 변경 알림이 전달되지 않아 polling으로 감지
+    volumes:
+      - ./backend/app:/srv/app
+      - ./backend/config:/srv/config
+      - ./backend/db:/srv/db
+      - ./frontend:/srv/frontend
+      - ./backend/tests:/srv/tests
+      - ./docs:/srv/docs                 # Stage 1 이후 python -m app.ingest 결과 기록
