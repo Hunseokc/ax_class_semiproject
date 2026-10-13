@@ -1,14 +1,16 @@
 """수집·전처리: 이상 행 격리, 샘플 재적재 시 행 수 불변."""
 import csv
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+import pytest
 from sqlalchemy import text
 
 from app.ingest import jobs, sample
 from app.ingest.preprocess import Bar, FxPoint, clean_bars, clean_fx
-from app.ingest.universe import load_universe
+from app.ingest.universe import StockSpec, load_universe
 from tests.conftest import TABLES, scalar
 
 
@@ -37,10 +39,34 @@ def test_clean_bars_drops_unfinished_session():
 
 def test_clean_fx_quarantines_spike():
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    pts = [FxPoint(base + timedelta(days=i), Decimal(v)) for i, v in enumerate([1300, 1302, 1301, 13.01, 1303, 1304])]
+    # 문자열로 만든다: Decimal(13.01)은 float 오차가 섞여 Decimal("13.01")과 다른 값이 된다
+    pts = [FxPoint(base + timedelta(days=i), Decimal(v))
+           for i, v in enumerate(["1300", "1302", "1301", "13.01", "1303", "1304"])]
     ok, bad = clean_fx(pts)
-    assert Decimal("13.01") not in {p.usd_krw for p in ok} and len(ok) == 5
+    assert [p.usd_krw for p in ok] == [Decimal(v) for v in ("1300", "1302", "1301", "1303", "1304")]
+    assert [q.row["usd_krw"] for q in bad] == [Decimal("13.01")]
     assert "초과 이탈" in bad[0].reason
+
+
+def test_master_failure_is_logged_and_raised(engine, monkeypatch):
+    """마스터 적재가 실패하면 FAILED 로그를 남기고 예외를 전파한다(CLI가 성공으로 끝나지 않는다)."""
+    u = load_universe()
+    broken = replace(u, indices=(replace(u.indices[0], market="NOPE"),))      # 없는 시장 코드
+    monkeypatch.setattr(jobs, "load_universe", lambda: broken)
+    with pytest.raises(KeyError):
+        jobs.load_master(engine, offline=True)
+    assert scalar(engine, "SELECT status FROM ingestion_logs WHERE job_type = 'MASTER'") == "FAILED"
+    assert scalar(engine, "SELECT count(*) FROM stocks") == 4                 # 롤백: 픽스처 4종목 그대로
+
+
+def test_master_rejects_ticker_listed_in_two_markets(engine, monkeypatch):
+    """peer_groups.members는 티커만 적으므로, 같은 티커가 두 시장에 있으면 적재 전에 멈춘다."""
+    u = load_universe()
+    dup = replace(u, stocks=u.stocks + (StockSpec("NASDAQ", "005930", "Dup", "005930"),))
+    monkeypatch.setattr(jobs, "load_universe", lambda: dup)
+    with pytest.raises(ValueError, match="중복"):
+        jobs.load_master(engine, offline=True)
+    assert scalar(engine, "SELECT count(*) FROM ingestion_logs") == 0         # DB를 건드리기 전에 실패
 
 
 def _csv_rows(name: str) -> int:
