@@ -38,7 +38,15 @@ def load_master(engine: Engine, offline: bool = True) -> None:
     if not offline:
         raise NotImplementedError("온라인 마스터 적재(DART·SEC)는 Stage 3에서 추가한다. --offline을 사용하세요.")
     u = load_universe()
-    with job_log(engine, source="INTERNAL", job_type="MASTER", label="universe") as res:
+    # peer_groups.members는 티커만 적는다 → 같은 티커가 두 시장에 있으면 어느 종목인지 정할 수 없으므로 적재 전에 막는다
+    market_of: dict[str, str] = {}
+    for s in u.stocks:
+        if s.ticker in market_of:
+            raise ValueError(f"universe.yaml: 티커 {s.ticker}가 {market_of[s.ticker]}·{s.market}에 중복 — "
+                             "peer_groups.members가 가리키는 종목을 정할 수 없다")
+        market_of[s.ticker] = s.market
+    # 마스터가 실패하면 뒤따르는 적재가 모두 의미 없으므로 FAILED를 기록한 뒤 예외를 전파한다(CLI가 0이 아닌 코드로 끝난다)
+    with job_log(engine, source="INTERNAL", job_type="MASTER", label="universe", reraise=True) as res:
         with engine.begin() as conn:
             res.rows += upsert(conn, "markets", [
                 {"code": m.code, "country": m.country, "currency": m.currency, "timezone": m.timezone}
@@ -54,8 +62,8 @@ def load_master(engine: Engine, offline: bool = True) -> None:
                 for i in u.indices], ["code"])
             res.rows += upsert(conn, "peer_groups", [{"name": g.name} for g in u.peer_groups], ["name"])
             gid = dict(conn.execute(text("SELECT name, group_id FROM peer_groups")).all())
-            # 노출 종목 사이에 티커가 겹치지 않아 티커만으로 stock_id를 찾는다
-            sid = dict(conn.execute(text("SELECT ticker, stock_id FROM stocks")).all())
+            sid = {(m, t): i for i, m, t in conn.execute(text(
+                "SELECT s.stock_id, m.code, s.ticker FROM stocks s JOIN markets m USING (market_id)")).all()}
             res.rows += upsert(conn, "peer_group_members", [
-                {"group_id": gid[g.name], "stock_id": sid[t]} for g in u.peer_groups for t in g.members],
-                ["group_id", "stock_id"])
+                {"group_id": gid[g.name], "stock_id": sid[(market_of[t], t)]}
+                for g in u.peer_groups for t in g.members], ["group_id", "stock_id"])
