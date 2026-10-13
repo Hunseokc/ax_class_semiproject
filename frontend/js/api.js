@@ -49,14 +49,16 @@ export const api = {
 // ── [S1-A] Market · Stocks ──
 // MOCK=true 면 B의 API 없이 docs/06 3-1·3-2 예시와 같은 모양의 목 응답을 돌려준다.
 // 통합 전에 MOCK 을 false 로 바꾸고 이 구역의 MOCK_*·mock* 코드를 지운다 (D가 확인).
+// TODO(선행 머지 후 제거): MOCK 플래그와 아래 MOCK_*·mock* 목 데이터 전부
 const MOCK = true;
 const MOCK_DELAY_MS = 300;                       // 로딩 스켈레톤이 보이도록 일부러 늦춘다
 
 const wait = (data) => new Promise((resolve) => setTimeout(() => resolve(structuredClone(data)), MOCK_DELAY_MS));
 
-export const getStocks = ({ country, sort = "market_cap", order = "desc", group, limit = 100, offset = 0 } = {}) =>
-  MOCK ? mockStocks({ country, sort, order, group, limit, offset })
-       : api.get("/stocks", { country, sort, order, group, limit, offset });
+// group 은 경쟁 그룹 '이름'(예: "반도체"), q 는 이름·티커 검색어 — 원본 stocks.js 와 같은 방식
+export const getStocks = ({ country, sort = "market_cap", order = "desc", group, q, limit = 100, offset = 0 } = {}) =>
+  MOCK ? mockStocks({ country, sort, order, group, q, limit, offset })
+       : api.get("/stocks", { country, sort, order, group, q, limit, offset });
 
 export const getStock = (market, ticker) =>
   MOCK ? mockStock(market, ticker) : api.get(`/stocks/${market}/${ticker}`);
@@ -70,7 +72,7 @@ export const getFx = () => (MOCK ? wait(MOCK_FX) : api.get("/market/fx"));
 
 // ---- 목 데이터 (실제 응답에서 score·preset·is_watched 를 뺀 모양) -----------------------
 const MOCK_GROUPS = { groups: [{ group_id: 1, name: "반도체", size: 2 }, { group_id: 2, name: "빅테크", size: 1 }] };
-const MOCK_GROUP_OF = { "005930": [1], "000660": [1], AAPL: [2] };
+const MOCK_GROUP_OF = { "005930": ["반도체"], "000660": ["반도체"], AAPL: ["빅테크"] };
 
 const MOCK_STOCKS = [
   { stock_id: 1, market: "KOSPI", country: "KR", currency: "KRW", ticker: "005930", name: "삼성전자",
@@ -131,14 +133,16 @@ const MOCK_FX = {
 const notFound = (market, ticker) =>
   new ApiError(404, "STOCK_NOT_FOUND", `종목 ${market}/${ticker}을(를) 찾을 수 없습니다`, null);
 
-function mockStocks({ country, sort, order, group, limit, offset }) {
+function mockStocks({ country, sort, order, group, q, limit, offset }) {
   if (sort === "volume" && !country) {             // 실제 API와 같은 규칙: 전체 탭은 거래량 정렬 불가
     return Promise.reject(new ApiError(422, "VOLUME_SORT_REQUIRES_MARKET",
       "시장마다 거래량 단위가 달라 '전체'에서는 거래량 정렬을 할 수 없습니다", null));
   }
   const key = sort === "volume" ? "volume" : "market_cap_krw";
+  const word = (q || "").trim().toLowerCase();
   let rows = MOCK_STOCKS.filter((s) => (!country || s.country === country)
-    && (!group || (MOCK_GROUP_OF[s.ticker] || []).includes(Number(group))));
+    && (!group || (MOCK_GROUP_OF[s.ticker] || []).includes(group))
+    && (!word || s.name.toLowerCase().includes(word) || s.ticker.toLowerCase().includes(word)));
   rows = rows.sort((a, b) => (order === "asc" ? a[key] - b[key] : b[key] - a[key]));
   const items = rows.slice(offset, offset + limit).map((s, i) => ({
     rank: offset + i + 1, stock_id: s.stock_id, market: s.market, country: s.country, currency: s.currency,
@@ -151,7 +155,7 @@ function mockStocks({ country, sort, order, group, limit, offset }) {
 function mockStock(market, ticker) {
   const s = MOCK_STOCKS.find((x) => x.market === market && x.ticker === ticker);
   if (!s) return Promise.reject(notFound(market, ticker));
-  const groups = MOCK_GROUPS.groups.filter((g) => (MOCK_GROUP_OF[ticker] || []).includes(g.group_id))
+  const groups = MOCK_GROUPS.groups.filter((g) => (MOCK_GROUP_OF[ticker] || []).includes(g.name))
     .map(({ group_id, name }) => ({ group_id, name }));
   return wait({ ...s, valuation_as_of: s.as_of, groups });
 }
