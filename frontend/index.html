@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>대시보드 · StockMind</title>
-  <meta name="description" content="국내·미국 주요 지수와 환율 (일봉 기준)">
+  <meta name="description" content="국내·미국 주요 지수·환율과 주요 종목 (일봉 기준)">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -26,6 +26,15 @@
           <div class="section__head"><h2 id="h-market">주요 지수 · 환율 <span class="section__meta" id="as-of">일봉 기준</span></h2>
             <div class="section__tools"><div id="spark-range"></div></div></div>
           <div id="market"></div>
+        </section>
+
+        <!-- [S1-D] 발표용 임시: 고정 주요 종목 — TODO(Stage 2 A): 관심종목 카드로 교체 -->
+        <section class="section" aria-labelledby="h-featured">
+          <div class="section__head">
+            <div><h2 id="h-featured">주요 종목 <span class="section__meta">일봉 기준</span></h2>
+              <p class="subtle">국내·미국 대표 종목의 최근 종가와 추이</p></div>
+            <div class="section__tools"><span class="subtle" id="featured-count"></span><div id="featured-range"></div></div></div>
+          <div id="featured" class="featured"></div>
         </section>
 
         <p class="disclaimer">시세는 일봉 기준이며 장중 실시간이 아닙니다. 이 화면의 어떤 정보도 투자 권유가 아닙니다.</p>
