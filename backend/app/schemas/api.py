@@ -52,7 +52,7 @@ class IndexOut(Schema):
     prev_close: Num | None
     change: Num | None
     change_rate: Num | None
-    sparkline: list[SparkPoint]              # 최근 30거래일 종가 (일봉이 없으면 빈 목록)
+    sparkline: list[SparkPoint]              # 최근 1년 종가, 오래된 순 (일봉이 없으면 빈 목록)
 
 
 class IndicesOut(Schema):
@@ -75,7 +75,7 @@ class FxOut(Schema):
     prev_close: Num | None
     change: Num | None
     change_rate: Num | None
-    history: list[FxPointOut]                # 최근 30개 DAILY (오래된 순)
+    history: list[FxPointOut]                # 최근 1년 DAILY (오래된 순)
     as_of: datetime
 
 

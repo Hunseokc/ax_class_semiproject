@@ -16,14 +16,14 @@ router = APIRouter(prefix="/market", tags=["market"])
 SEOUL = ZoneInfo("Asia/Seoul")
 
 
-@router.get("/indices", response_model=IndicesOut, summary="지수별 최신값·등락·최근 30거래일 스파크라인")
+@router.get("/indices", response_model=IndicesOut, summary="지수별 최신값·등락·최근 1년 스파크라인")
 def indices(db: Session = Depends(get_db)):
     rows = db.execute(sql("market_indices")).mappings().all()
     items = [{**r, "sparkline": r["sparkline"] or []} for r in rows]
     return {"as_of": max((r["as_of"] for r in rows if r["as_of"]), default=None), "indices": items}
 
 
-@router.get("/fx", response_model=FxOut, summary="USD/KRW 최신값·전일 대비·최근 30일 (DB 값만, 외부 호출 없음)")
+@router.get("/fx", response_model=FxOut, summary="USD/KRW 최신값·전일 대비·최근 1년 (DB 값만, 외부 호출 없음)")
 def fx(db: Session = Depends(get_db)):
     latest = db.execute(text("SELECT rate_at, usd_krw, granularity FROM v_fx_latest")).mappings().first()
     if latest is None:

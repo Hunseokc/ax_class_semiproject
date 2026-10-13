@@ -34,9 +34,12 @@ def list_stocks(
                             detail={"allowed_sort_for_all": ["market_cap"]}, code="VOLUME_SORT_REQUIRES_MARKET")
     # order_col·order_dir은 위 화이트리스트(SORT_COLUMNS, Literal)에서만 나오므로 문자열 치환해도 안전하다
     stmt = text(raw("stock_list").format(order_col=SORT_COLUMNS[sort], order_dir=order.upper()))
-    rows = db.execute(stmt, {"country": country, "grp": group, "q": q, "limit": limit, "offset": offset}).mappings().all()
+    params = {"country": country, "grp": group, "q": q, "limit": limit, "offset": offset}
+    rows = db.execute(stmt, params).mappings().all()
+    # total은 COUNT(*) OVER()라 돌려줄 행이 없으면 읽을 곳이 없다 → offset이 끝을 넘었을 때만 첫 행으로 한 번 더 센다
+    total_row = rows[0] if rows else (db.execute(stmt, {**params, "limit": 1, "offset": 0}).mappings().first() if offset else None)
     fx_at = db.execute(text("SELECT rate_at FROM v_fx_latest")).scalar()
-    return {"total": rows[0]["total"] if rows else 0, "limit": limit, "offset": offset, "sort": sort, "order": order,
+    return {"total": total_row["total"] if total_row else 0, "limit": limit, "offset": offset, "sort": sort, "order": order,
             "fx_rate_at": fx_at, "items": [dict(r) for r in rows]}
 
 
