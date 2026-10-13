@@ -33,8 +33,13 @@ class Conflict(AppError):
     status_code, code = 409, "CONFLICT"
 
 
+# ── [S1-B] 종목 API ── (거래량 정렬을 '전체' 시장에서 요청하는 등 형식은 맞지만 처리할 수 없는 요청)
+class Unprocessable(AppError):
+    status_code, code = 422, "UNPROCESSABLE"
+
+
 # 503은 /health/db가 쓰므로 Stage 0에 둔다.
-# 422 Unprocessable 등 도메인 에러 클래스·코드(GROUP_NOT_FOUND·DUPLICATE_ITEM …)는 각 단계에서 이 아래에 추가한다.
+# 도메인 에러 클래스·코드(GROUP_NOT_FOUND·DUPLICATE_ITEM …)는 각 단계에서 이 아래에 추가한다.
 class ServiceUnavailable(AppError):
     status_code, code = 503, "SERVICE_UNAVAILABLE"
 
