@@ -24,6 +24,12 @@
 5. refresh 작업 연결 — 요청 메모 → D (섹터·심리 지수 갱신을 4시간 갱신 흐름에 넣기)
 6. backend/tests/test_home_widgets.py
 
+[파트별 확인 — 계획표의 "파트별 확인 지점"으로 그대로 쓴다. 파일마다 만든 직후 돌려 보고(CLAUDE.md 3절 ③), 파트가 끝날 때마다 실제로 실행해서 "여기까지 만든 것"을 보여 주고 아주 쉽게 설명한다(3-1)]
+파트 1 (1번 섹터) → 볼 것: load_sectors 실행 → psql로 sector_performance_daily 최근 행(섹터·등락률), read_sectors 출력. 30일 지난 행 정리 전후 행 수.
+파트 2 (2번 심리 지수) → 볼 것: ensure_sentiment 두 번 실행 → 두 번째는 '이미 있음'으로 계산하지 않는 로그. 점수와 label_for 결과(예: 62 → '탐욕')를 구성 요소 값과 함께 풀이.
+파트 3 (3~4번 순위 유틸·API) → 볼 것: curl `/home/sectors?country=US`, `/home/sentiment?market=KR`. 같은 호출 두 번 → ingestion_logs 행 수가 그대로(외부 호출 없음)인 것을 psql로.
+파트 4 (6번 테스트) → pytest -v 번역.
+
 [건드리지 않을 파일] 007 마이그레이션·schema(D), home.py /ranking(B), frontend(A)
 [인터페이스 계약] 응답 구조는 원본 home.py·schemas와 동일 — A가 MOCK으로 먼저 개발
 [완료 기준]
@@ -32,7 +38,7 @@
 
 [선행 작업] 없음 — 007 마이그레이션·home.py 뼈대(D 계약)는 이미 stage6에 있다. 머지 순서 1번이므로 끝나면 바로 Ready PR.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage6에서 새로 만듦) → origin/stage6 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
-② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
 
 ---
@@ -54,6 +60,14 @@
 5. backend/app/queries/home_volume_surge.sql, home_attractiveness.sql + home.py [S6-B] GET /home/ranking
 6. backend/tests/test_listing.py, test_home_api.py
 
+[파트별 확인 — 계획표의 "파트별 확인 지점"으로 그대로 쓴다. 파일마다 만든 직후 돌려 보고(CLAUDE.md 3절 ③), 파트가 끝날 때마다 실제로 실행해서 "여기까지 만든 것"을 보여 주고 아주 쉽게 설명한다(3-1)]
+파트 1 (1번 상장 목록) → 볼 것: `python -m app.ingest listing` 소요 시간과 결과 → psql로 coverage별(노출·비교군·listed) 종목 수.
+파트 2 (2번 참고 점수) → 볼 것: listed 종목 하나로 curl analysis → reference=true·reference_note, 순위가 '비교군 N개 + 이 종목' 기준인 것.
+파트 3 (3번 검색) → 볼 것: curl search?q=삼성, ?q=AAPL, ?q=% — 결과 순서를 정렬 규칙 하나하나와 짝지어 설명. %가 '아무거나'로 해석되지 않는 것(이스케이프).
+파트 4 (4번 배당 열) → 볼 것: psql로 v_stock_metrics의 dps·dividend_yield, analysis 응답의 배당. 열을 끝에만 추가해야 하는 이유를 실제로 중간에 넣으면 나는 에러 메시지로 보여 준다(트랜잭션 안에서 시도 후 ROLLBACK).
+파트 5 (5번 홈 순위) → 볼 것: curl /home/ranking — 거래량 급증·매력도 순위 읽어 주기.
+파트 6 (6번 테스트) → pytest -v 번역.
+
 [건드리지 않을 파일] 005 마이그레이션·schema(D), home.py /sectors·/sentiment(C), frontend(A)
 [완료 기준]
   docker compose run --rm api python -m app.ingest listing   (약 10초)
@@ -62,7 +76,7 @@
 
 [선행 작업] 코드상 기다릴 것 없음(머지 순서만 C 다음). home.py는 C와 구역이 다르므로 충돌 시 둘 다 남긴다. C 머지 전이면 Draft PR.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage6에서 새로 만듦) → origin/stage6 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
-② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
 
 ---
@@ -86,12 +100,18 @@
 7. home.js — 지수 카드: 휴장 달력 기반 장 상태 배지(D의 market_calendar 응답 필드), 52주 범위
 8. css/pages.css [S6-A], 모바일 1열 전환
 
+[파트별 확인 — 계획표의 "파트별 확인 지점"으로 그대로 쓴다. 파일마다 만든 직후 돌려 보고(CLAUDE.md 3절 ③), 파트가 끝날 때마다 실제로 실행해서 "여기까지 만든 것"을 보여 주고 아주 쉽게 설명한다(3-1)]
+파트 1 (1~2번 api.js·상단 검색) → 볼 것: 검색창에 '삼성' 입력 → 자동완성, 방향키·Enter 이동, listed 종목 '참고' 표시. Network 탭에서 글자마다가 아니라 멈춘 뒤 1번만 요청이 나가는 것(디바운스)을 보여 준다.
+파트 2 (3~4번 2열 배치·관심종목 컴팩트) → 볼 것: 원본 docs/screenshots/01_home.png와 나란히 놓고 같은 점·다른 점 체크. 컴팩트 ↔ 카드 전환.
+파트 3 (5~6번 히트맵·심리 지수·순위 탭) → 볼 것: 섹터 색이 등락률과 맞는지 curl /home/sectors 값과 비교, 게이지 값, 탭 전환.
+파트 4 (7~8번 지수 카드·CSS·모바일) → 볼 것: 장 상태 배지·52주 범위, 기기 모드 390px에서 1열. 검색에서 listed 종목 클릭 → 상세 '데이터 수집 중' 안내. 화면별 스크린샷 안내.
+
 [건드리지 않을 파일] backend/ 전부, 공통 css(D)
 [완료 기준] 원본 01_home.png와 레이아웃 일치 / 검색에서 상장 목록 종목 클릭 → 상세(데이터 수집 중 안내) / 모바일 1열 / 콘솔 에러 0
 
 [선행 작업] C의 /home/sectors·/home/sentiment, B의 /stocks/search·/home/ranking, D의 market_calendar 응답 필드(7번). 아직 없으면 원본 home.py·schemas 응답 모양으로 MOCK 하고 묻지 말고 진행한다. B·C 머지 전이면 Draft PR.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage6에서 새로 만듦) → origin/stage6 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
-② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
 
 ---
