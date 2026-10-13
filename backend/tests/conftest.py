@@ -21,7 +21,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
 
 from app.api import deps
-from app.core.config import ROOT_DIR, get_settings
+from app.core.config import get_settings
+from app.ingest import jobs
 from app.main import app
 
 # FK 자식 → 부모 순서(TRUNCATE ... CASCADE라 순서는 중요하지 않지만 읽기 쉽게)
@@ -34,16 +35,8 @@ DAYS = [D - timedelta(days=2), D - timedelta(days=1), D]
 
 
 def apply_schema(engine: Engine, reset: bool = False) -> None:
-    """db/schema.sql → db/indexes.sql 적용. (Stage 1-C가 app.ingest.jobs.init_db를 만들면 그쪽으로 교체해도 된다)
-
-    SQL 파일은 파라미터 없이 psycopg로 직접 실행한다(주석 속 '%'가 placeholder로 해석되지 않도록).
-    """
-    with engine.begin() as conn:
-        raw = conn.connection.driver_connection
-        if reset:
-            raw.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-        for name in ("schema.sql", "indexes.sql"):
-            raw.execute((ROOT_DIR / "db" / name).read_text(encoding="utf-8"))
+    """db/schema.sql → indexes.sql → views.sql(있을 때만) 적용. CLI init-db와 같은 경로(app.ingest.jobs.init_db)를 쓴다."""
+    jobs.init_db(engine, reset=reset)
 
 
 @pytest.fixture(scope="session")
