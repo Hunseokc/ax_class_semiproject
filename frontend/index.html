@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>대시보드 · StockMind</title>
-  <meta name="description" content="국내·미국 주요 지수, 환율, 관심종목 요약 (일봉 기준)">
+  <meta name="description" content="국내·미국 주요 지수와 환율 (일봉 기준)">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -12,18 +12,23 @@
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/components.css">
   <link rel="stylesheet" href="/static/css/pages.css">
-  <!-- Stage 1: 담당(A)이 아래 인라인 스크립트를 js/pages/home.js 로 바꾸고(mountSidebar 호출 포함) Chart.js CDN을 추가한다 -->
-  <script type="module">
-    import { mountSidebar } from "/static/js/components/sidebar.js";
-    mountSidebar("home");
-  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" defer></script>
+  <script type="module" src="/static/js/pages/home.js"></script>
 </head>
 <body>
   <div class="app">
     <aside id="sidebar" class="sidebar"></aside>
     <main class="main" id="main">
-      <div class="main__inner">
+      <div class="main__inner home">
         <h1 class="sr-only">대시보드</h1>
+
+        <section class="section" aria-labelledby="h-market">
+          <div class="section__head"><h2 id="h-market">주요 지수 · 환율 <span class="section__meta" id="as-of">일봉 기준</span></h2>
+            <div class="section__tools"><div id="spark-range"></div></div></div>
+          <div id="market"></div>
+        </section>
+
+        <p class="disclaimer">시세는 일봉 기준이며 장중 실시간이 아닙니다. 이 화면의 어떤 정보도 투자 권유가 아닙니다.</p>
       </div>
     </main>
   </div>
