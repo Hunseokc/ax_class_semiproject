@@ -1,7 +1,7 @@
 # Stage 2 — 사용자 기능: 관심종목·모의 포트폴리오 CRUD
 
 **단계 목표**: 단일 데모 사용자가 관심종목을 추가·정렬·삭제하고, 시드 안에서 국내·미국 종목을 담아 원화 기준 평가손익(환율 효과 분리)을 본다.
-**D 선행 계약(단계 시작 전 커밋됨)**: `users`·`watchlist_items`(memo·target_price 없음)·`portfolios`·`portfolio_items` 테이블과 ORM, `deps.get_current_user_id()`, `providers/base.py`(FxProvider 등 인터페이스).
+**D 선행 계약(단계 시작 전 커밋됨)**: `users`·`watchlist_items`(memo·target_price 없음)·`portfolios`·`portfolio_items` 테이블과 ORM, `deps.get_current_user_id()`, `providers/base.py` 보강(FxProvider는 Stage 1-D에 있음 — Bar·FxPoint를 preprocess에서 base로 이동).
 **머지 순서**: C → B → A → D 통합
 **PR 방식**: 앞 순서 작업이 머지되기 전에 끝나면 기다리지 않고 Draft PR → 시니어가 그 파트를 먼저 리뷰 → 앞 순서 머지 후 최신 stage를 합쳐 같은 PR을 Ready로 전환(CLAUDE.md 6절). 시니어는 Ready PR만 머지 순서대로 머지한다.
 
