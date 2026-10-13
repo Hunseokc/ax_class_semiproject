@@ -19,7 +19,7 @@
 | 기준 시각 | 시세 응답은 `as_of`(거래일), 환율은 `rate_at`, 통화는 `currency` |
 | 요청 ID | 모든 응답 헤더 `X-Request-ID`, 서버 로그에 같은 ID 기록 |
 | 외부 소스 | **조회 API는 외부 소스를 직접 부르지 않고 DB에 저장된 값만 돌려준다.** 외부 호출은 수집(`app.ingest`)에서만 한다 |
-| 수집 (Stage 1) | `python -m app.ingest prices [--full] [--tickers …]`(국내 pykrx·미국 yfinance 일봉), `indices [--full]`, `fx [--full]`(USD/KRW DAILY). 기본은 증분(저장된 마지막 날짜 다음 날부터, 환율은 마지막 날을 한 번 더 받음), 저장된 값이 없거나 `--full`이면 최근 730일. 대상 1건당 `ingestion_logs` 1행, 한 대상이 실패해도 나머지는 계속 적재. 수집이 안 되면 `import-sample`(CSV)로 대체. 4시간 자동 갱신·FxService는 Stage 3 |
+| 수집 (Stage 1) | `python -m app.ingest prices [--full] [--tickers …]`(국내 pykrx·미국 yfinance 일봉), `indices [--full]`, `fx [--full]`(USD/KRW DAILY). 기본은 증분(저장된 마지막 날짜 다음 날부터, 환율은 마지막 날을 한 번 더 받음), 저장된 값이 없거나 `--full`이면 최근 730일. 대상 1건당 `ingestion_logs` 1행, 한 대상이 실패해도 나머지는 계속 적재. pykrx가 막히면 `PRICE_SOURCE_KR=yfinance`로 국내 시세·지수도 yfinance로 받아 다시 실행(수동 전환), 그래도 안 되면 `master --offline` 후 `import-sample`(CSV)로 대체. 4시간 자동 갱신·FxService는 Stage 3 |
 
 ## 2. 엔드포인트 목록 (Stage 0~1)
 
@@ -27,8 +27,8 @@
 |---|---|---|---|---|---|---|
 | 헬스체크 | GET | `/health` (루트) | 프로세스 생존 확인 — DB에 접근하지 않음 | - | 200 | 0 |
 | 헬스체크 | GET | `/health/db` (루트) | DB 연결 확인(`SELECT 1`). 컨테이너 HEALTHCHECK가 사용 | - | 200 · 503 DB_UNAVAILABLE | 0 |
-| 시장 | GET | `/market/indices` | 지수별 최신값·등락·최근 30거래일 스파크라인(DB 값만) | - | 200 | 1-B |
-| 시장 | GET | `/market/fx` | USD/KRW 최신값·전일 대비·최근 30개 DAILY 추이(DB 값만, 외부 호출은 Stage 3 FxService) | - | 200 | 1-B |
+| 시장 | GET | `/market/indices` | 지수별 최신값·등락·최근 1년 스파크라인(DB 값만, 화면에서 1개월·3개월·1년으로 자름) | - | 200 | 1-B |
+| 시장 | GET | `/market/fx` | USD/KRW 최신값·전일 대비·최근 1년 DAILY 추이(DB 값만, 외부 호출은 Stage 3 FxService) | - | 200 | 1-B |
 | 종목 | GET | `/peer-groups` | 경쟁 그룹 목록 (리스트 필터용) | - | 200 | 1-B |
 | 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 이름·티커 검색) | country, sort, order, group, q, limit, offset | 200 · 422 VALIDATION_ERROR, VOLUME_SORT_REQUIRES_MARKET | 1-B |
 | 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션 | - | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR | 1-B |
@@ -56,7 +56,7 @@
 이때 `GET /health`는 200 — 프로세스는 살아 있고 DB만 문제임을 구분한다.
 
 ### 3-1. 시장
-#### `GET /api/v1/market/indices` — 최근 30거래일 스파크라인
+#### `GET /api/v1/market/indices` — 최근 1년 스파크라인(화면에서 1개월·3개월·1년으로 자름)
 응답 `200`:
 ```json
 {
@@ -74,14 +74,14 @@
       "change_rate": -0.054649,
       "sparkline": [
         {
-          "date": "2026-08-27",
-          "close": 6912.37
+          "date": "2025-10-14",
+          "close": 3561.81
         },
         {
-          "date": "2026-08-28",
-          "close": 6788.88
+          "date": "2025-10-15",
+          "close": 3657.28
         },
-        "… 외 28개"
+        "… 외 242개"
       ]
     },
     {
@@ -96,14 +96,14 @@
       "change_rate": -0.01432,
       "sparkline": [
         {
-          "date": "2026-08-27",
-          "close": 837.65
+          "date": "2025-10-14",
+          "close": 847.96
         },
         {
-          "date": "2026-08-28",
-          "close": 838.41
+          "date": "2025-10-15",
+          "close": 864.72
         },
-        "… 외 28개"
+        "… 외 242개"
       ]
     },
     "… 외 8개"
@@ -125,14 +125,14 @@
   "change_rate": -0.002189,
   "history": [
     {
-      "date": "2026-09-01",
-      "usd_krw": 1366.62
+      "date": "2025-10-14",
+      "usd_krw": 1426.0699
     },
     {
-      "date": "2026-09-02",
-      "usd_krw": 1372.86
+      "date": "2025-10-15",
+      "usd_krw": 1429.4301
     },
-    "… 외 28개"
+    "… 외 256개"
   ],
   "as_of": "2026-10-13T00:00:00+09:00"
 }
@@ -330,7 +330,7 @@
 |---|---|---|---|
 | 공통 | 모든 화면 | 사이드바(대시보드·주식 리스트·모의 포트폴리오) | 없음 (마지막 갱신 시각은 Stage 3) |
 | 대시보드 홈 | `/` | 지수·환율 카드 | `GET /market/indices`, `GET /market/fx` |
-| 주식 리스트 | `/stocks` | 순위 리스트·탭·정렬 | `GET /stocks?country=&sort=&order=&group=&q=` |
+| 주식 리스트 | `/stocks` | 순위 리스트·탭·정렬 | `GET /stocks?country=&sort=&order=&group=&q=` (offset이 끝을 넘어도 `total`은 전체 개수) |
 | | | 경쟁 그룹 필터 | `GET /peer-groups` |
 | 종목 상세 | `/stocks/{market}/{ticker}` | 기본 정보·핵심 지표 | `GET /stocks/{market}/{ticker}` |
 | | | 가격 차트 (1M~1Y) | `GET /stocks/{market}/{ticker}/candles?range=` |
