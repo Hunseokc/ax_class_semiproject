@@ -89,9 +89,10 @@ const MOCK_STOCKS = [
     per: 36.7, pbr: 52.1, eps: 8.62, bps: 6.07, shares_outstanding: 14700000000 },
 ];
 
+// [코드, 이름, 시장, 통화, 종가, 전일 종가] — 코드는 실제 서버와 같게 (home.js 가 코드로 카드를 고른다)
 const MOCK_INDEX_BASE = [
-  ["KOSPI", "KR", "KRW", 6625.93, 6803.9], ["KOSDAQ", "KR", "KRW", 1012.4, 1004.1],
-  ["S&P 500", "US", "USD", 6840.2, 6811.5], ["NASDAQ", "US", "USD", 23250.7, 23102.3], ["DOW", "US", "USD", 47310.5, 47420.9],
+  ["KOSPI", "KOSPI", "KR", "KRW", 6625.93, 6803.9], ["KOSDAQ", "KOSDAQ", "KR", "KRW", 1012.4, 1004.1],
+  ["SPX", "S&P 500", "US", "USD", 6840.2, 6811.5], ["IXIC", "NASDAQ", "US", "USD", 23250.7, 23102.3], ["DJI", "DOW", "US", "USD", 47310.5, 47420.9],
 ];
 
 // 날짜 n개를 기준일부터 거슬러 올라가며 만든다 (주말 제외 = 거래일 근사)
@@ -115,8 +116,8 @@ function mockSeries(last, n, seed) {
 
 const MOCK_INDICES = {
   as_of: "2026-10-09",
-  indices: MOCK_INDEX_BASE.map(([code, country, currency, close, prev], k) => ({
-    code, name: code, country, currency, as_of: "2026-10-08", close, prev_close: prev,
+  indices: MOCK_INDEX_BASE.map(([code, name, country, currency, close, prev], k) => ({
+    code, name, country, currency, as_of: "2026-10-08", close, prev_close: prev,
     change: +(close - prev).toFixed(2), change_rate: +((close - prev) / prev).toFixed(6),
     sparkline: mockDates("2026-10-08", 60).map((date, i) => ({ date, close: +mockSeries(close, 60, k)[i].toFixed(2) })),
     session_status: "previous_session",
