@@ -47,6 +47,18 @@ export const api = {
 
 // 화면에서 쓰는 호출 모음 ----------------------------------------------------------
 // ── [S1-A] Market · Stocks ──
+// group 은 경쟁 그룹 '이름'(예: "반도체"), q 는 이름·티커 검색어 — 원본 stocks.js 와 같은 방식
+export const getStocks = ({ country, sort = "market_cap", order = "desc", group, q, limit = 100, offset = 0 } = {}) =>
+  api.get("/stocks", { country, sort, order, group, q, limit, offset });
+
+export const getStock = (market, ticker) => api.get(`/stocks/${market}/${ticker}`);
+
+export const getCandles = (market, ticker, range = "1m") =>
+  api.get(`/stocks/${market}/${ticker}/candles`, { range });
+
+export const getPeerGroups = () => api.get("/peer-groups");
+export const getIndices = () => api.get("/market/indices");
+export const getFx = () => api.get("/market/fx");
 
 // ── [S2-A] Watchlist · Portfolios ──
 
