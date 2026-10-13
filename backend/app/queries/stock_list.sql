@@ -1,7 +1,8 @@
 -- 주식 리스트: 현재가·등락률·거래량·시총(원화 환산), 정렬 기준별 순위
 -- {order_col}·{order_dir}은 서버가 화이트리스트(volume / market_cap_krw, ASC / DESC)에서만 치환한다. 나머지는 모두 바인드 파라미터
 -- Stage 1: 전 종목이 노출 대상이라 is_active만 거른다. 매력도·관심 여부는 이후 단계에서 컬럼과 JOIN을 추가한다
--- 개선 후보: 검색어 :q의 LIKE 특수문자(%, _)를 이스케이프하지 않는다(원본 동작 유지) → ESCAPE 절 + like_escape 적용 검토
+-- 개선 후보: 검색어(q)의 LIKE 특수문자(%, _)를 이스케이프하지 않는다(원본 동작 유지) → ESCAPE 절 + like_escape 적용 검토
+-- 주의: 주석에도 콜론+글자(바인드 변수 표기)를 쓰지 않는다. text()가 주석 안의 것까지 변수로 읽는다
 WITH base AS (
     SELECT s.stock_id, s.ticker, s.name, s.name_en, m.code AS market, m.country, m.currency,
            lp.trade_date AS as_of, lp.close, lp.change, lp.change_rate, lp.volume,
