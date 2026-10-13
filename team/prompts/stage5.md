@@ -3,6 +3,7 @@
 **단계 목표**: 사용 중 나온 요구(관심종목 메모·목표가, 월별·랭킹 통계, 균등 배분, 데이터 품질 확인)를 반영하고, 운영 중인 DB를 데이터 유지한 채 마이그레이션으로 바꾸는 흐름을 보여준다.
 **D 선행 계약**: `004_watchlist_memo.sql`(memo·target_price) 마이그레이션과 schema 반영, `006_sector_freshness.sql`은 D 본인 작업.
 **머지 순서**: C → B → D → A
+**PR 방식**: 앞 순서 작업이 머지되기 전에 끝나면 기다리지 않고 Draft PR → 시니어가 그 파트를 먼저 리뷰 → 앞 순서 머지 후 최신 stage를 합쳐 같은 PR을 Ready로 전환(CLAUDE.md 6절). 시니어는 Ready PR만 머지 순서대로 머지한다.
 
 ---
 
@@ -31,7 +32,9 @@
   curl ".../statistics/ranking?metric=return_1m&country=KR&limit=5"
   pytest -q
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] C(feat/s5-c-equal-weight-quality)의 data_quality 서비스(4번에서 호출). C와 합의한 시그니처(합의 전이면 원본 시그니처)대로 import 해 작성하고, 4번 테스트는 ⏸ C 머지 후. 1~3번은 선행 없음. C 머지 전이면 Draft PR.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage5에서 새로 만듦) → origin/stage5 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -62,7 +65,9 @@
   docker compose run --rm api python -m app.ingest status
   pytest -q tests/test_equal_weight.py tests/test_data_quality.py
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] 없음 — 머지 순서 1번이므로 끝나면 바로 Ready PR. data_quality 시그니처는 계획표 승인 직후 B에게 공유해 B가 기다리지 않게 하고, PR 본문에도 적는다.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage5에서 새로 만듦) → origin/stage5 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -89,7 +94,9 @@
 [이번 단계에서 뺄 것] 상단 검색, 섹터 히트맵·심리 지수, 홈 2열 개편
 [완료 기준] 메모 수정 후 새로고침해도 유지 / 지표 설정 유지 / 균등 배분 '모두 담기' 후 요약 갱신 / 모바일 가로 스크롤 없음
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] B(feat/s5-b-memo-stats)의 PUT watchlist·monthly·ranking, C(feat/s5-c-equal-weight-quality)의 equal-weight 미리보기. 아직 없으면 docs/06 예시로 MOCK 하고 묻지 말고 진행한다. 머지 순서가 마지막이므로 B·C·D 머지 전이면 Draft PR.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage5에서 새로 만듦) → origin/stage5 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -98,6 +105,7 @@
 
 ```
 시니어 모드. Stage 5.
+[PR] Draft PR은 코드 리뷰만 한다. Ready로 바뀐 PR을 머지 순서대로 머지하고, 머지할 때마다 다음 순서 팀원에게 알린다(그쪽 Claude가 동기화 중 머지를 감지해 Ready 전환을 시작한다).
 [선행] 004_watchlist_memo.sql + schema·ORM → 커밋 후 배포. 마이그레이션 적용 시연: 기존 DB에 `python -m app.ingest migrate 004_watchlist_memo`.
 [내 구현]
 1. 006_sector_freshness.sql(+schema: peer_groups.kind, stocks.industry·sic, data_freshness, fundamental_bases)

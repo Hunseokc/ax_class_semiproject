@@ -3,6 +3,7 @@
 **단계 목표**: 단일 데모 사용자가 관심종목을 추가·정렬·삭제하고, 시드 안에서 국내·미국 종목을 담아 원화 기준 평가손익(환율 효과 분리)을 본다.
 **D 선행 계약(단계 시작 전 커밋됨)**: `users`·`watchlist_items`(memo·target_price 없음)·`portfolios`·`portfolio_items` 테이블과 ORM, `deps.get_current_user_id()`, `providers/base.py`(FxProvider 등 인터페이스).
 **머지 순서**: C → B → A → D 통합
+**PR 방식**: 앞 순서 작업이 머지되기 전에 끝나면 기다리지 않고 Draft PR → 시니어가 그 파트를 먼저 리뷰 → 앞 순서 머지 후 최신 stage를 합쳐 같은 PR을 Ready로 전환(CLAUDE.md 6절). 시니어는 Ready PR만 머지 순서대로 머지한다.
 
 ---
 
@@ -37,7 +38,9 @@
   docker compose run --rm api pytest -q tests/test_portfolio.py tests/test_fx_service.py
   curl로: 포트폴리오 생성 → amount 모드로 NASDAQ/AAPL 담기 → 시드 초과 409 → summary에 환율 효과 필드
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] 없음 — D의 선행 계약과 Stage 1 결과물(v_latest_price·v_fx_latest·market.py)은 이미 stage2에 있다. 머지 순서 1번이므로 끝나면 바로 Ready PR.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage2에서 새로 만듦) → origin/stage2 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -68,7 +71,9 @@
   docker compose run --rm api pytest -q tests/test_watchlist_api.py
   curl POST /api/v1/watchlist {"market":"KOSPI","ticker":"005930"} → 201, 같은 요청 → 409
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] 코드상 기다릴 것 없음(머지 순서만 C 다음). C(feat/s2-c-portfolio)가 머지 전이면 Draft PR → C 머지 후 최신 stage2를 합치고 테스트 재실행 → Ready. schemas/api.py·main.py 충돌은 서로 다른 구역이므로 둘 다 남긴다.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage2에서 새로 만듦) → origin/stage2 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -100,7 +105,9 @@
   리스트 ★ → 홈 카드 표시 → 정렬 변경 유지 → 포트폴리오 생성 → USD 종목 금액 모드 담기 → 시드 초과 메시지 → 요약 갱신
   모바일 폭(390px)에서 포트폴리오 페이지 가로 스크롤 없음
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] B(feat/s2-b-watchlist)의 /watchlist, C(feat/s2-c-portfolio)의 /portfolios. 아직 없으면 docs/06 3-4·3-5 예시로 MOCK 하고 묻지 말고 진행한다. B·C 머지 전이면 Draft PR → 머지 후 MOCK 제거·완료 기준 실행 → Ready.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage2에서 새로 만듦) → origin/stage2 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -109,7 +116,8 @@
 
 ```
 시니어 모드. Stage 2.
-[선행] schema.sql·models에 users·watchlist_items(memo·target_price 제외)·portfolios·portfolio_items, deps.get_current_user_id, providers/base.py → stage2에 커밋 후 프롬프트 배포.
+[PR] Draft PR은 코드 리뷰만 한다. Ready로 바뀐 PR을 머지 순서대로 머지하고, 머지할 때마다 다음 순서 팀원에게 알린다(그쪽 Claude가 동기화 중 머지를 감지해 Ready 전환을 시작한다).
+[선행] stage2 브랜치는 stage1 머지·팀 키트(CLAUDE.md 9~11절) 수정이 모두 들어간 main에서 만든다. schema.sql·models에 users·watchlist_items(memo·target_price 제외)·portfolios·portfolio_items, deps.get_current_user_id, providers/base.py → stage2에 커밋 후 프롬프트 배포.
 [통합 중]
 1. backend/app/ingest/demo.py + CLI seed-demo (데모 사용자·관심종목·포트폴리오)
 2. 소유자 검사: 남의 포트폴리오·항목 접근 시 404 — backend/tests/test_ownership.py, test_current_user.py
