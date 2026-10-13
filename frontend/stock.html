@@ -12,18 +12,28 @@
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/components.css">
   <link rel="stylesheet" href="/static/css/pages.css">
-  <!-- Stage 1: 담당(A)이 아래 인라인 스크립트를 js/pages/stock.js 로 바꾸고(mountSidebar 호출 포함) Chart.js CDN을 추가한다 -->
-  <script type="module">
-    import { mountSidebar } from "/static/js/components/sidebar.js";
-    mountSidebar("stocks");
-  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" defer></script>
+  <script type="module" src="/static/js/pages/stock.js"></script>
 </head>
 <body>
   <div class="app">
     <aside id="sidebar" class="sidebar"></aside>
     <main class="main" id="main">
       <div class="main__inner">
-        <h1 class="sr-only">종목 상세</h1>
+        <p><a class="section__link" href="/stocks">← 주식 리스트</a></p>
+        <div id="head"></div>
+
+        <section class="section card detail-section" aria-labelledby="h-price">
+          <div class="section__head"><h2 id="h-price">가격 차트</h2><div id="range-tabs"></div></div>
+          <div id="price-chart"></div>
+        </section>
+
+        <section class="section detail-section" aria-labelledby="h-key">
+          <h2 id="h-key">핵심 정보</h2>
+          <div id="key-metrics"></div>
+        </section>
+
+        <p class="disclaimer">시세는 일봉 기준이며 장중 실시간이 아닙니다. 이 화면의 어떤 정보도 투자 권유가 아닙니다.</p>
       </div>
     </main>
   </div>
