@@ -4,6 +4,7 @@
 **D 선행 계약**: `financial_statements`·`disclosures` 테이블과 ORM, `providers/base.py`에 재무·공시 인터페이스 보강.
 **공통 주의**: `.env`에 `KRX_ID`·`KRX_PW`·`DART_API_KEY`·`SEC_USER_AGENT` 필요. 단위 테스트는 실제 네트워크를 쓰지 않는다(`tests/fakes.py`).
 **머지 순서**: C → B → D → A
+**PR 방식**: 앞 순서 작업이 머지되기 전에 끝나면 기다리지 않고 Draft PR → 시니어가 그 파트를 먼저 리뷰 → 앞 순서 머지 후 최신 stage를 합쳐 같은 PR을 Ready로 전환(CLAUDE.md 6절). 시니어는 Ready PR만 머지 순서대로 머지한다.
 
 ---
 
@@ -38,7 +39,9 @@
   docker compose run --rm api python -m app.ingest prices --tickers 005930 AAPL  → ingestion_logs에 SUCCESS 2행
   같은 명령 재실행 → 새로 받을 날짜가 없으면 외부 호출 없이 끝남
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] 없음 — providers/base.py(D 계약)는 이미 stage3에 있다. 머지 순서 1번이므로 끝나면 바로 Ready PR.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage3에서 새로 만듦) → origin/stage3 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -73,7 +76,9 @@
   curl "localhost:8000/api/v1/stocks/KOSPI/005930/financials?limit=2" → 원본 예시와 같은 구조
   pytest -q 통과
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] C(feat/s3-c-price-providers)의 http.py·factory.py. dart.py·sec.py는 원본과 같은 이름으로 http.py를 import 해 먼저 작성하고, 이를 쓰는 테스트는 ⏸ C 머지 후. 3번(factory.py [S3-B] 구역)은 C의 파일이므로 계획표 맨 뒤로 ⏸. C 머지 전이면 Draft PR.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage3에서 새로 만듦) → origin/stage3 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -102,7 +107,9 @@
 [완료 기준]
   삼성전자·AAPL 상세에서 재무·공시 표시, 데이터 없는 종목은 빈 상태 / 사이드바 갱신 시각이 status API와 일치 / 콘솔 에러 0
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] B(feat/s3-b-financials)의 financials·disclosures API, D의 /market/refresh·/refresh/status. 아직 없으면 docs/06 예시로 MOCK 하고 묻지 말고 진행한다. 머지 순서가 마지막이므로 B·D 머지 전이면 Draft PR.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage3에서 새로 만듦) → origin/stage3 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -111,6 +118,7 @@
 
 ```
 시니어 모드. Stage 3.
+[PR] Draft PR은 코드 리뷰만 한다. Ready로 바뀐 PR을 머지 순서대로 머지하고, 머지할 때마다 다음 순서 팀원에게 알린다(그쪽 Claude가 동기화 중 머지를 감지해 Ready 전환을 시작한다).
 [선행] schema·ORM에 financial_statements·disclosures, providers/base.py 재무·공시 인터페이스 → 커밋 후 배포.
 [내 구현]
 1. backend/app/ingest/store.py — advisory_lock 추가 (C 파일이지만 동시성 설계라 D가 맡음 — C에게 공지)

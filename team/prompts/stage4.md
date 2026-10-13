@@ -4,6 +4,7 @@
 **D 선행 계약**: 마이그레이션 `001_scoring_v2.sql`·`002_presets.sql`과 schema 반영(scoring_presets, scoring_weights, stock_metric_values, stock_scores, peer_group_members.is_primary), `docs/05`에 `v_stock_metrics` 컬럼 목록과 `stock_scores` 구조 기록.
 **순서상 의존**: B의 `v_stock_metrics`가 C의 지표 입력이다 → **B는 1번(VIEW)부터 먼저 PR**하고 나머지를 이어서 한다.
 **머지 순서**: B(VIEW) → C → B(API) → D → A
+**PR 방식**: 앞 순서 작업이 머지되기 전에 끝나면 기다리지 않고 Draft PR → 시니어가 그 파트를 먼저 리뷰 → 앞 순서 머지 후 최신 stage를 합쳐 같은 PR을 Ready로 전환(CLAUDE.md 6절). 시니어는 Ready PR만 머지 순서대로 머지한다.
 
 ---
 
@@ -38,7 +39,9 @@
   docker compose run --rm api python -m app.ingest explain   → 삼성전자 팩터별 기여도 출력
   pytest -q tests/test_scoring.py
 
-[시작] 먼저 "모델 한 장 요약"만 출력하라. 그다음 CLAUDE.md 2절의 작업 계획표. 코드는 내가 승인한 뒤 파일 하나씩.
+[선행 작업] B ①(feat/s4-b-metrics-view)의 v_stock_metrics. 컬럼 목록은 docs/05에 있으므로 그 이름대로 SQL·서비스를 먼저 작성하고, 실제 VIEW가 있어야 도는 테스트는 ⏸ B① 머지 후. B① 머지 전이면 Draft PR.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② "모델 한 장 요약"(9절 문체)만 먼저 출력하고, 그다음 CLAUDE.md 2절의 작업 계획표. 코드는 내가 승인한 뒤 파일 하나씩.
 ```
 
 ---
@@ -73,7 +76,9 @@
   curl localhost:8000/api/v1/stocks/KOSPI/005930/peers/chart?range=1m → 휴장일 null 포함
   pytest -q tests/test_analysis.py
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] ①은 선행 없음 — 끝나면 바로 Ready PR(C가 이 VIEW를 기다린다). ②는 C(feat/s4-c-scoring)의 stock_scores 행이 필요하지만 테이블(D)은 이미 있으므로 테스트는 픽스처로 행을 직접 넣어 진행한다. ①이 머지 전이면 ②는 ①에서 갈라져 시작(CLAUDE.md 10절). C 머지 전이면 ②는 Draft PR.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -101,7 +106,9 @@
 [완료 기준]
   프리셋 바꾸면 상세·리스트·홈 점수가 같이 바뀜 / 1인 그룹은 '비교 대상 없음' / 점수 없는 종목은 빈 상태 / 콘솔 에러 0
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] B ②(feat/s4-b-analysis-api)의 analysis·peers·presets API. 아직 없으면 docs/06 3-3 예시로 MOCK 하고 묻지 말고 진행한다. 머지 순서가 마지막이므로 B②·D 머지 전이면 Draft PR.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -110,6 +117,7 @@
 
 ```
 시니어 모드. Stage 4.
+[PR] Draft PR은 코드 리뷰만 한다. Ready로 바뀐 PR을 머지 순서대로 머지하고, 머지할 때마다 다음 순서 팀원에게 알린다(그쪽 Claude가 동기화 중 머지를 감지해 Ready 전환을 시작한다).
 [선행] 001_scoring_v2.sql·002_presets.sql + schema·ORM, docs/05 v_stock_metrics 컬럼 계약 → 커밋 후 배포.
 [내 구현]
 1. 003_benchmark.sql(+schema: coverage, detail_synced_at), backend/app/ingest/benchmark.py — 국가·섹터별 시총 상위 비교군 선정·평시 데이터·정리

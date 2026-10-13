@@ -3,6 +3,7 @@
 **단계 목표**: 홈을 2열 대시보드(검색바·투자 성향 한 줄 → 관심종목 컴팩트 + 섹터 히트맵·시장 심리 지수 → 거래량 급증/매력도 순위 탭)로 개편하고, 상장 종목 전체를 상단 검색으로 찾을 수 있게 한다. 홈 위젯은 DB에 저장해 재사용(외부 호출 최소화).
 **D 선행 계약**: `005_listed_dividend.sql`(coverage 'listed', valuation_snapshots.dps)·`007_home_widgets.sql`(sector_performance_daily, market_sentiment_daily) + schema 반영. `be/app/api/home.py` 라우터 뼈대(`/home` prefix, 구역 주석)를 먼저 커밋.
 **머지 순서**: C → B → A → D 마감
+**PR 방식**: 앞 순서 작업이 머지되기 전에 끝나면 기다리지 않고 Draft PR → 시니어가 그 파트를 먼저 리뷰 → 앞 순서 머지 후 최신 stage를 합쳐 같은 PR을 Ready로 전환(CLAUDE.md 6절). 시니어는 Ready PR만 머지 순서대로 머지한다.
 
 ---
 
@@ -29,7 +30,9 @@
   curl localhost:8000/api/v1/home/sectors?country=US · /home/sentiment?market=KR
   두 번째 호출은 외부 호출 없음(ingestion_logs 확인) / pytest -q tests/test_home_widgets.py
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] 없음 — 007 마이그레이션·home.py 뼈대(D 계약)는 이미 stage6에 있다. 머지 순서 1번이므로 끝나면 바로 Ready PR.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage6에서 새로 만듦) → origin/stage6 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -57,7 +60,9 @@
   curl "localhost:8000/api/v1/stocks/search?q=삼성" · "?q=AAPL" → 정렬 규칙대로
   curl localhost:8000/api/v1/home/ranking / pytest -q
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] 코드상 기다릴 것 없음(머지 순서만 C 다음). home.py는 C와 구역이 다르므로 충돌 시 둘 다 남긴다. C 머지 전이면 Draft PR.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage6에서 새로 만듦) → origin/stage6 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -84,7 +89,9 @@
 [건드리지 않을 파일] backend/ 전부, 공통 css(D)
 [완료 기준] 원본 01_home.png와 레이아웃 일치 / 검색에서 상장 목록 종목 클릭 → 상세(데이터 수집 중 안내) / 모바일 1열 / 콘솔 에러 0
 
-[시작] 지금은 CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
+[선행 작업] C의 /home/sectors·/home/sentiment, B의 /stocks/search·/home/ranking, D의 market_calendar 응답 필드(7번). 아직 없으면 원본 home.py·schemas 응답 모양으로 MOCK 하고 묻지 말고 진행한다. B·C 머지 전이면 Draft PR.
+[시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage6에서 새로 만듦) → origin/stage6 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
+② CLAUDE.md 2절의 작업 계획표만 출력하라. 코드는 내가 승인한 뒤 파일 하나씩 진행한다.
 ```
 
 ---
@@ -93,6 +100,7 @@
 
 ```
 시니어 모드. Stage 6 마감.
+[PR] Draft PR은 코드 리뷰만 한다. Ready로 바뀐 PR을 머지 순서대로 머지하고, 머지할 때마다 다음 순서 팀원에게 알린다(그쪽 Claude가 동기화 중 머지를 감지해 Ready 전환을 시작한다).
 [선행] 005·007 마이그레이션 + schema, home.py 뼈대 → 커밋 후 배포.
 [내 구현]
 1. backend/app/services/market_calendar.py — exchange-calendars 기반 장 상태, /market/indices 응답에 추가
