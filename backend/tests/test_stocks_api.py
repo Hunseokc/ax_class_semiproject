@@ -103,7 +103,9 @@ def test_pages_do_not_overlap(client):
     _, p2 = get(client, "/stocks?limit=2&offset=2")
     assert tickers(p1) + tickers(p2) == ["AAPL", "NVDA", "005930", "000660"]
     _, p3 = get(client, "/stocks?limit=2&offset=4")
-    assert p3["items"] == []
+    assert p3["items"] == [] and p3["total"] == 4                  # 끝을 넘은 페이지도 전체 개수는 그대로
+    _, p4 = get(client, "/stocks?group=없는그룹&offset=2")
+    assert p4["items"] == [] and p4["total"] == 0
 
 
 # ---------------------------------------------------------------- 리스트: 필터·검색
@@ -273,6 +275,22 @@ def test_index_without_prices_keeps_card(client, engine):
     _, b = get(client, "/market/indices")
     empty = next(i for i in b["indices"] if i["code"] == "EMPTY")
     assert empty["close"] is None and empty["change"] is None and empty["sparkline"] == []
+
+
+def test_sparkline_and_fx_history_cover_one_year(client, engine):
+    """홈 카드가 1개월·3개월·1년으로 자를 수 있게 최신일 기준 1년치를 준다 (1년보다 오래된 점은 제외)."""
+    old = [D - timedelta(days=n) for n in (40, 200, 364, 366)]      # 366일 전은 1년 밖
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO index_daily_prices (index_id, trade_date, close) VALUES (1, :d, 2000)"),
+                     [{"d": d} for d in old])
+        conn.execute(text("INSERT INTO fx_rates (rate_at, usd_krw, granularity) VALUES (CAST(:d AS date) + time '00:00', 1200, 'DAILY')"),
+                     [{"d": d} for d in old])
+    _, b = get(client, "/market/indices")
+    spark = [p["date"] for p in b["indices"][0]["sparkline"]]
+    assert spark[0] == old[2].isoformat() and old[3].isoformat() not in spark and len(spark) == 3 + 3
+    _, f = get(client, "/market/fx")
+    hist = [h["date"] for h in f["history"]]
+    assert hist[0] == old[2].isoformat() and old[3].isoformat() not in hist and len(hist) == 3 + 3
 
 
 # ---------------------------------------------------------------- 환율

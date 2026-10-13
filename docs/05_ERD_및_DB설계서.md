@@ -1,10 +1,10 @@
-# 05. ERD 및 DB 설계서 (초안 — Stage 1 범위)
+# 05. ERD 및 DB 설계서 (Stage 1 범위)
 
-> **상태: Stage 0 초안.** Stage 1 테이블 10개만 담았다. 이후 단계에서 D가 테이블을 추가할 때 이 문서의 해당 절을 함께 확장한다.
-> (Stage 2: 사용자·관심종목·포트폴리오 / Stage 3: 재무·공시 / Stage 4+: 매력도·비교군·섹터 — 의도적 비정규화 2건, 트리거, VIEW, EXPLAIN 비교도 그때 채운다.)
+> **상태: Stage 1 확정.** Stage 1 테이블 10개·VIEW 2개·보조 인덱스 6개를 실제 DDL 기준으로 담았다. 이후 단계에서 D가 테이블을 추가할 때 이 문서의 해당 절을 함께 확장한다.
+> (Stage 2: 사용자·관심종목·포트폴리오 / Stage 3: 재무·공시·밸류에이션 수집 / Stage 4+: 매력도·비교군·섹터 — 의도적 비정규화 2건, 트리거, `v_stock_metrics`, EXPLAIN 비교도 그때 채운다.)
 
-- DDL 원문: `backend/db/schema.sql` → `backend/db/indexes.sql` 순서로 실행 (`views.sql`은 Stage 1-B에서 추가)
-- DBMS: PostgreSQL 16 / 테이블 10개, 보조 인덱스 6개
+- DDL 원문: `backend/db/schema.sql` → `backend/db/indexes.sql` → `backend/db/views.sql` 순서로 실행 (`python -m app.ingest init-db`가 같은 순서로 적용)
+- DBMS: PostgreSQL 16 / 테이블 10개, VIEW 2개, 보조 인덱스 6개
 - 금액·가격은 모두 `NUMERIC` (float 사용 안 함), 시각은 모두 `TIMESTAMPTZ`
 - ORM(`backend/app/models/__init__.py`)은 `schema.sql`과 1:1이며 `tests/test_schema.py`가 일치를 검증한다.
 
@@ -238,7 +238,9 @@ erDiagram
 | started_at | timestamptz | N |  |  | 시작 시각 |
 | finished_at | timestamptz | Y |  |  | 종료 시각 (`>= started_at`) |
 
-제약: `CHECK (job_type IN (...))` / `CHECK (status IN ('SUCCESS','FAILED','SKIPPED'))` / `CHECK (rows_loaded >= 0)` / `CHECK (finished_at IS NULL OR finished_at >= started_at)`
+Stage 1에서 쓰는 값: `MASTER`(INTERNAL, `master`), `PRICES`(PYKRX·YFINANCE, 종목 1건당 1행), `INDICES`(지수 1건당 1행), `FX`(YFINANCE). `VALUATION`은 CHECK에만 있고 수집은 Stage 3.
+
+제약: `CHECK (job_type IN ('PRICES','INDICES','FX','VALUATION','MASTER'))` / `CHECK (status IN ('SUCCESS','FAILED','SKIPPED'))` / `CHECK (rows_loaded >= 0)` / `CHECK (finished_at IS NULL OR finished_at >= started_at)`
 
 ## 4. 정규화 (Stage 1 범위)
 
@@ -261,10 +263,28 @@ erDiagram
 
 (`valuation_snapshots (stock_id, as_of DESC)`는 PK 역방향 스캔과 중복이라 만들지 않는다.)
 
-## 6. 이후 단계에서 채울 절
+FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으로 이미 인덱싱된다: `stocks.market_id`(UNIQUE 선두), 복합 PK의 선두 컬럼들. `indices.market_id`(10행), `ingestion_logs.stock_id`는 행 수가 적어 생략했다.
+
+## 6. VIEW (Stage 1)
+| VIEW | 내용 | 주요 SQL 요소 | 사용처 |
+|---|---|---|---|
+| v_latest_price | 종목별 최신 종가·전일 종가·등락·등락률·거래량 | LATERAL, 서브쿼리 LIMIT 2, LAG, NULLIF | `stock_list.sql`, `stock_detail.sql` |
+| v_fx_latest | 최신 USD/KRW 1행 (최신 rate_at, 동시각이면 SNAPSHOT 우선) | ORDER BY, LIMIT | `/stocks`의 `fx_rate_at`, 상세의 USD 원화 환산 |
+
+Stage 1에는 SNAPSHOT을 쓰는 환율 서비스가 없으므로(Stage 3) `v_fx_latest`는 `fx` 수집이 넣은 최신 DAILY 행을 돌려준다.
+
+## 7. 검증 결과 (Stage 1)
+| 검증 | 결과 |
+|---|---|
+| DDL 적용 (schema → indexes → views, 테스트 DB 카탈로그 조회) | 테이블 10, VIEW 2, 보조 인덱스 6 |
+| ORM ↔ DDL 컬럼 일치, Stage 1 외 테이블 없음 | `test_orm_matches_schema`, `test_tables_are_stage1_only` 통과 |
+| 제약 위반 18건(고가<저가, 음수 거래량, 가격 0, PK·UNIQUE 중복, 없는 FK, 잘못된 국가·통화·granularity·job_type, 환율 0, 종료<시작 등) 거부, 종목 삭제 시 CASCADE | `test_constraints_reject_bad_rows`, `test_delete_cascades` 통과 |
+| 같은 데이터 재적재 시 행 수 불변(upsert) | `test_ingest.py`의 샘플·전체 재적재 테스트 통과 |
+| 실제 수집 적재 (2026-10-13, 개발 DB) | 25종목 `daily_prices` 12,276행, 지수 10개 4,960행, USD/KRW DAILY 516행, `ingestion_logs` 성공 41 / 실패 0 |
+
+## 8. 이후 단계에서 채울 절
 
 - 사용자·관심종목·포트폴리오 테이블, `updated_at` 트리거, 의도적 비정규화(`portfolio_items.ref_*`) — Stage 2
-- 재무제표·공시 테이블 — Stage 3
-- 매력도·비교군·섹터 관련 테이블/컬럼, 마이그레이션 파일 — Stage 4 이후
-- VIEW(`v_latest_price`, `v_fx_latest`) — Stage 1-B
+- 재무제표·공시 테이블, `valuation_snapshots` 수집 — Stage 3
+- 매력도·비교군·섹터 관련 테이블/컬럼, `v_stock_metrics`, 마이그레이션 파일 — Stage 4 이후
 - 인덱스 전후 `EXPLAIN (ANALYZE)` 비교, 분석 쿼리와 SQL 요소 정리 — Stage 5

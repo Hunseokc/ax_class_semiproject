@@ -30,16 +30,13 @@ function inRange(points, lastDate) {
 
 const localDay = (tz, at = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(at);   // YYYY-MM-DD
 
-/** 최신 데이터 날짜가 그 시장의 오늘이 아니면 배지. 판정은 서버의 거래소 달력(session_status),
- *  서버가 판정하지 못하면(null) 주말 여부로만 판단한다 */
+/** 최신 데이터 날짜가 그 시장의 오늘이 아니면 배지. Stage 1 API에는 거래소 달력 판정(session_status)이 없어
+ *  주말 여부로만 판단한다 (session_status는 이후 단계에서 API에 추가되면 다시 우선 사용) */
 function sessionBadge(ix) {
   if (!ix.as_of) return "";
-  let status = ix.session_status;
-  if (!status) {
-    const today = localDay(ix.country === "US" ? "America/New_York" : "Asia/Seoul");
-    const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
-    status = ix.as_of >= today ? "today" : dow === 0 || dow === 6 ? "holiday" : "previous_session";
-  }
+  const today = localDay(ix.country === "US" ? "America/New_York" : "Asia/Seoul");
+  const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
+  const status = ix.as_of >= today ? "today" : dow === 0 || dow === 6 ? "holiday" : "previous_session";
   if (status === "today") return "";
   const [text, why] = status === "holiday"
     ? ["휴장", "오늘은 휴장일(거래소 달력 기준)이라 마지막 거래일 종가를 표시합니다"]
@@ -68,7 +65,9 @@ function fxCard(fx) {
       <div class="metric-card__meta"><span>${sparkMeta().label} 추이</span></div>
       <div class="metric-card__foot">${changeHtml(fx.change_rate, "KR")}<span class="subtle" title="환율 기준 시각 ${dateTime(fx.rate_at)}">${dateTime(fx.rate_at).slice(-5)}</span></div>
     </article>`);
-  const values = [...inRange(fx.history || [], localDay("Asia/Seoul", new Date(fx.rate_at))).map((p) => p.usd_krw), fx.usd_krw];
+  // 현재값이 SNAPSHOT(장중 시각)일 때만 끝에 덧붙인다. DAILY면 이미 history의 마지막 점이라 덧붙이면 꼬리가 평평해진다
+  const history = inRange(fx.history || [], localDay("Asia/Seoul", new Date(fx.rate_at))).map((p) => p.usd_krw);
+  const values = fx.granularity === "SNAPSHOT" ? [...history, fx.usd_krw] : history;
   queueMicrotask(() => sparkline(el.querySelector("canvas"), values, color("--lavender")));
   return el;
 }
