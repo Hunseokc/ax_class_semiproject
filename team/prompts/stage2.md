@@ -102,7 +102,7 @@
 1. frontend/js/api.js — [S2-A] 구역: watchlist·portfolios 호출 함수
 2. frontend/js/components/watch.js — ★ 토글(낙관적 업데이트, 실패 시 되돌림)
 3. frontend/js/pages/stocks.js·stock.js — [S2-A] 구역에 ★ 연결 (만들자마자 화면에서 눌러 볼 수 있게 컴포넌트 바로 다음에 연결)
-4. frontend/js/pages/home.js — [S2-A] 구역에 관심종목 카드(가격·등락) + 정렬 변경
+4. frontend/js/pages/home.js — [S2-A] 구역에 관심종목 카드(가격·등락) + 정렬 변경. Stage 1 발표용 임시 '주요 종목' 섹션([S1-D], FEATURED 고정 2종목 — index.html·home.js·pages.css)을 이 카드로 교체하고 임시 코드·스타일은 지운다
 5. frontend/portfolio.html + frontend/js/pages/portfolio.js — 포트폴리오 목록·생성·시드 수정·삭제, 항목 표(수정·삭제), 요약(사용·잔여·평가손익·환율 효과), 비중 차트
 6. frontend/js/components/add-to-portfolio.js — 담기 모달: 포트폴리오 선택, 수량/금액/비중 모드, 미리보기(예상 수량·원화 금액), 409 시드 초과 시 최대 수량 안내
 7. frontend/js/pages/stocks.js·stock.js — [S2-A] 구역에 담기 버튼 연결
