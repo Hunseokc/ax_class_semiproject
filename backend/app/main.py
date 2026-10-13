@@ -12,7 +12,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import health
+from app.api import health, market, stocks
 from app.core.config import FRONTEND_DIR, get_settings
 from app.core.errors import NotFound, install_error_handlers, internal_error_response
 from app.core.logging import request_id_var, setup_logging
@@ -58,6 +58,8 @@ async def request_context(request: Request, call_next):
 api = APIRouter(prefix="/api/v1", responses={404: {"model": ErrorOut}, 409: {"model": ErrorOut}, 422: {"model": ErrorOut}})
 # 라우터 등록은 자기 구역에 import 1줄 + include_router 1줄만 추가한다.
 # ── [S1-B] stocks·market ──
+for r in (market.router, stocks.groups_router, stocks.router):
+    api.include_router(r)
 
 # ── [S2-B] watchlist ──
 
