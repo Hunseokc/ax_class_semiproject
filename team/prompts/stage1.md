@@ -1,8 +1,9 @@
-# Stage 1 — MVP: 샘플 데이터로 리스트·상세·지수
+# Stage 1 — MVP: 실제 시세 수집 + 리스트·상세·지수
 
-**단계 목표**: 외부 API 없이 `backend/sample_data/*.csv`만으로 주식 리스트·종목 상세·홈 지수 카드가 실제 DB 데이터를 보여준다.
+**단계 목표**: pykrx·yfinance로 실제 시세(일봉)·지수·환율을 수집해 DB에 넣고(수집이 안 되면 `backend/sample_data/*.csv`로 대체), 주식 리스트·종목 상세·홈 지수 카드가 실제 DB 데이터를 보여준다.
 **병렬 개발 방법**: B·A는 C를 기다리지 않는다. B는 테스트용 픽스처(conftest)로, A는 원본 `docs/06` 3-1·3-2의 예시 JSON을 목 데이터로 먼저 개발한다.
-**머지 순서**: C → B → A → D 통합
+**머지 순서**: C → D(수집) → B → A → D 통합
+**범위 변경(10/13)**: 실제 시세 수집(시세·지수·환율)을 Stage 3에서 당겨 D가 맡는다. C의 전처리·저장 함수(clean_bars·clean_fx·upsert·job_log)를 그대로 쓴다. 재무·밸류에이션 수집, 4시간 갱신, advisory lock은 Stage 3 유지. B의 API는 계속 DB만 조회한다.
 
 ---
 
@@ -111,13 +112,32 @@
 
 ---
 
+## 팀원 D(시니어) — 실제 시세 수집
+
+```
+시니어 모드. Stage 1 수집. 브랜치 feat/s1-d-collectors (origin/stage1에서 분기 — C 머지 완료 → Ready PR)
+1. backend/app/core/config.py(price_source_kr·krx_id/pw·export_krx_credentials), .env.example
+2. backend/app/providers/{__init__,base,http,convert,krx,yahoo,factory}.py — 일봉·지수·환율만 (Bar·FxPoint는 preprocess에서 re-export)
+3. backend/app/ingest/jobs.py [S1-D] — stock_refs·index_refs, load_prices·load_indices·load_fx_daily
+4. backend/app/ingest/__main__.py [S1-D] — prices [--full] [--tickers], indices [--full], fx [--full]
+5. backend/tests/fakes.py, backend/tests/test_ingest.py [S1-D]
+[이번 단계에서 뺄 것] 밸류에이션·재무·공시 수집, bulk·batch 경로, refresh·스케줄러, advisory_lock, CLI all
+[완료 기준]
+  docker compose run --rm api python -m app.ingest prices --tickers 005930 AAPL  → ingestion_logs에 SUCCESS 2행
+  같은 명령 재실행 → 새로 받을 날짜가 없으면 외부 호출 없이 '최신 상태'
+  docker compose run --rm api pytest -q tests/test_ingest.py
+[대체] 수집 실패 시 PRICE_SOURCE_KR=yfinance, 그래도 안 되면 import-sample
+```
+
+---
+
 ## 팀원 D(시니어) — 통합
 
 ```
 시니어 모드. Stage 1 통합.
-1. stage1 브랜치에 C → B → A 순서로 PR 머지, 충돌 해결.
+1. stage1 브랜치에 C → D(수집) → B → A 순서로 PR 머지, 충돌 해결.
 2. A의 MOCK 플래그 제거 확인, main.py 라우터 등록 확인.
-3. 통합 시나리오 실행: init-db → master --offline → import-sample → /stocks → 상세 → 홈.
+3. 통합 시나리오 실행: init-db → master --offline → prices·indices·fx(실패 시 import-sample) → /stocks → 상세 → 홈.
 4. backend/tests/test_integration.py 뼈대(샘플 적재 후 주요 API 200).
 5. docs/05·06에 Stage 1 범위 반영. 원본과 파일별 diff 요약 — 의도적으로 뺀 부분 외 차이는 fix 커밋.
 6. stage1 → main, 태그 v1.0.
