@@ -175,11 +175,11 @@ CREATE TABLE watchlist_items (
 -- 모의 포트폴리오: "시드 안에서 담아보는 계산기 겸 장바구니" (거래 원장 아님)
 CREATE TABLE portfolios (
   portfolio_id SERIAL PRIMARY KEY,
-  user_id      INT          NOT NULL REFERENCES users ON DELETE CASCADE,
-  name         VARCHAR(64)  NOT NULL,
-  seed_amount  NUMERIC(18,0) NOT NULL CHECK (seed_amount > 0),     -- 원화 시드
-  created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  user_id      INT           NOT NULL REFERENCES users ON DELETE CASCADE,
+  name         VARCHAR(100)  NOT NULL,
+  seed_krw     NUMERIC(20,0) NOT NULL CHECK (seed_krw > 0),        -- 투자 시드(원)
+  created_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
   UNIQUE (user_id, name)                                           -- 같은 사용자의 포트폴리오 이름 중복 → 409
 );
 CREATE TRIGGER trg_portfolios_updated_at BEFORE UPDATE ON portfolios
@@ -191,14 +191,17 @@ CREATE TRIGGER trg_portfolios_updated_at BEFORE UPDATE ON portfolios
 CREATE TABLE portfolio_items (
   item_id      SERIAL PRIMARY KEY,
   portfolio_id INT           NOT NULL REFERENCES portfolios ON DELETE CASCADE,
-  stock_id     INT           NOT NULL REFERENCES stocks,           -- 담은 종목은 지워지지 않게 CASCADE 안 함
+  stock_id     INT           NOT NULL REFERENCES stocks ON DELETE RESTRICT,  -- 담긴 종목은 삭제 불가
   quantity     INT           NOT NULL CHECK (quantity > 0),        -- 정수 주식 수
   ref_price    NUMERIC(18,4) NOT NULL CHECK (ref_price > 0),       -- 담은 시점 종가 (종목 통화)
-  ref_fx_rate  NUMERIC(12,4) NOT NULL CHECK (ref_fx_rate > 0),     -- 담은 시점 환율 (KRW 종목은 1)
+  ref_fx_rate  NUMERIC(12,4) NOT NULL DEFAULT 1 CHECK (ref_fx_rate > 0),  -- 담은 시점 환율 (KRW 종목은 1)
   ref_date     DATE          NOT NULL,                             -- 위 가격·환율의 기준일
+  memo         TEXT,
   created_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  cost_krw     NUMERIC(24,2) GENERATED ALWAYS AS (quantity * ref_price * ref_fx_rate) STORED,  -- 원가(원)
   UNIQUE (portfolio_id, stock_id)                                  -- 같은 종목은 한 줄 (수량 수정으로 늘린다)
 );
+-- "원가 합계 ≤ 시드"는 행 간 제약이라 CHECK로 걸 수 없다 → 서비스에서 트랜잭션 + 포트폴리오 행 잠금(SELECT ... FOR UPDATE)으로 보장한다.
 CREATE TRIGGER trg_portfolio_items_updated_at BEFORE UPDATE ON portfolio_items
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();

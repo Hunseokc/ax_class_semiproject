@@ -2,6 +2,8 @@
 
 이후 단계 테이블이 추가되면 담당 단계에서 테이블 수와 제약 케이스를 늘린다.
 """
+from decimal import Decimal
+
 import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.dialects import postgresql
@@ -60,15 +62,18 @@ def test_tables_are_stage1_and_2_only(engine):
     ("사용자명 중복", "INSERT INTO users (username, display_name) VALUES ('demo', '중복')"),
     ("관심종목 중복(PK)", "INSERT INTO watchlist_items (user_id, stock_id) VALUES (1, 1), (1, 1)"),
     ("없는 사용자 관심종목 FK", "INSERT INTO watchlist_items (user_id, stock_id) VALUES (999, 1)"),
-    ("시드 0", "INSERT INTO portfolios (user_id, name, seed_amount) VALUES (1, 'P', 0)"),
-    ("포트폴리오 이름 중복", "INSERT INTO portfolios (user_id, name, seed_amount) VALUES (1, 'P', 100), (1, 'P', 100)"),
-    ("수량 0", "INSERT INTO portfolios (portfolio_id, user_id, name, seed_amount) VALUES (1, 1, 'P', 100);"
+    ("시드 0", "INSERT INTO portfolios (user_id, name, seed_krw) VALUES (1, 'P', 0)"),
+    ("포트폴리오 이름 중복", "INSERT INTO portfolios (user_id, name, seed_krw) VALUES (1, 'P', 100), (1, 'P', 100)"),
+    ("수량 0", "INSERT INTO portfolios (portfolio_id, user_id, name, seed_krw) VALUES (1, 1, 'P', 100);"
               "INSERT INTO portfolio_items (portfolio_id, stock_id, quantity, ref_price, ref_fx_rate, ref_date) VALUES (1, 1, 0, 1, 1, '2030-01-01')"),
-    ("담은 가격 0", "INSERT INTO portfolios (portfolio_id, user_id, name, seed_amount) VALUES (1, 1, 'P', 100);"
+    ("담은 가격 0", "INSERT INTO portfolios (portfolio_id, user_id, name, seed_krw) VALUES (1, 1, 'P', 100);"
                  "INSERT INTO portfolio_items (portfolio_id, stock_id, quantity, ref_price, ref_fx_rate, ref_date) VALUES (1, 1, 1, 0, 1, '2030-01-01')"),
-    ("항목 종목 중복", "INSERT INTO portfolios (portfolio_id, user_id, name, seed_amount) VALUES (1, 1, 'P', 100);"
+    ("항목 종목 중복", "INSERT INTO portfolios (portfolio_id, user_id, name, seed_krw) VALUES (1, 1, 'P', 100);"
                   "INSERT INTO portfolio_items (portfolio_id, stock_id, quantity, ref_price, ref_fx_rate, ref_date) "
                   "VALUES (1, 1, 1, 1, 1, '2030-01-01'), (1, 1, 2, 1, 1, '2030-01-01')"),
+    ("담긴 종목 삭제(RESTRICT)", "INSERT INTO portfolios (portfolio_id, user_id, name, seed_krw) VALUES (1, 1, 'P', 100);"
+                            "INSERT INTO portfolio_items (portfolio_id, stock_id, quantity, ref_price, ref_date) VALUES (1, 1, 1, 1, '2030-01-01');"
+                            "DELETE FROM stocks WHERE stock_id = 1"),
 ])
 def test_constraints_reject_bad_rows(engine, label, sql):
     with pytest.raises(IntegrityError):
@@ -92,12 +97,14 @@ def test_delete_cascades(engine):
 
 
 def test_user_delete_cascades_and_updated_at_trigger(engine):
-    """사용자 삭제 → 관심종목·포트폴리오·항목 CASCADE. UPDATE 시 updated_at 트리거가 시각을 갱신한다."""
+    """사용자 삭제 → 관심종목·포트폴리오·항목 CASCADE. cost_krw 생성 컬럼 계산. UPDATE 시 updated_at 트리거가 시각을 갱신한다."""
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO watchlist_items (user_id, stock_id) VALUES (1, 1)"))
-        conn.execute(text("INSERT INTO portfolios (portfolio_id, user_id, name, seed_amount) VALUES (1, 1, 'P', 1000000)"))
+        conn.execute(text("INSERT INTO portfolios (portfolio_id, user_id, name, seed_krw) VALUES (1, 1, 'P', 1000000)"))
         conn.execute(text("INSERT INTO portfolio_items (portfolio_id, stock_id, quantity, ref_price, ref_fx_rate, ref_date) "
                           "VALUES (1, 3, 2, 195, 1300, '2030-01-01')"))
+        # cost_krw는 생성 컬럼: 2주 × 195달러 × 1300원 = 507,000원
+        assert conn.execute(text("SELECT cost_krw FROM portfolio_items")).scalar() == Decimal("507000.00")
         conn.execute(text("UPDATE portfolios SET created_at = created_at - interval '1 day', "
                           "updated_at = updated_at - interval '1 day' WHERE portfolio_id = 1"))
         conn.execute(text("UPDATE portfolios SET name = 'Q' WHERE portfolio_id = 1"))
