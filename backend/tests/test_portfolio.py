@@ -5,8 +5,6 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import text
 
-from app.api import deps
-from app.main import app
 from tests.conftest import D
 
 API = "/api/v1/portfolios"
@@ -21,14 +19,6 @@ def create(client, name="테스트", seed=10_000_000):
 def add(client, pid, ticker, mode, value, market=None):
     market = market or ("NASDAQ" if ticker.isalpha() else "KOSPI")
     return client.post(f"{API}/{pid}/items", json={"market": market, "ticker": ticker, "mode": mode, "value": value})
-
-
-@pytest.fixture
-def as_user(client):
-    """이후 요청을 지정한 사용자로 보낸다 (나중에 로그인이 정할 사용자를 대신함). 해제는 client 픽스처가 한다."""
-    def _set(user_id: int) -> None:
-        app.dependency_overrides[deps.get_current_user_id] = lambda: user_id
-    return _set
 
 
 # ------------------------------------------------------------------ 명세 10절 고정 시나리오
@@ -120,16 +110,14 @@ def test_duplicate_item_and_not_found(client):
     assert client.delete(f"{API}/{other}/items/{first['item_id']}").status_code == 404
 
 
-def test_portfolio_validation_and_duplicate_name(client, engine, as_user):
+def test_portfolio_validation_and_duplicate_name(client, as_user):
     assert client.post(API, json={"name": "x", "seed_krw": 0}).status_code == 422
     assert client.post(API, json={"name": "x", "seed_krw": -1}).status_code == 422
     assert client.post(API, json={"name": "", "seed_krw": 100}).status_code == 422
     create(client, name="같은이름")
     r = client.post(API, json={"name": "같은이름", "seed_krw": 100})
     assert r.status_code == 409 and r.json()["error"]["code"] == "DUPLICATE_PORTFOLIO_NAME"
-    with engine.begin() as conn:                                            # 공통 픽스처에는 demo(1)뿐 → 두 번째 사용자를 여기서 준비
-        conn.execute(text("INSERT INTO users (user_id, nickname) VALUES (2, 'other')"))
-    as_user(2)
+    as_user(2)                                                              # other(2)는 conftest 공통 픽스처에 있다
     create(client, name="같은이름")                                         # 사용자가 다르면 허용
     as_user(99)
     assert client.post(API, json={"name": "x", "seed_krw": 100}).status_code == 404
