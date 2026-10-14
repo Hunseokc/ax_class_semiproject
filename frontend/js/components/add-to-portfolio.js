@@ -1,5 +1,6 @@
-// 담기 팝업: 포트폴리오 선택 + 모드(수량/금액/비중) + 값 → 미리보기 → POST
+// 담기 폼: 포트폴리오 선택 + 모드(수량/금액/비중) + 값 → 미리보기 → POST
 // - openAddToPortfolio(stock): 주식 리스트·종목 상세의 "담기" 모달
+// - renderAddForm(container, opts): 모의 포트폴리오 화면의 인라인 담기 패널
 // 미리보기는 화면 계산(참고용)이고, 실제 수량·원가·시드 검증은 서버가 Decimal로 다시 계산한다.
 import { addPortfolioItem, getFx, getPortfolios } from "../api.js";
 import { esc, krw, num, price } from "../format.js";
@@ -13,28 +14,30 @@ const MODES = [
 
 /**
  * stock: {market, ticker, name, close, currency}
- * opts: {portfolios, fx, onDone(item), onCancel}
+ * opts: {portfolios, fx, portfolioId(고정 시), onDone(item), onCancel}
  */
-function renderAddForm(container, stock, { portfolios, fx, onDone, onCancel }) {
+export function renderAddForm(container, stock, { portfolios, fx, portfolioId, onDone, onCancel }) {
   const rate = stock.currency === "USD" ? fx.usd_krw : 1;
   const unit = stock.close * rate;           // 1주 원가(원)
   let mode = "amount";
+  const fixed = portfolioId != null;
 
   const form = h(`<form novalidate class="add-form">
       <p class="subtle">기준가 ${price(stock.close, stock.currency)}${stock.currency === "USD" ? ` × 환율 ${num(rate, 2)}${fx.fx_stale ? " (지연된 환율)" : ""}` : ""}
         = 1주 ${krw(unit)}</p>
-      <div class="field"><label for="pf-select">포트폴리오</label>
+      <div class="field" ${fixed ? "hidden" : ""}><label for="pf-select">포트폴리오</label>
         <select id="pf-select" class="select">${portfolios.map((p) => `<option value="${p.portfolio_id}">${esc(p.name)} · 잔여 ${krw(p.remaining_krw, { compact: true })}</option>`).join("")}</select></div>
       <div class="field"><span class="field__label" id="mode-label">입력 방식</span><div data-mode></div></div>
       <div class="field"><label for="pf-value" data-value-label>금액 (원)</label>
         <input id="pf-value" class="input num" inputmode="decimal" autocomplete="off" required></div>
       <dl class="preview" aria-live="polite" data-preview></dl>
       <p class="notice notice--warn" data-error hidden></p>
-      <div class="modal__foot"><button class="btn" type="button" data-cancel>취소</button>
+      <div class="modal__foot">${onCancel ? '<button class="btn" type="button" data-cancel>취소</button>' : ""}
         <button class="btn btn--primary" type="submit">담기</button></div>
     </form>`);
   container.replaceChildren(form);
   const select = form.querySelector("#pf-select");
+  if (fixed) select.value = String(portfolioId);
   const input = form.querySelector("#pf-value");
   const preview = form.querySelector("[data-preview]");
   const errorBox = form.querySelector("[data-error]");
@@ -69,7 +72,7 @@ function renderAddForm(container, stock, { portfolios, fx, onDone, onCancel }) {
     { label: "입력 방식", variant: "segmented--card" }));
   input.addEventListener("input", update);
   select.addEventListener("change", update);
-  form.querySelector("[data-cancel]").addEventListener("click", onCancel);
+  form.querySelector("[data-cancel]")?.addEventListener("click", onCancel);
   update();
 
   form.addEventListener("submit", async (e) => {
