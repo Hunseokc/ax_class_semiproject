@@ -63,7 +63,8 @@
   .stock-row { grid-template-columns: 24px minmax(150px, 2fr) minmax(110px, 1fr) 116px; }
 }
 @media (max-width: 767px) {
-  .stock-row { grid-template-columns: 20px 1fr auto auto; }
+  .stock-row { grid-template-columns: 20px 1fr auto; }
+  .stock-row__actions { grid-column: 2 / -1; justify-content: flex-start; }   /* 폰 폭: 버튼은 이름 아래 줄 */
 }
 
 /* 종목 상세 헤더 ★ 칸 [S2-A] */
