@@ -4,35 +4,45 @@
 
 - 흩어진 원천 데이터(pykrx·yfinance)를 수집·전처리해 PostgreSQL 정규화 스키마에 적재합니다.
 - FastAPI 조회 API와 바닐라 HTML/CSS/JS 화면으로 보여 줍니다. 조회 API는 외부 소스를 직접 부르지 않고 DB 값만 씁니다.
-- 4인 팀(시니어 1 · 주니어 3)이 6단계로 나눠 만들고 있으며, 현재 **Stage 1(MVP, v1.0)** 까지 완료됐습니다.
+- 4인 팀(시니어 1 · 주니어 3)이 6단계로 나눠 만들고 있으며, 현재 **Stage 2(사용자 기능 — 관심종목·모의 포트폴리오, v2.0)** 까지 완료됐습니다.
 
 > 시세는 일봉 기준이며 장중 실시간이 아닙니다. 이 프로젝트의 어떤 정보도 투자 권유가 아닙니다.
 
 ## 화면
 
-### 대시보드 홈 — 주요 지수·환율 + 주요 종목
+### 대시보드 홈 — 주요 지수·환율 + 관심종목
 위쪽은 KOSPI·KOSDAQ·S&P 500·NASDAQ·Dow Jones와 USD/KRW의 최신값, 전일 대비 등락, 1개월·3개월·1년 스파크라인입니다. 그날 장이 열리지 않은 시장은 `직전 거래일` 배지로 구분합니다.
 
-아래쪽은 국내·미국 대표 종목(삼성전자·NVIDIA)의 최근 종가·등락·거래량과 종가 추이 차트입니다. 미국 종목은 원화 환산가와 적용 환율을 함께 보여 주고, 카드를 누르면 종목 상세로 이동합니다. (Stage 1에서는 두 종목을 고정해 보여 주며, Stage 2에서 사용자가 고른 관심종목 카드로 바뀝니다.)
+아래쪽은 사용자가 ★로 고른 관심종목 카드입니다. 최근 종가·등락을 보여 주고, 미국 종목은 원화 환산가와 적용 환율을 함께 보여 줍니다. ▲▼ 버튼으로 카드 순서를 바꿀 수 있고, 카드를 누르면 종목 상세로 이동합니다.
 
 ![대시보드 홈](docs/assets/screenshots/home.png)
 
 ### 주식 리스트 — 거래량·시가총액 순위
-국내·미국 탭, 거래량/시가총액 정렬, 이름·티커 검색, 경쟁 그룹 필터를 지원합니다. `전체` 탭은 시장마다 거래량 단위가 달라 시가총액(원화 환산) 순위만 제공합니다.
+국내·미국 탭, 거래량/시가총액 정렬, 이름·티커 검색, 경쟁 그룹 필터를 지원합니다. `전체` 탭은 시장마다 거래량 단위가 달라 시가총액(원화 환산) 순위만 제공합니다. 행마다 ★(관심종목 추가·해제)와 `담기`(모의 포트폴리오에 담기) 버튼이 있습니다.
 
 ![주식 리스트](docs/assets/screenshots/stocks.png)
 
 ### 종목 상세 — 가격 차트·핵심 정보
-1M·3M·6M·1Y 기간의 종가 추이와 거래량, 시가총액·PER·PBR을 보여 줍니다.
+1M·3M·6M·1Y 기간의 종가 추이와 거래량, 시가총액·PER·PBR을 보여 줍니다. 여기서도 ★와 `포트폴리오에 담기`를 쓸 수 있습니다.
 
 ![종목 상세](docs/assets/screenshots/stock_detail.png)
+
+### 모의 포트폴리오 — 시드 안에서 담아 보는 계산기
+정해 둔 시드(원화) 안에서 국내·미국 종목을 담아 보는 화면입니다. 실제 거래 기록이 아니라 "담아 보는 계산기 겸 장바구니"입니다.
+
+- 포트폴리오를 여러 개 만들고 이름·시드를 고치거나 지울 수 있습니다.
+- 담기 팝업에서 **수량·금액·비중** 중 하나로 입력하면 몇 주가 되는지 미리 보여 주고, 시드를 넘으면 담을 수 있는 최대 수량을 안내합니다.
+- 담는 순간의 가격·환율을 항목에 함께 저장해, 지금 평가손익을 **가격 효과**와 **환율 효과**로 나눠 보여 줍니다.
+- 사용·잔여 시드, 시장·그룹 비중 차트, 담은 종목 표(수정·삭제)를 제공합니다.
+
+![모의 포트폴리오](docs/assets/screenshots/portfolio.png)
 
 ## 기술 스택
 
 | 구분 | 사용 기술 |
 |---|---|
 | 백엔드 | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.x (동기, 원문 SQL `backend/app/queries/*.sql` + `text()`) |
-| DB | PostgreSQL 16 — 테이블 10 · VIEW 2 · 보조 인덱스 6 (Stage 1) |
+| DB | PostgreSQL 16 — 테이블 14 · VIEW 2 · 보조 인덱스 8 (Stage 2) |
 | 수집 | pykrx(국내 시세·지수·밸류에이션), yfinance(미국 시세·지수, USD/KRW) |
 | 프론트엔드 | 바닐라 HTML/CSS/JS (ES Modules, 빌드 없음) · Chart.js (CDN) |
 | 실행·테스트 | Docker Compose · pytest |
@@ -49,6 +59,8 @@ pykrx · yfinance ──▶ providers/ ──▶ ingest/ (전처리·이상 행 
 - **재적재 안전(멱등)**: 같은 데이터를 다시 적재해도 행 수가 늘지 않도록 upsert로 넣습니다.
 - **이상 행 격리**: 고가<저가, 음수 거래량 같은 행은 DB에 넣지 않고 `backend/data/quarantine/`에 사유와 함께 남깁니다.
 - **금액은 `Decimal`/`NUMERIC`**: 가격·비율 계산에 float을 쓰지 않습니다. 해외 종목은 원화 환산값을 함께 제공합니다.
+- **담는 순간 값 복사(의도적 비정규화)**: 포트폴리오 항목에는 담은 날의 가격·환율·날짜를 복사해 둡니다. 시세가 나중에 바뀌어도 "얼마에 담았는지"가 남아 손익을 계산할 수 있습니다.
+- **요청 사용자 고정**: 로그인은 아직 없고, 모든 관심종목·포트폴리오 API는 서버가 정한 데모 사용자 기준으로 동작합니다. 남의 포트폴리오·항목은 404로 막습니다.
 - **일관된 에러 형식**: 모든 오류는 `{"error": {"code", "message", "detail"}}`로 응답합니다.
 
 ## 빠르게 실행하기
@@ -66,9 +78,12 @@ docker compose -f compose.yml -f compose.dev.yml up -d --build
 docker compose run --rm api python -m app.ingest init-db
 docker compose run --rm api python -m app.ingest master --offline
 docker compose run --rm api python -m app.ingest import-sample
+
+# 4) (선택) 데모 관심종목 8건 + 모의 포트폴리오 2개 넣기
+docker compose run --rm api python -m app.ingest seed-demo
 ```
 
-브라우저에서 http://localhost:8000 을 열면 대시보드가 보입니다. API 문서는 http://localhost:8000/docs 에 있습니다.
+브라우저에서 http://localhost:8000 을 열면 대시보드가 보입니다. `seed-demo`를 실행했으면 홈에 관심종목 카드가, http://localhost:8000/portfolio 에 데모 포트폴리오가 보입니다. 시세가 없는 종목은 건너뜁니다. API 문서는 http://localhost:8000/docs 에 있습니다.
 
 ### 실제 데이터로 수집하기 (선택)
 
@@ -88,19 +103,27 @@ docker compose run --rm api python -m app.ingest fx --full       # USD/KRW 일�
 docker compose run --rm api pytest -q
 ```
 
-스키마 제약(잘못된 행 거부·CASCADE), ORM↔DDL 일치, 재적재 시 행 수 불변, API 응답·오류 형식을 검증합니다. 테스트는 별도 DB(`stockdb_test`)에서 돌아갑니다.
+스키마 제약(잘못된 행 거부·CASCADE), ORM↔DDL 일치, 재적재 시 행 수 불변, API 응답·오류 형식, 관심종목 추가·중복·정렬·삭제, 포트폴리오 담기 계산(시드 초과·수량 0·환율 효과), 환율 서비스(TTL·저장값 사용), 남의 데이터 접근 차단을 검증합니다. 테스트는 별도 DB(`stockdb_test`)에서 돌아갑니다.
 
-## API (Stage 1)
+## API (Stage 2)
 
 | Method | URL | 기능 |
 |---|---|---|
 | GET | `/health`, `/health/db` | 프로세스·DB 연결 확인 |
 | GET | `/api/v1/market/indices` | 지수별 최신값·등락·최근 1년 스파크라인 |
-| GET | `/api/v1/market/fx` | USD/KRW 최신값·전일 대비·최근 1년 추이 |
+| GET | `/api/v1/market/fx` | USD/KRW 최신값·전일 대비·최근 1년 추이 (갱신 실패 시 마지막 저장값 + `fx_stale`) |
 | GET | `/api/v1/peer-groups` | 경쟁 그룹 목록 |
 | GET | `/api/v1/stocks` | 주식 리스트 (`country`, `sort`, `order`, `group`, `q`, `limit`, `offset`) |
 | GET | `/api/v1/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션 |
 | GET | `/api/v1/stocks/{market}/{ticker}/candles` | 기간 일봉 (`range=1m·3m·6m·1y`) |
+| GET · POST | `/api/v1/watchlist` | 관심종목 카드 목록 · 추가 |
+| PATCH | `/api/v1/watchlist/order` | 관심종목 순서 변경 |
+| DELETE | `/api/v1/watchlist/{market}/{ticker}` | 관심종목 삭제 |
+| GET · POST | `/api/v1/portfolios` | 포트폴리오 목록 · 생성 |
+| GET · PUT · DELETE | `/api/v1/portfolios/{id}` | 포트폴리오 단건 · 이름·시드 수정 · 삭제 |
+| GET · POST | `/api/v1/portfolios/{id}/items` | 담은 종목과 현재 평가 · 종목 담기(`mode=quantity·amount·weight`) |
+| PUT · DELETE | `/api/v1/portfolios/{id}/items/{item_id}` | 담은 종목 수정 · 삭제 |
+| GET | `/api/v1/portfolios/{id}/summary` | 사용·잔여 시드, 비중, 평가손익(가격 효과·환율 효과) |
 
 요청·응답 예시와 에러 코드는 [docs/06_기능_API_정의서.md](docs/06_기능_API_정의서.md)에 있습니다.
 
@@ -110,10 +133,11 @@ docker compose run --rm api pytest -q
 ax_stockmind/
 ├─ backend/
 │  ├─ app/
-│  │  ├─ api/          라우터 (market, stocks, health)
+│  │  ├─ api/          라우터 (market, stocks, watchlist, portfolios, health)
 │  │  ├─ core/         설정·DB 연결·에러·로깅
-│  │  ├─ ingest/       수집·적재 CLI (python -m app.ingest)
+│  │  ├─ ingest/       수집·적재·데모 데이터 CLI (python -m app.ingest)
 │  │  ├─ providers/    외부 데이터 소스 어댑터 (pykrx, yfinance)
+│  │  ├─ services/     환율(TTL)·모의 포트폴리오 계산
 │  │  ├─ queries/      조회용 원문 SQL
 │  │  ├─ models/       ORM (schema.sql과 1:1)
 │  │  └─ schemas/      API 요청·응답 모델
@@ -143,7 +167,7 @@ ax_stockmind/
 |---|---|---|
 | Stage 0 | 뼈대·개발 환경 | ✅ v0.1 |
 | Stage 1 | MVP — 지수·환율·주요 종목 홈, 주식 리스트, 종목 상세, 시세 수집 | ✅ v1.0.1 |
-| Stage 2 | 사용자 기능 — 관심종목·모의 포트폴리오 | |
+| Stage 2 | 사용자 기능 — 관심종목·모의 포트폴리오 | ✅ v2.0 |
 | Stage 3 | 실데이터 — 재무·공시 포함 4개 소스 수집, 주기적 갱신 | |
 | Stage 4 | 분석 — 매력도·경쟁 비교·통계 | |
 | Stage 5 | 고도화 — 메모·목표가·통계 확장 | |
