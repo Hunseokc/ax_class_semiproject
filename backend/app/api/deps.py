@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.db import get_engine, session_factory
 from app.core.errors import NotFound, ServiceUnavailable
-from app.schemas.common import MARKET_PATTERN, TICKER_PATTERN
+from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN
 
 
 def get_engine_dep() -> Engine:
@@ -61,3 +61,6 @@ def get_current_user_id(db: Session = Depends(get_db)) -> int:
 
 
 CurrentUserId = Annotated[int, Depends(get_current_user_id)]
+
+# 정수 id 경로 파라미터(portfolio_id·item_id 등) — 범위 밖이면 DB 조회 전에 422 VALIDATION_ERROR
+IdPath = Annotated[int, Path(ge=1, le=INT_MAX, description="1 이상 PostgreSQL INT 범위")]
