@@ -46,7 +46,7 @@
   docker compose run --rm api python -m app.ingest explain   → 삼성전자 팩터별 기여도 출력
   pytest -q tests/test_scoring.py
 
-[선행 작업] B ①(feat/s4-b-metrics-view)의 v_stock_metrics. 컬럼 목록은 docs/05에 있으므로 그 이름대로 SQL·서비스를 먼저 작성하고, 실제 VIEW가 있어야 도는 테스트는 ⏸ B① 머지 후. B① 머지 전이면 Draft PR.
+[선행 작업] B ①(feat/s4-b-metrics-view)의 v_stock_metrics. 컬럼 목록은 docs/05에 있으므로 B① 브랜치에 있으면 받아 쓰고(✅), 없으면 그 이름대로 🔌 나중에 연결 — 실제 VIEW가 있어야 도는 테스트는 🔌 연결되면 실행. B① 머지 전이면 Draft PR.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② "모델 한 장 요약"(9절 문체)만 먼저 출력하고, 그다음 CLAUDE.md 2절의 작업 계획표(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```

@@ -77,7 +77,7 @@
 파트 1 (1~2번 DART·SEC Provider) → 볼 것: 실제 호출로 005930의 FY 매출·영업이익·순이익 최근 연도, AAPL의 같은 값을 출력(1종목씩만). 계정 ID가 없어 계정명으로 대체된 항목이 있으면 짚어 준다. .env에 DART_API_KEY·SEC_USER_AGENT가 없으면 어떤 에러가 나는지 보여 주고 설정법 안내.
 파트 2 (4~6번 적재 작업·CLI) → 볼 것: `financials --tickers 005930 AAPL`, `disclosures --days 30 --tickers 005930` → psql로 financial_statements(종목·연도별 행)·disclosures 행 수와 예시 3행, ingestion_logs. 재실행해도 행 수가 그대로(멱등).
 파트 3 (7~8번 조회 SQL·API) → 볼 것: curl `/stocks/KOSPI/005930/financials?limit=2`, `/disclosures` — docs/06 예시와 칸 이름을 나란히 비교. 없는 종목 404. /docs에서 직접 해 보기.
-파트 4 (9번 테스트, ⏸ 3번 factory 연결) → pytest -v 번역. 3번은 C 머지 후 연결하고 그때 파트 1 확인을 get_providers()로 다시 해 본다.
+파트 4 (9번 테스트, 🔌 3번 factory 연결) → pytest -v 번역. 3번은 C 코드와 연결되면 하고 그때 파트 1 확인을 get_providers()로 다시 해 본다.
 
 [건드리지 않을 파일] krx.py·yahoo.py·http.py(C — http.py 재사용만), base.py(D), refresh(D), frontend(A)
 [인터페이스 계약]
@@ -89,7 +89,7 @@
   curl "localhost:8000/api/v1/stocks/KOSPI/005930/financials?limit=2" → 원본 예시와 같은 구조
   pytest -q 통과
 
-[선행 작업] C(feat/s3-c-price-providers)의 http.py·factory.py. dart.py·sec.py는 원본과 같은 이름으로 http.py를 import 해 먼저 작성하고, 이를 쓰는 테스트는 ⏸ C 머지 후. 3번(factory.py [S3-B] 구역)은 C의 파일이므로 계획표 맨 뒤로 ⏸. C 머지 전이면 Draft PR.
+[선행 작업] C(feat/s3-c-price-providers)의 http.py·factory.py. C 브랜치에 있으면 받아 쓰고(✅), 없으면 dart.py·sec.py를 원본과 같은 이름으로 🔌 나중에 연결(CLAUDE.md 11절) — 이를 쓰는 테스트는 🔌 연결되면 실행. 3번(factory.py [S3-B] 구역)은 C의 파일이므로 계획표 맨 뒤로 🔌. C 머지 전이면 Draft PR.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage3에서 새로 만듦) → origin/stage3 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```

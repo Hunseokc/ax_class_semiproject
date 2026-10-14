@@ -28,7 +28,7 @@
 파트 1 (1번 PUT 메모·목표가) → 볼 것: curl PUT AAPL `{"memo":"테스트","target_price":250}` → GET에 target_gap. 현재가로 (250 − 현재가) ÷ 현재가를 손계산해 같은지 보여 준다. `{"memo":null}` → 지워짐, 빈 본문 → 422, memo 201자 → 422. 마지막에 원래대로 되돌린다.
 파트 2 (2번 월별 집계) → 볼 것: curl monthly → 진행 중인 달 is_partial=true. psql로 한 달의 첫 종가·마지막 종가를 꺼내 응답 값과 같은지 비교.
 파트 3 (3번 랭킹) → 볼 것: curl ranking?metric=return_1m&country=KR&limit=5. 같은 값이 있으면 1,1,3 순위를 짚어 준다. country 없이 volume → 422 VOLUME_SORT_REQUIRES_MARKET.
-파트 4 (4번 데이터 품질 API — 테스트 ⏸ C 머지 후) → 볼 것: C 서비스가 있으면 curl data-quality 응답 읽어 주기, 없으면 ⏸ 표시.
+파트 4 (4번 데이터 품질 API — 테스트 🔌 C 코드와 연결되면) → 볼 것: ✅ C 서비스를 받아 왔으면 curl data-quality 응답 읽어 주기, 🔌면 "C 코드와 연결되면 볼 수 있어요" 한 줄.
 파트 5 (5~6번 입력 검증 상한·테스트) → 볼 것: limit=100000, q 길이 초과 → 422 응답 모양. pytest -v 번역.
 
 [건드리지 않을 파일] 마이그레이션·schema(D), services/data_quality.py·portfolio.py(C), frontend(A)
@@ -39,7 +39,7 @@
   curl ".../statistics/ranking?metric=return_1m&country=KR&limit=5"
   pytest -q
 
-[선행 작업] C(feat/s5-c-equal-weight-quality)의 data_quality 서비스(4번에서 호출). C와 합의한 시그니처(합의 전이면 원본 시그니처)대로 import 해 작성하고, 4번 테스트는 ⏸ C 머지 후. 1~3번은 선행 없음. C 머지 전이면 Draft PR.
+[선행 작업] C(feat/s5-c-equal-weight-quality)의 data_quality 서비스(4번에서 호출). C와 합의한 시그니처(합의 전이면 원본 시그니처)대로 작성한다(C 브랜치에 있으면 ✅ 받아 쓰고, 없으면 🔌 나중에 연결). 4번 테스트는 🔌 연결되면 실행. 1~3번은 선행 없음. C 머지 전이면 Draft PR.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage5에서 새로 만듦) → origin/stage5 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
