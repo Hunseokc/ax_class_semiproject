@@ -160,7 +160,7 @@ const mockPortfolio = {
   _db: () => mockLoad(PF_KEY, { next_id: 1, next_item_id: 1, list: [] }),
   _find(db, id) {
     const p = db.list.find((x) => x.portfolio_id === Number(id));
-    if (!p) throw mockErr(404, "PORTFOLIO_NOT_FOUND", "포트폴리오를 찾을 수 없습니다", { portfolio_id: Number(id) });
+    if (!p) throw mockErr(404, "PORTFOLIO_NOT_FOUND", `포트폴리오(ID ${Number(id)})를 찾을 수 없습니다`, { portfolio_id: Number(id) });
     return p;
   },
   _used: (p) => r2(p.items.reduce((a, i) => a + i.cost_krw, 0)),
@@ -218,7 +218,7 @@ const mockPortfolio = {
   },
   async create(name, seed_krw) {
     const db = this._db();
-    if (db.list.some((p) => p.name === name)) throw mockErr(409, "DUPLICATE_PORTFOLIO", "같은 이름의 포트폴리오가 있습니다", { name });
+    if (db.list.some((p) => p.name === name)) throw mockErr(409, "DUPLICATE_PORTFOLIO_NAME", `같은 이름의 포트폴리오가 이미 있습니다: ${name}`, { name });
     const now = new Date().toISOString();
     const p = { portfolio_id: db.next_id++, name, seed_krw: Number(seed_krw), items: [], created_at: now, updated_at: now };
     db.list.push(p);
@@ -228,7 +228,7 @@ const mockPortfolio = {
   async update(id, name, seed_krw) {
     const db = this._db();
     const p = this._find(db, id);
-    if (db.list.some((x) => x !== p && x.name === name)) throw mockErr(409, "DUPLICATE_PORTFOLIO", "같은 이름의 포트폴리오가 있습니다", { name });
+    if (db.list.some((x) => x !== p && x.name === name)) throw mockErr(409, "DUPLICATE_PORTFOLIO_NAME", `같은 이름의 포트폴리오가 이미 있습니다: ${name}`, { name });
     const used = this._used(p);
     if (Number(seed_krw) < used) {
       throw mockErr(409, "SEED_BELOW_USED", "시드를 현재 담은 원가 합계보다 작게 줄일 수 없습니다", { used_krw: used, requested_seed_krw: Number(seed_krw) });
@@ -264,7 +264,7 @@ const mockPortfolio = {
     const db = this._db();
     const p = this._find(db, id);
     const old = p.items.find((i) => i.item_id === Number(itemId));
-    if (!old) throw mockErr(404, "PORTFOLIO_ITEM_NOT_FOUND", "담은 종목을 찾을 수 없습니다", { item_id: Number(itemId) });
+    if (!old) throw mockErr(404, "ITEM_NOT_FOUND", `포트폴리오(ID ${p.portfolio_id})에 항목(ID ${Number(itemId)})이 없습니다`, { item_id: Number(itemId) });
     const now = new Date().toISOString();
     // 수정하면 기준가·환율도 현재값으로 다시 복사된다
     Object.assign(old, await this._build(p, { ...body, market: old.market, ticker: old.ticker }, old), { updated_at: now });
@@ -276,7 +276,7 @@ const mockPortfolio = {
     const db = this._db();
     const p = this._find(db, id);
     if (!p.items.some((i) => i.item_id === Number(itemId))) {
-      throw mockErr(404, "PORTFOLIO_ITEM_NOT_FOUND", "담은 종목을 찾을 수 없습니다", { item_id: Number(itemId) });
+      throw mockErr(404, "ITEM_NOT_FOUND", `포트폴리오(ID ${p.portfolio_id})에 항목(ID ${Number(itemId)})이 없습니다`, { item_id: Number(itemId) });
     }
     p.items = p.items.filter((i) => i.item_id !== Number(itemId));
     mockSave(PF_KEY, db);
