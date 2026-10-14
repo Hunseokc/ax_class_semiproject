@@ -25,7 +25,7 @@
 3. backend/app/providers/yahoo.py — 밸류에이션 스냅샷, 묶음 다운로드(get_daily_prices_batch)
 4. backend/app/providers/factory.py — Providers에 valuation·bulk·batch 필드 추가. dart·sec 자리는 B가 채우도록 [S3-B] 구역 주석
 5. backend/app/ingest/universe.py — jobs.py [S1-D]의 stock_refs·index_refs를 원본 위치로 이동
-6. backend/app/ingest/jobs.py — [S3-C] 구역: last_closed_day, load_prices_bulk, load_valuations(_bulk), derive_us_valuations (Bar에 change_rate 추가는 D가 Stage 2에서 base로 옮긴 Bar에 — 요청 메모)
+6. backend/app/ingest/jobs.py — [S3-C] 구역: last_closed_day, load_prices_bulk, load_valuations(_bulk), derive_us_valuations (Bar.change_rate는 D가 계약으로 base.py에 넣어 둠 ✅)
 7. backend/app/ingest/__main__.py — [S3-C] 구역: valuation(--full, --tickers), all(마스터+C 작업. B 작업은 B가 추가)
 8. backend/app/services/fx.py — Stage 2의 '항상 실패 provider' 자리에 yahoo FX 연결 (deps 쪽 연결은 요청 메모 → D)
 9. backend/tests/fakes.py — 밸류에이션·bulk·batch 가짜 추가, backend/tests/test_ingest.py — 원본의 남은 테스트
@@ -41,7 +41,7 @@
 [인터페이스 계약]
 - 사용: providers/base.py 인터페이스, store.upsert·job_log(S1)
 - 제공: jobs의 각 load_* 함수 시그니처는 원본과 같게 — D의 RefreshService가 이 함수를 호출한다. 반환은 {대상: 상태} dict
-[이번 단계에서 뺄 것] 비교군(benchmark)·listing·섹터·freshness 관련 분기, DART 파생 밸류에이션의 fundamental_bases(Stage 5) — 파생은 FY 재무 기반만
+[이번 단계에서 뺄 것] 비교군(benchmark)·listing·섹터·freshness 관련 분기, 갱신 범위 구분(scope·FREQUENT_SQL — coverage는 Stage 4), 배당(Valuation.dps·valuation_snapshots.dps), DART 파생 밸류에이션의 fundamental_bases(Stage 5) — 파생은 FY 재무 기반만
 [완료 기준]
   docker compose run --rm api pytest -q tests/test_ingest.py
   docker compose run --rm api python -m app.ingest valuation --tickers 005930 AAPL  → ingestion_logs에 SUCCESS 2행
@@ -71,7 +71,7 @@
 5. backend/app/ingest/jobs.py load_master — [S3-B] 구역: online일 때 DART corp_code·SEC CIK 매핑
 6. backend/app/ingest/__main__.py — [S3-B] 구역: financials(--years, --tickers), disclosures(--days, --tickers), all에 두 작업 추가
 7. backend/app/queries/financials.sql, disclosures.sql
-8. backend/app/api/stocks.py — [S3-B] 구역: GET /stocks/{market}/{ticker}/financials, /disclosures + schemas [S3-B] 구역
+8. backend/app/api/stocks.py — [S3-B] 구역: GET /stocks/{market}/{ticker}/financials, /disclosures (응답 스키마 FinancialsOut·DisclosuresOut은 D가 schemas [S3-B] 구역에 원본 그대로 넣어 둠 ✅)
 9. backend/tests/ — test_ingest.py에 test_dart_account_mapping_falls_back_to_account_name, test_stocks_api.py에 재무·공시 엔드포인트
 
 [파트별 확인 — 계획표의 "파트별 확인 지점"으로 그대로 쓴다. 파일마다 만든 직후 돌려 보고(CLAUDE.md 3절 ③), 파트가 끝날 때마다 실제로 실행해서 "여기까지 만든 것"을 보여 주고 아주 쉽게 설명한다(3-1)]
