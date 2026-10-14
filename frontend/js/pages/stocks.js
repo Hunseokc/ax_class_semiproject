@@ -91,6 +91,7 @@ function refresh() {
     skeleton: skeleton("row", 8),
     fetch: async () => {
       // [S2-A] 관심종목을 못 받아도 리스트는 보여 준다 (★만 전부 꺼진 상태)
+      // TODO(연결): D의 stock_list.sql·stock_detail.sql에 is_watched가 들어오면 원본처럼 starButton(s, s.is_watched)로 바꾸고 getWatchlist 호출 삭제
       const [d, wl] = await Promise.all([
         getStocks({ country: state.country, sort: state.sort, group: state.group, q: state.q }),
         getWatchlist().catch(() => ({ items: [] })),
