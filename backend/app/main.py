@@ -65,6 +65,8 @@ for r in (market.router, stocks.groups_router, stocks.router):
 api.include_router(watchlist.router)
 
 # ── [S2-C] portfolios ──
+from app.api import portfolios  # noqa: E402
+api.include_router(portfolios.router)
 
 # ── [S3-B] financials·disclosures ──
 
