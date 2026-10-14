@@ -2,8 +2,9 @@
 
 **단계 목표**: 사용 중 나온 요구(관심종목 메모·목표가, 월별·랭킹 통계, 균등 배분, 데이터 품질 확인)를 반영하고, 운영 중인 DB를 데이터 유지한 채 마이그레이션으로 바꾸는 흐름을 보여준다.
 **D 선행 계약**: `004_watchlist_memo.sql`(memo·target_price) 마이그레이션과 schema 반영, `006_sector_freshness.sql`은 D 본인 작업.
-**머지 순서**: C → B → D → A
-**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. stage에 없는 다른 팀원 코드는 원본과 같은 이름으로 [연결 예정](CLAUDE.md 11절)로 두고, 연결은 D가 단계 통합 때 한다. 시니어는 자동 검사가 통과한 넘김 PR을 머지 순서대로 바로바로 머지한다.
+**D 껍데기**(단계 시작 전 stage5에, `TODO(껍데기)` 주석): `services/data_quality.py`(C — 원본 시그니처, 예시 값 반환), `portfolio.py` preview_equal_weight + `portfolios.py` POST preview/equal-weight(C — `docs/06` 예시 응답), `watchlist.py` PUT(B — 예시 응답), stats_router monthly·ranking·data-quality(B — `docs/06` 예시 응답).
+**머지·마감**: 순서 없음 — Ready PR은 도착하는 대로 머지한다. PR 마감 시각까지 Ready가 안 된 파일은 D가 인수한다(그전까지는 껍데기가 그대로 있어 앱은 정상 동작한다).
+**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. 다른 팀원 코드는 D가 미리 넣은 껍데기를 그대로 쓰고(✅ 있음), 내 파일의 껍데기는 본문을 원본대로 교체한다. 껍데기도 없을 때만 [연결 예정](CLAUDE.md 11절). 시니어는 자동 검사가 통과한 넘김 PR을 도착하는 대로 바로바로 머지한다.
 
 ---
 
@@ -20,7 +21,7 @@
 1. backend/app/queries/watchlist.sql + api/watchlist.py — PUT /watchlist/{market}/{ticker}: 보낸 필드만 변경, null이면 지움, 빈 본문 422, memo 200자, target_price > 0 소수 4자리. GET 응답에 memo·target_price·target_gap = (목표가 − 현재가) / 현재가
 2. backend/app/queries/stats_monthly.sql + stats_router GET /statistics/monthly — date_trunc + GROUP BY, FIRST_VALUE/LAST_VALUE 윈도우, 진행 중인 달 is_partial
 3. backend/app/queries/stats_ranking.sql + GET /statistics/ranking — RANK() OVER(같은 값 같은 순위 1,1,3), 지표값 없는 종목 제외, 전체+volume은 422 VOLUME_SORT_REQUIRES_MARKET
-4. backend/app/queries/stats_data_quality.sql + GET /statistics/data-quality — C의 data_quality 서비스 호출(시그니처는 C와 PR 전에 합의)
+4. backend/app/queries/stats_data_quality.sql + GET /statistics/data-quality — C의 data_quality 서비스 호출(시그니처는 D의 껍데기 = 원본)
 5. deps·schemas [S5-B] — 입력 검증 상한(limit·offset·q 길이 등 원본 A-112 기준)
 6. backend/tests/test_watchlist_api.py·test_analysis.py 추가분
 
@@ -39,7 +40,7 @@
   curl ".../statistics/ranking?metric=return_1m&country=KR&limit=5"
   pytest -q
 
-[선행 작업] C(feat/s5-c-equal-weight-quality)의 data_quality 서비스(4번에서 호출). C와 합의한 시그니처(합의 전이면 원본 시그니처)대로 작성한다(stage에 없으면 [연결 예정]). 4번 테스트는 연결 예정 목록에 적는다(D가 연결 후 추가). 1~3번은 선행 없음.
+[선행 작업] 없음 — C의 data_quality 서비스는 D의 껍데기(원본 시그니처, 예시 값 반환)가 stage5에 있어 ✅ 그대로 쓴다. 1번 PUT, 2~4번 monthly·ranking·data-quality는 D의 껍데기가 들어 있으니 본문을 원본대로 교체한다.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage5에서 새로 만듦) → origin/stage5 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -71,14 +72,14 @@
 
 [건드리지 않을 파일] stats_data_quality.sql·analysis.py(B — B가 내 서비스를 호출), schema(D), frontend(A)
 [인터페이스 계약]
-- 제공: data_quality 서비스 함수 시그니처를 PR 전에 B와 합의해 PR 본문에 기록
+- 제공: data_quality 서비스는 D의 껍데기 시그니처(원본) 그대로 — 바꾸지 않는다
 [이번 단계에서 뺄 것] 섹터 히트맵·시장 심리 지수(Stage 6), listing
 [완료 기준]
   curl -X POST .../portfolios/{id}/preview/equal-weight → 수량·제외 사유, DB에 변화 없음
   docker compose run --rm api python -m app.ingest status
   pytest -q tests/test_equal_weight.py tests/test_data_quality.py
 
-[선행 작업] 없음 — 머지 순서 1번이다. data_quality 시그니처는 계획표 승인 직후 B에게 공유해 B가 기다리지 않게 하고, PR 본문에도 적는다.
+[선행 작업] 없음 — 1·2번 equal-weight, 4번 data_quality.py는 D의 껍데기가 들어 있으니 본문을 원본대로 교체한다(시그니처는 그대로 — B가 이미 이 시그니처로 부르고 있다).
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage5에서 새로 만듦) → origin/stage5 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -114,7 +115,7 @@
 [이번 단계에서 뺄 것] 상단 검색, 섹터 히트맵·심리 지수, 홈 2열 개편
 [완료 기준] 메모 수정 후 새로고침해도 유지 / 지표 설정 유지 / 균등 배분 '모두 담기' 후 요약 갱신 / 모바일 가로 스크롤 없음
 
-[선행 작업] B(feat/s5-b-memo-stats)의 PUT watchlist·monthly·ranking, C(feat/s5-c-equal-weight-quality)의 equal-weight 미리보기. stage에 없으면 [연결 예정](CLAUDE.md 11절) — docs/06 예시로 MOCK 하고 묻지 말고 진행한다(`TODO(연결)` 표시, D가 연결).
+[선행 작업] 없음 — B의 PUT watchlist·monthly·ranking, C의 equal-weight 미리보기는 D의 껍데기가 stage5에 있어 ✅ 그대로 쓴다. MOCK을 따로 만들지 않는다. 지금은 예시 값이 나오고, 담당자가 본문을 교체하면 같은 코드 그대로 진짜 값이 나온다.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage5에서 새로 만듦) → origin/stage5 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -125,14 +126,15 @@
 
 ```
 시니어 모드. Stage 5.
-[PR] 파트 단위로 넘어온(Ready) PR을 자동 검사 통과 확인 후 머지 순서대로 당일 머지하고, 팀 채팅에 알린다. 진행 중(Draft) PR은 코드만 미리 본다. 받은 요청 메모는 추천안에 OK/다른 지시만 답한다.
-[연결 예정 처리] 이 단계 PR이 모두 머지되면 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "연결 예정 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 5` 통과 → 아래 통합으로.
-[선행] 004_watchlist_memo.sql + schema·ORM → 커밋 후 배포. 마이그레이션 적용 시연: 기존 DB에 `python -m app.ingest migrate 004_watchlist_memo`.
+[PR] 파트 단위로 넘어온(Ready) PR을 자동 검사 통과 확인 후 도착하는 대로 당일 머지하고, 팀 채팅에 알린다. 진행 중(Draft) PR은 코드만 미리 본다. 받은 요청 메모는 추천안에 OK/다른 지시만 답한다.
+[마감] PR 마감 시각에 stage5에서 `git grep -n "TODO(껍데기)"`로 남은 껍데기를 본다. 남은 파일은 D가 인수한다 — 담당자 브랜치의 끝난 커밋까지 머지하고 나머지를 D가 작성한다. 시간이 모자라면 껍데기 그대로 태그를 달고 다음 단계를 연다(앱은 정상 동작). 인수 내역(파일·원래 담당·사유·상태)은 stage5 → main PR 본문 "인수 파트"에 적고, 인수분은 끝나는 대로 stage5에 머지한 뒤 다음 stage로 합친다.
+[연결 예정 처리] 마감 후 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "연결 예정 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 5` 통과 → 아래 통합으로.
+[선행] 004_watchlist_memo.sql + schema·ORM + 머리말의 "D 껍데기" 전부(`TODO(껍데기): {담당} — {무엇}` 주석, 이름·인자·응답 모양은 원본 그대로) → `pytest -q` 통과 → 커밋 후 배포. 마이그레이션 적용 시연: 기존 DB에 `python -m app.ingest migrate 004_watchlist_memo`.
 [내 구현]
 1. 006_sector_freshness.sql(+schema: peer_groups.kind, stocks.industry·sic, data_freshness, fundamental_bases)
 2. backend/app/ingest/sectors.py(KRX 업종·SIC → 섹터), benchmark 섹터 계층, scoring 중립화가 업종 섹터를 쓰도록 C와 합의
 3. backend/app/services/freshness.py — 재무 유효기간·사업보고서 공시 시 무효화, B의 load_financials와 연결
 4. /health/db 503(연결 시간 제한), 컨테이너 HEALTHCHECK 교체, 500 응답 요청 ID 유지, 입력 검증 상한 리뷰
 5. backend/tests/{test_freshness,test_health}.py, docs/architecture.md
-[통합] C → B → D → A 머지, migrate 004·006 → benchmark --reselect → scores → 화면 확인 → stage5 → main, 태그 v5.0
+[통합] 마감·인수 후 migrate 004·006 → benchmark --reselect → scores → 화면 확인 → stage5 → main, 태그 v5.0
 ```

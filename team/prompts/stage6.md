@@ -2,8 +2,9 @@
 
 **단계 목표**: 홈을 2열 대시보드(검색바·투자 성향 한 줄 → 관심종목 컴팩트 + 섹터 히트맵·시장 심리 지수 → 거래량 급증/매력도 순위 탭)로 개편하고, 상장 종목 전체를 상단 검색으로 찾을 수 있게 한다. 홈 위젯은 DB에 저장해 재사용(외부 호출 최소화).
 **D 선행 계약**: `005_listed_dividend.sql`(coverage 'listed', valuation_snapshots.dps)·`007_home_widgets.sql`(sector_performance_daily, market_sentiment_daily) + schema 반영. `be/app/api/home.py` 라우터 뼈대(`/home` prefix, 구역 주석)를 먼저 커밋.
-**머지 순서**: C → B → A → D 마감
-**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. stage에 없는 다른 팀원 코드는 원본과 같은 이름으로 [연결 예정](CLAUDE.md 11절)로 두고, 연결은 D가 단계 통합 때 한다. 시니어는 자동 검사가 통과한 넘김 PR을 머지 순서대로 바로바로 머지한다.
+**D 껍데기**(단계 시작 전 stage6에, `TODO(껍데기)` 주석): `home.py` /home/sectors·/home/sentiment(C), /home/ranking(B), `stocks.py` /stocks/search(B) — 원본 home.py·schemas 응답 모양의 예시 값, `/market/indices` 응답의 장 상태 필드(D — 예시 값).
+**머지·마감**: 순서 없음 — Ready PR은 도착하는 대로 머지한다. PR 마감 시각까지 Ready가 안 된 파일은 D가 인수한다(그전까지는 껍데기가 그대로 있어 앱은 정상 동작한다).
+**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. 다른 팀원 코드는 D가 미리 넣은 껍데기를 그대로 쓰고(✅ 있음), 내 파일의 껍데기는 본문을 원본대로 교체한다. 껍데기도 없을 때만 [연결 예정](CLAUDE.md 11절). 시니어는 자동 검사가 통과한 넘김 PR을 도착하는 대로 바로바로 머지한다.
 
 ---
 
@@ -31,12 +32,12 @@
 파트 4 (6번 테스트) → pytest -v 번역.
 
 [건드리지 않을 파일] 007 마이그레이션·schema(D), home.py /ranking(B), frontend(A)
-[인터페이스 계약] 응답 구조는 원본 home.py·schemas와 동일 — A가 MOCK으로 먼저 개발
+[인터페이스 계약] 응답 구조는 원본 home.py·schemas와 동일 — A는 D의 껍데기로 먼저 개발
 [완료 기준]
   curl localhost:8000/api/v1/home/sectors?country=US · /home/sentiment?market=KR
   두 번째 호출은 외부 호출 없음(ingestion_logs 확인) / pytest -q tests/test_home_widgets.py
 
-[선행 작업] 없음 — 007 마이그레이션·home.py 뼈대(D 계약)는 이미 stage6에 있다. 머지 순서 1번이다.
+[선행 작업] 없음 — 007 마이그레이션·home.py 뼈대(D 계약)는 이미 stage6에 있다. 4번 /home/sectors·/home/sentiment는 D의 껍데기가 들어 있으니 본문을 원본대로 교체한다.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage6에서 새로 만듦) → origin/stage6 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -74,7 +75,7 @@
   curl "localhost:8000/api/v1/stocks/search?q=삼성" · "?q=AAPL" → 정렬 규칙대로
   curl localhost:8000/api/v1/home/ranking / pytest -q
 
-[선행 작업] 코드상 기다릴 것 없음(머지 순서만 C 다음). home.py는 C와 구역이 다르므로 충돌 시 둘 다 남긴다.
+[선행 작업] 없음 — 3번 /stocks/search, 5번 /home/ranking은 D의 껍데기가 들어 있으니 본문을 원본대로 교체한다. home.py는 C와 구역이 다르므로 충돌 시 둘 다 남긴다.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage6에서 새로 만듦) → origin/stage6 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -109,7 +110,7 @@
 [건드리지 않을 파일] backend/ 전부, 공통 css(D)
 [완료 기준] 원본 01_home.png와 레이아웃 일치 / 검색에서 상장 목록 종목 클릭 → 상세(데이터 수집 중 안내) / 모바일 1열 / 콘솔 에러 0
 
-[선행 작업] C의 /home/sectors·/home/sentiment, B의 /stocks/search·/home/ranking, D의 market_calendar 응답 필드(7번). stage에 없으면 [연결 예정](CLAUDE.md 11절) — 원본 home.py·schemas 응답 모양으로 MOCK 하고 묻지 말고 진행한다(`TODO(연결)` 표시, D가 연결).
+[선행 작업] 없음 — C의 /home/sectors·/home/sentiment, B의 /stocks/search·/home/ranking, D의 장 상태 필드(7번)는 D의 껍데기가 stage6에 있어 ✅ 그대로 쓴다. MOCK을 따로 만들지 않는다. 지금은 예시 값이 나오고, 담당자가 본문을 교체하면 같은 코드 그대로 진짜 값이 나온다.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage6에서 새로 만듦) → origin/stage6 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -120,9 +121,10 @@
 
 ```
 시니어 모드. Stage 6 마감.
-[PR] 파트 단위로 넘어온(Ready) PR을 자동 검사 통과 확인 후 머지 순서대로 당일 머지하고, 팀 채팅에 알린다. 진행 중(Draft) PR은 코드만 미리 본다. 받은 요청 메모는 추천안에 OK/다른 지시만 답한다.
-[연결 예정 처리] 이 단계 PR이 모두 머지되면 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "연결 예정 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 6` 통과 → 아래 통합으로.
-[선행] 005·007 마이그레이션 + schema, home.py 뼈대 → 커밋 후 배포.
+[PR] 파트 단위로 넘어온(Ready) PR을 자동 검사 통과 확인 후 도착하는 대로 당일 머지하고, 팀 채팅에 알린다. 진행 중(Draft) PR은 코드만 미리 본다. 받은 요청 메모는 추천안에 OK/다른 지시만 답한다.
+[마감] PR 마감 시각에 stage6에서 `git grep -n "TODO(껍데기)"`로 남은 껍데기를 본다. 남은 파일은 D가 인수한다 — 담당자 브랜치의 끝난 커밋까지 머지하고 나머지를 D가 작성한다. 시간이 모자라면 껍데기 그대로 태그를 달고 다음 단계를 연다(앱은 정상 동작). 인수 내역(파일·원래 담당·사유·상태)은 stage6 → main PR 본문 "인수 파트"에 적고, 인수분은 끝나는 대로 stage6에 머지한 뒤 다음 stage로 합친다.
+[연결 예정 처리] 마감 후 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "연결 예정 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 6` 통과 → 아래 통합으로.
+[선행] 005·007 마이그레이션 + schema, home.py 뼈대 + 머리말의 "D 껍데기" 전부(`TODO(껍데기): {담당} — {무엇}` 주석, 이름·인자·응답 모양은 원본 그대로) → `pytest -q` 통과 → 커밋 후 배포.
 [내 구현]
 1. backend/app/services/market_calendar.py — exchange-calendars 기반 장 상태, /market/indices 응답에 추가
 2. refresh에 섹터·심리 지수 연결(C 요청), sample.py export_sample, ingest/smoke.py

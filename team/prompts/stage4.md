@@ -2,9 +2,9 @@
 
 **단계 목표**: 같은 시장 안 상대 위치를 나타내는 매력도(다중 팩터: 지표 → 로버스트 Z → 섹터 중립화 → 프리셋 가중 → 100·Φ)를 계산·저장하고, 종목 상세에서 수치 분석·경쟁 비교·통계를 보여준다.
 **D 선행 계약**: 마이그레이션 `001_scoring_v2.sql`·`002_presets.sql`과 schema 반영(scoring_presets, scoring_weights, stock_metric_values, stock_scores, peer_group_members.is_primary), `docs/05`에 `v_stock_metrics` 컬럼 목록과 `stock_scores` 구조 기록.
-**순서상 의존**: B의 `v_stock_metrics`가 C의 지표 입력이다 → **B는 1번(VIEW)부터 먼저 PR**하고 나머지를 이어서 한다.
-**머지 순서**: B(VIEW) → C → B(API) → D → A
-**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. stage에 없는 다른 팀원 코드는 원본과 같은 이름으로 [연결 예정](CLAUDE.md 11절)로 두고, 연결은 D가 단계 통합 때 한다. 시니어는 자동 검사가 통과한 넘김 PR을 머지 순서대로 바로바로 머지한다.
+**D 껍데기**(단계 시작 전 stage4에, `TODO(껍데기)` 주석): `views.sql` v_stock_metrics(B ① — `docs/05` 컬럼 그대로, PER·PBR처럼 valuation_snapshots에서 바로 꺼낼 수 있는 값만 채우고 나머지는 NULL), `scoring.py`의 compute_scores 등 원본 시그니처(C — 0 반환), `seed-demo`에 stock_scores·stock_metric_values 시드 행(프리셋 4종 × 데모 종목), `analysis.py` router·scoring_router·stats_router 엔드포인트 + main.py 등록(B ② — `docs/06` 3-3·통계 예시 응답).
+**머지·마감**: 순서 없음 — Ready PR은 도착하는 대로 머지한다. PR 마감 시각까지 Ready가 안 된 파일은 D가 인수한다(그전까지는 껍데기가 그대로 있어 앱은 정상 동작한다).
+**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. 다른 팀원 코드는 D가 미리 넣은 껍데기를 그대로 쓰고(✅ 있음), 내 파일의 껍데기는 본문을 원본대로 교체한다. 껍데기도 없을 때만 [연결 예정](CLAUDE.md 11절). 시니어는 자동 검사가 통과한 넘김 PR을 도착하는 대로 바로바로 머지한다.
 
 ---
 
@@ -46,7 +46,7 @@
   docker compose run --rm api python -m app.ingest explain   → 삼성전자 팩터별 기여도 출력
   pytest -q tests/test_scoring.py
 
-[선행 작업] B ①(feat/s4-b-metrics-view)의 v_stock_metrics. 컬럼 목록은 docs/05에 있으므로 stage에 없으면 그 이름대로 [연결 예정] — 실제 VIEW가 있어야 도는 테스트는 연결 예정 목록에 적는다(D가 연결 후 추가).
+[선행 작업] 없음 — B의 v_stock_metrics는 D의 껍데기(docs/05 컬럼, PER·PBR 등 일부 값만 채움)가 stage4에 있어 ✅ 그대로 쓴다. 2·6번 scoring.py의 compute_scores 등은 D의 껍데기가 들어 있으니 본문을 원본대로 교체한다. B가 실제 VIEW를 머지하면 같은 코드 그대로 모든 지표 값이 들어온다.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② "모델 한 장 요약"(9절 문체)만 먼저 출력하고, 그다음 CLAUDE.md 2절의 작업 계획표(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -76,7 +76,7 @@
 
 [파트별 확인 — 계획표의 "파트별 확인 지점"으로 그대로 쓴다. 파일마다 만든 직후 돌려 보고(CLAUDE.md 3절 ③), 파트가 끝날 때마다 실제로 실행해서 "여기까지 만든 것"을 보여 주고 아주 쉽게 설명한다(3-1)]
 파트 1 (1번 v_stock_metrics — ①번 브랜치) → 볼 것: psql로 005930·AAPL의 return_1m·volatility·mdd·per·pbr 등 출력. 1개월 수익률 하나는 daily_prices에서 두 종가를 직접 꺼내 손계산해 VIEW 값과 같은지 보여 준다.
-파트 2 (2~4번 분석 SQL·프리셋 검증·analysis 라우터) → 볼 것: curl `/stocks/KOSPI/005930/analysis?preset=growth` → 원본 3-3 예시와 칸 비교, preset=xxx → 422 UNKNOWN_PRESET, `/scoring/presets`. C 머지 전이라 점수가 null이면 그게 정상인 이유를 말해 준다.
+파트 2 (2~4번 분석 SQL·프리셋 검증·analysis 라우터) → 볼 것: curl `/stocks/KOSPI/005930/analysis?preset=growth` → 원본 3-3 예시와 칸 비교, preset=xxx → 422 UNKNOWN_PRESET, `/scoring/presets`. C 머지 전에는 seed-demo의 시드 점수가 나온다는 것을 말해 준다.
 파트 3 (5번 경쟁 비교·추이) → 볼 것: curl `/peers`(그룹 내 순위·평균), `/peers/chart?range=1m` → 첫날 값이 100인 것, 휴장일 null 위치를 짚어 준다. 1인 그룹 종목 응답도 1번.
 파트 4 (6번 통계 4종) → 볼 것: 4개 엔드포인트 curl. min_samples로 빠진 그룹(stats_market_excluded)이 왜 빠졌는지 숫자로 설명.
 파트 5 (7번 기존 응답에 매력도) → 볼 것: `/stocks?preset=growth` 와 `?preset=value` 결과를 나란히 — 점수 열이 달라짐. /watchlist도 같은 방식.
@@ -92,7 +92,7 @@
   curl localhost:8000/api/v1/stocks/KOSPI/005930/peers/chart?range=1m → 휴장일 null 포함
   pytest -q tests/test_analysis.py
 
-[선행 작업] ①은 선행 없음 — 파트가 끝나는 대로 넘긴다(C가 이 VIEW를 기다린다). ②는 C(feat/s4-c-scoring)의 stock_scores 행이 필요하지만 테이블(D)은 이미 있으므로 테스트는 픽스처로 행을 직접 넣어 진행한다. ①이 머지 전이면 ②는 ①에서 갈라져 시작(CLAUDE.md 10절). C 머지 전이면 ②는 Draft PR.
+[선행 작업] 없음 — ①은 파트가 끝나는 대로 넘긴다(빨리 머지될수록 C가 실제 지표 값으로 확인할 수 있다). ②는 ① 머지와 상관없이 origin/stage4에서 갈라져 시작한다(VIEW 껍데기가 stage4에 있다). C의 stock_scores는 D의 시드 행이 있어 ✅ 그대로 쓰고, 테스트는 픽스처로 행을 직접 넣는다. 4~6번 analysis.py 엔드포인트는 D의 껍데기가 들어 있으니 본문을 원본대로 교체한다.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -127,7 +127,7 @@
 [완료 기준]
   프리셋 바꾸면 상세·리스트·홈 점수가 같이 바뀜 / 1인 그룹은 '비교 대상 없음' / 점수 없는 종목은 빈 상태 / 콘솔 에러 0
 
-[선행 작업] B ②(feat/s4-b-analysis-api)의 analysis·peers·presets API. stage에 없으면 [연결 예정](CLAUDE.md 11절) — docs/06 3-3 예시로 MOCK 하고 묻지 말고 진행한다(`TODO(연결)` 표시, D가 연결).
+[선행 작업] 없음 — B의 analysis·peers·presets API는 D의 껍데기가 stage4에 있어 ✅ 그대로 쓴다. MOCK을 따로 만들지 않는다. 껍데기 동안은 docs/06 3-3 예시 값이라 프리셋을 바꿔도 점수가 같다 — Network 탭에서 preset 값이 바뀐 요청이 나가는 것으로 확인하고, B가 본문을 교체하면 같은 코드 그대로 점수가 바뀐다.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -138,14 +138,15 @@
 
 ```
 시니어 모드. Stage 4.
-[PR] 파트 단위로 넘어온(Ready) PR을 자동 검사 통과 확인 후 머지 순서대로 당일 머지하고, 팀 채팅에 알린다. 진행 중(Draft) PR은 코드만 미리 본다. 받은 요청 메모는 추천안에 OK/다른 지시만 답한다.
-[연결 예정 처리] 이 단계 PR이 모두 머지되면 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "연결 예정 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 4` 통과 → 아래 통합으로.
-[선행] 001_scoring_v2.sql·002_presets.sql + schema·ORM, docs/05 v_stock_metrics 컬럼 계약 → 커밋 후 배포.
+[PR] 파트 단위로 넘어온(Ready) PR을 자동 검사 통과 확인 후 도착하는 대로 당일 머지하고, 팀 채팅에 알린다. 진행 중(Draft) PR은 코드만 미리 본다. 받은 요청 메모는 추천안에 OK/다른 지시만 답한다.
+[마감] PR 마감 시각에 stage4에서 `git grep -n "TODO(껍데기)"`로 남은 껍데기를 본다. 남은 파일은 D가 인수한다 — 담당자 브랜치의 끝난 커밋까지 머지하고 나머지를 D가 작성한다. 시간이 모자라면 껍데기 그대로 태그를 달고 다음 단계를 연다(앱은 정상 동작). 인수 내역(파일·원래 담당·사유·상태)은 stage4 → main PR 본문 "인수 파트"에 적고, 인수분은 끝나는 대로 stage4에 머지한 뒤 다음 stage로 합친다.
+[연결 예정 처리] 마감 후 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "연결 예정 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 4` 통과 → 아래 통합으로.
+[선행] stage3(인수분 포함 현재 상태)에서 stage4를 만든다 → 001_scoring_v2.sql·002_presets.sql + schema·ORM, docs/05 v_stock_metrics 컬럼 계약 + 머리말의 "D 껍데기" 전부(`TODO(껍데기): {담당} — {무엇}` 주석, 이름·인자·응답 모양은 원본 그대로) → `pytest -q` 통과 → 커밋 후 배포.
 [내 구현]
 1. 003_benchmark.sql(+schema: coverage, detail_synced_at), backend/app/ingest/benchmark.py — 국가·섹터별 시총 상위 비교군 선정·평시 데이터·정리
 2. backend/app/services/hydration.py — 비교군 종목 상세 요청 시 백그라운드 수집, detail_status(ready/loading/failed, 실패 10분 뒤 재시도)
 3. refresh.py에 SCORES 작업 연결(C 요청 메모), scheduler에 매일 07:00 KST 비교군 작업
 4. stocks.py 상세 응답 detail_status·/stocks q 검색 시 비교군 포함 — B와 구역 합의 후 D가 추가, A에게 배지 요청
 5. backend/tests/test_benchmark.py, docs/09 비교군 절
-[통합] B(VIEW) → C → B(API) → D → A 머지, benchmark → scores 실행 → 화면 확인 → stage4 → main, 태그 v4.0
+[통합] 마감·인수 후 benchmark → scores 실행 → 화면 확인 → stage4 → main, 태그 v4.0
 ```
