@@ -206,3 +206,19 @@ def load_fx_daily(engine: Engine, providers: Providers, *, full: bool = False, t
                     for p in pts], ["granularity", "rate_at"])
             res.notes.append(f"{start}~{today}")
     return res.status
+
+
+# ---------------------------------------------------------------- 데모 사용자
+DEMO_WATCHLIST = [("KOSPI", "005930"), ("KOSPI", "000660"), ("KOSPI", "035420"), ("KOSPI", "373220"),
+                  ("NASDAQ", "AAPL"), ("NASDAQ", "NVDA"), ("NASDAQ", "MSFT"), ("NASDAQ", "TSLA")]
+
+
+def seed_demo_watchlist(engine: Engine) -> int:
+    with engine.begin() as conn:
+        uid = conn.execute(text("SELECT user_id FROM users WHERE nickname = 'demo'")).scalar_one()
+        rows = []
+        for order, (market, ticker) in enumerate(DEMO_WATCHLIST, start=1):
+            sid = conn.execute(text("""SELECT s.stock_id FROM stocks s JOIN markets m USING (market_id)
+                                       WHERE m.code = :m AND s.ticker = :t"""), {"m": market, "t": ticker}).scalar_one()
+            rows.append({"user_id": uid, "stock_id": sid, "sort_order": order})
+        return upsert(conn, "watchlist_items", rows, ["user_id", "stock_id"], update=["sort_order"])
