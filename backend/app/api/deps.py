@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import get_engine, session_factory
-from app.core.errors import NotFound, ServiceUnavailable
+from app.core.errors import NotFound
 from app.providers.base import FxPoint, ProviderError
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN
 from app.services.fx import FxService
@@ -50,21 +50,11 @@ def resolve_stock(db: Session, market: str, ticker: str) -> dict:
     return dict(row)
 
 
-# ── [S2-D] 현재 사용자 ──
-def get_current_user_id(db: Session = Depends(get_db)) -> int:
-    """요청을 보낸 사용자의 user_id. 인증이 없는 단일 데모 사용자 모드라 설정의 demo_username 행을 쓴다.
+# ── [S2-D] 현재 사용자·경로 id ──
+def get_current_user_id() -> int:
+    """1차는 단일 사용자(데모) 모드라 설정값을 그대로 쓴다. 2차에서 JWT 검증으로 교체한다."""
+    return get_settings().default_user_id
 
-    관심종목·포트폴리오 API는 요청 본문·경로로 user_id를 받지 않고 항상 이 함수로 정한다
-    (나중에 로그인이 생기면 이 함수만 바꾸면 된다). 사용자 행이 없으면 init-db/seed-demo가 안 된 상태 → 503.
-    """
-    username = get_settings().demo_username
-    user_id = db.execute(text("SELECT user_id FROM users WHERE username = :u"), {"u": username}).scalar()
-    if user_id is None:
-        raise ServiceUnavailable(f"사용자 '{username}'이(가) 없습니다. init-db(또는 seed-demo)를 실행하세요", code="USER_NOT_FOUND")
-    return user_id
-
-
-CurrentUserId = Annotated[int, Depends(get_current_user_id)]
 
 # 정수 id 경로 파라미터(portfolio_id·item_id 등) — 범위 밖이면 DB 조회 전에 422 VALIDATION_ERROR
 IdPath = Annotated[int, Path(ge=1, le=INT_MAX, description="1 이상 PostgreSQL INT 범위")]
