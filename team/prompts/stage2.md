@@ -62,7 +62,7 @@
 
 [담당 파일 — 이 순서대로]
 1. backend/app/queries/watchlist.sql — 사용자 관심종목 카드(정렬순, 최신가·등락). 매력도·메모·목표가·target_gap 컬럼 제외
-2. backend/app/schemas/api.py — [S2-B] 구역 (WatchlistItemOut, WatchlistAddIn, WatchlistOrderIn)
+2. backend/app/schemas/api.py — [S2-B] 구역. 원본 이름 그대로: WatchlistCreate, WatchlistOrderItem, WatchlistOrder, WatchlistCard, WatchlistOut (score·memo·target_price·target_gap·preset 필드 제외, WatchlistUpdate는 Stage 5)
 3. backend/app/api/watchlist.py — GET /watchlist, POST /watchlist(중복 409 DUPLICATE_WATCHLIST), PATCH /watchlist/order, DELETE /watchlist/{market}/{ticker}
    - 모든 핸들러는 deps.get_current_user_id()로 사용자 확정 (요청에 user_id 받지 않음)
 4. backend/app/main.py — [S2-B] 라우터 등록
@@ -136,7 +136,7 @@
 ```
 시니어 모드. Stage 2.
 [PR] Draft PR은 코드 리뷰만 한다. Ready로 바뀐 PR을 머지 순서대로 머지하고, 머지할 때마다 다음 순서 팀원에게 알린다(그쪽 Claude가 동기화 중 머지를 감지해 Ready 전환을 시작한다).
-[선행] stage2 브랜치는 stage1 머지·팀 키트(CLAUDE.md 9~11절) 수정이 모두 들어간 main에서 만든다. schema.sql·models에 users·watchlist_items(memo·target_price 제외)·portfolios·portfolio_items, deps.get_current_user_id, providers/base.py → stage2에 커밋 후 프롬프트 배포.
+[선행] stage2 브랜치는 stage1 머지·팀 키트(CLAUDE.md 9~11절) 수정이 모두 들어간 main에서 만든다. schema.sql·models에 users·watchlist_items(memo·target_price·updated_at 제외)·portfolios·portfolio_items, deps.get_current_user_id·IdPath, config.default_user_id·refresh_ttl_hours, providers/base.py → `python team/tools/check_contract.py 2` 통과 → stage2에 커밋 후 프롬프트 배포.
 [통합 중]
 1. backend/app/ingest/demo.py + CLI seed-demo (데모 사용자·관심종목·포트폴리오)
 2. 소유자 검사: 남의 포트폴리오·항목 접근 시 404 — backend/tests/test_ownership.py, test_current_user.py

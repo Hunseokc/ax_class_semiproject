@@ -14,10 +14,12 @@
 
 ## 1. 참조 원본
 
-- 원본 완성본: `../ax_class_semiproject/` (형제 폴더). **읽기 전용** — 절대 수정하지 않는다.
+- 원본 완성본: `../ax_class_semiproject/` (형제 폴더, 로컬에 `../semi`로 받았으면 그 경로). **읽기 전용** — 절대 수정하지 않는다.
 - 원본은 "정답지"이자 최종 형태다. 이번 단계 결과물은 원본과 **같은 파일 경로·같은 이름·같은 동작**을 목표로 하되, **이번 단계 범위에 해당하는 부분만** 옮긴다.
 - 원본 파일에는 이후 단계의 기능(매력도, 비교군, 홈 위젯 등)이 섞여 있다. 시작 프롬프트의 "이번 단계에서 뺄 것"에 해당하는 코드·import·필드·테스트는 빼고, 빠져서 깨지는 곳은 최소한의 형태로 바꾼다. 무엇을 뺐는지 [설계 설명]에 적는다.
 - 원본에 없는 기능·라이브러리·파일을 새로 만들지 않는다.
+- **원본 코드·DDL은 "복사한 뒤 뺄 것만 지운다".** 이름·타입·길이·기본값·제약·relationship을 다시 쓰거나 "더 나은 이름"으로 바꾸지 않는다. 원본을 보고 새로 타이핑하면 반드시 조금씩 틀어진다.
+- 원본과 다르게 두어도 되는 것은 `team/contracts/stage{N}.toml`에 적힌 것뿐이다. 거기 없는 차이를 발견하면(내 파일이든 남의 파일이든) 11절 "약속끼리 서로 다를 때"로 처리한다.
 
 ## 2. 작업 시작 — 첫 응답은 "작업 계획표"만
 
@@ -298,6 +300,8 @@
 
 - 스택: Python 3.12 · FastAPI · SQLAlchemy 2.x(동기, 원문 SQL은 `backend/app/queries/*.sql` + `text()`) · Pydantic v2 · PostgreSQL 16 · Docker Compose · pytest · 바닐라 JS(ES Modules, 빌드 없음) · Chart.js(CDN)
 - 실행: `docker compose -f compose.yml -f compose.dev.yml up -d --build` / 적재 `docker compose run --rm api python -m app.ingest <명령>` / 테스트 `docker compose run --rm api pytest -q`
+- `.env`에 `COMPOSE_FILE=compose.yml:compose.dev.yml`(+`COMPOSE_PATH_SEPARATOR=:`)이 있어야 위 명령이 **지금 소스**로 돈다. 없으면 마지막으로 빌드한 이미지 속 옛 코드로 돌아, 테스트가 통과해도 믿을 수 없다. 테스트 전에 `.env`에 이 두 줄이 있는지 먼저 확인하고, 없으면 `.env.example`대로 추가한다.
+- 계약 검사(원본 대비 schema·ORM·import): `python team/tools/check_contract.py {N}` — D는 계약 커밋 전, 모두는 PR을 Ready로 바꾸기 전에 통과시킨다.
 - 에러 응답은 항상 `{"error": {"code", "message", "detail"}}` (`backend/app/core/errors.py`의 `AppError` 계열)
 - 금액·비율 계산은 `Decimal`, 통화는 원화 통합(거래 시점 환율 저장)
 - 조회 API는 외부 소스를 직접 부르지 않는다(DB 값만). 외부 호출은 수집(`ingest`)·갱신 서비스에서만.
@@ -408,6 +412,6 @@ A·B·C에게 보여주는 모든 글(계획표, 설계 설명, 코드 해설, �
 - 실패를 숨기려고 남의 파일을 대신 만들거나, 가짜 모듈·skip 표시를 레포에 남기지 않는다.
 
 ### 이때만 멈추고 묻는다
-- 약속끼리 서로 다를 때 (예: 시작 프롬프트와 docs/06의 필드 이름이 다름) → 어느 쪽을 따를지 묻고, 시니어에게 보낼 요청 메모를 만든다.
+- 약속끼리 서로 다를 때 (예: 시작 프롬프트와 docs/06의 필드 이름이 다름, D의 테이블·deps가 원본과 다름) → 어느 쪽을 따를지 묻고, 시니어에게 보낼 요청 메모를 만든다. 메모에는 `check_contract.py` 출력의 해당 `[key]`를 붙인다.
 - 담당 외 파일을 고치지 않으면 진행 자체가 안 될 때 → 요청 메모를 만들고 할 수 있는 나머지를 먼저 진행한다.
 - `origin/stage{N}` 브랜치가 아예 없을 때 (10절)
