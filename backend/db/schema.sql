@@ -149,19 +149,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 사용자: 인증 없는 단일 데모 사용자(username='demo') 모드. 그래도 user_id FK를 두어 다중 사용자로 확장 가능하게 한다
+-- 사용자: 인증 없음. 기본 사용자 1명(demo)은 load_master가 시드한다(get_current_user_id = 설정 DEFAULT_USER_ID). 2차에서 로그인으로 대체
 CREATE TABLE users (
-  user_id      SERIAL PRIMARY KEY,
-  username     VARCHAR(32)  NOT NULL UNIQUE,
-  display_name VARCHAR(64)  NOT NULL,
-  created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
+  user_id    SERIAL PRIMARY KEY,
+  nickname   VARCHAR(50) NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON users
-  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
--- 데모 사용자 1명 (get_current_user_id가 username으로 찾는다). seed-demo가 관심종목·포트폴리오를 채운다
-INSERT INTO users (username, display_name) VALUES ('demo', '데모 사용자');
 
 -- 관심종목: 사용자 ↔ 종목 N:M 교차 테이블 + 정렬 순서. 메모·목표가는 Stage 5에서 컬럼 추가
 CREATE TABLE watchlist_items (
@@ -175,11 +168,11 @@ CREATE TABLE watchlist_items (
 -- 모의 포트폴리오: "시드 안에서 담아보는 계산기 겸 장바구니" (거래 원장 아님)
 CREATE TABLE portfolios (
   portfolio_id SERIAL PRIMARY KEY,
-  user_id      INT          NOT NULL REFERENCES users ON DELETE CASCADE,
-  name         VARCHAR(64)  NOT NULL,
-  seed_amount  NUMERIC(18,0) NOT NULL CHECK (seed_amount > 0),     -- 원화 시드
-  created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  user_id      INT           NOT NULL REFERENCES users ON DELETE CASCADE,
+  name         VARCHAR(100)  NOT NULL,
+  seed_krw     NUMERIC(20,0) NOT NULL CHECK (seed_krw > 0),        -- 투자 시드(원)
+  created_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
   UNIQUE (user_id, name)                                           -- 같은 사용자의 포트폴리오 이름 중복 → 409
 );
 CREATE TRIGGER trg_portfolios_updated_at BEFORE UPDATE ON portfolios
@@ -191,14 +184,17 @@ CREATE TRIGGER trg_portfolios_updated_at BEFORE UPDATE ON portfolios
 CREATE TABLE portfolio_items (
   item_id      SERIAL PRIMARY KEY,
   portfolio_id INT           NOT NULL REFERENCES portfolios ON DELETE CASCADE,
-  stock_id     INT           NOT NULL REFERENCES stocks,           -- 담은 종목은 지워지지 않게 CASCADE 안 함
+  stock_id     INT           NOT NULL REFERENCES stocks ON DELETE RESTRICT,  -- 담긴 종목은 삭제 불가
   quantity     INT           NOT NULL CHECK (quantity > 0),        -- 정수 주식 수
   ref_price    NUMERIC(18,4) NOT NULL CHECK (ref_price > 0),       -- 담은 시점 종가 (종목 통화)
-  ref_fx_rate  NUMERIC(12,4) NOT NULL CHECK (ref_fx_rate > 0),     -- 담은 시점 환율 (KRW 종목은 1)
+  ref_fx_rate  NUMERIC(12,4) NOT NULL DEFAULT 1 CHECK (ref_fx_rate > 0),  -- 담은 시점 환율 (KRW 종목은 1)
   ref_date     DATE          NOT NULL,                             -- 위 가격·환율의 기준일
+  memo         TEXT,
   created_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  cost_krw     NUMERIC(24,2) GENERATED ALWAYS AS (quantity * ref_price * ref_fx_rate) STORED,  -- 원가(원)
   UNIQUE (portfolio_id, stock_id)                                  -- 같은 종목은 한 줄 (수량 수정으로 늘린다)
 );
+-- "원가 합계 ≤ 시드"는 행 간 제약이라 CHECK로 걸 수 없다 → 서비스에서 트랜잭션 + 포트폴리오 행 잠금(SELECT ... FOR UPDATE)으로 보장한다.
 CREATE TRIGGER trg_portfolio_items_updated_at BEFORE UPDATE ON portfolio_items
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();

@@ -3,6 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[2]   # backend/ (컨테이너에서는 /srv)
@@ -29,9 +30,10 @@ class Settings(BaseSettings):
     price_source_kr: Literal["pykrx", "yfinance"] = "pykrx"
     krx_id: str = ""
     krx_pw: str = ""
-    # ── [S2-D] 데모 사용자 ──
-    demo_username: str = "demo"   # 인증 없는 단일 사용자 모드: get_current_user_id가 이 username의 users 행을 쓴다
-    # 이후 단계 설정(API 키·갱신 TTL·스케줄러)은 해당 단계 담당자가 이 클래스에 추가한다
+    # ── [S2-D] 사용자·갱신 TTL ──
+    default_user_id: int = Field(default=1, ge=1)   # 인증 없는 단일 사용자(demo) 모드: get_current_user_id가 돌려주는 값
+    refresh_ttl_hours: float = Field(default=4, ge=3, le=4)   # 같은 종류 외부 호출은 이 시간에 최대 1회 (FxService TTL)
+    # 이후 단계 설정(API 키·스케줄러)은 해당 단계 담당자가 이 클래스에 추가한다
 
 
 @lru_cache
