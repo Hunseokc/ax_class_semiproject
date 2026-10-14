@@ -1,8 +1,11 @@
 // 주식 리스트: 시장 탭·정렬(거래량/시총)·검색·경쟁 그룹 필터
-import { getPeerGroups, getStocks } from "../api.js";
+import { getPeerGroups, getStocks, getWatchlist } from "../api.js";
 import { changeHtml, dateTime, esc, initials, krw, price, stockUrl, volume } from "../format.js";
 import { mountSidebar } from "../components/sidebar.js";
 import { emptyState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";
+import { icons } from "../components/icons.js";   // [S2-A]
+import { openAddToPortfolio } from "../components/add-to-portfolio.js";   // [S2-A]
+import { starButton } from "../components/watch.js";   // [S2-A]
 
 mountSidebar("stocks");
 const $ = (sel) => document.querySelector(sel);
@@ -61,8 +64,8 @@ getPeerGroups().then(({ groups }) => {
 groupSel.addEventListener("change", () => { state.group = groupSel.value; refresh(); });
 
 // ---------------------------------------------------------------- 리스트
-function stockRow(s) {
-  return h(`<li class="stock-row">
+function stockRow(s, watched) {
+  const li = h(`<li class="stock-row">
       <span class="rank">${s.rank}</span>
       <a class="stock-row__name" href="${stockUrl(s.market, s.ticker)}">
         <span class="avatar" aria-hidden="true">${esc(initials(s.name))}</span>
@@ -72,7 +75,13 @@ function stockRow(s) {
       <span class="stock-row__price num"><strong>${price(s.close, s.currency)}</strong>${changeHtml(s.change_rate, s.country)}</span>
       <span class="stock-row__col num" data-label="거래량">${volume(s.volume)}</span>
       <span class="stock-row__col num" data-label="시총(원화)">${krw(s.market_cap_krw, { compact: true })}</span>
+      <span class="stock-row__actions"></span>
     </li>`);
+  // [S2-A] ★ — 서버가 is_watched 를 주지 않으므로 내 관심종목 목록과 맞춰 본다
+  const add = h(`<button class="btn btn--sm btn--accent" type="button" aria-label="${esc(s.name)} 포트폴리오에 담기">${icons.plus}<span>담기</span></button>`);
+  add.addEventListener("click", () => openAddToPortfolio(s));
+  li.querySelector(".stock-row__actions").append(starButton(s, watched.has(`${s.market}/${s.ticker}`)), add);
+  return li;
 }
 
 function refresh() {
@@ -80,14 +89,23 @@ function refresh() {
   const sortLabel = state.sort === "volume" ? "거래량" : "시가총액(원화 환산)";
   return load($("#list"), {
     skeleton: skeleton("row", 8),
-    fetch: () => getStocks({ country: state.country, sort: state.sort, group: state.group, q: state.q }),
+    fetch: async () => {
+      // [S2-A] 관심종목을 못 받아도 리스트는 보여 준다 (★만 전부 꺼진 상태)
+      // TODO(연결): D의 stock_list.sql·stock_detail.sql에 is_watched가 들어오면 원본처럼 starButton(s, s.is_watched)로 바꾸고 getWatchlist 호출 삭제
+      const [d, wl] = await Promise.all([
+        getStocks({ country: state.country, sort: state.sort, group: state.group, q: state.q }),
+        getWatchlist().catch(() => ({ items: [] })),
+      ]);
+      d.watched = new Set(wl.items.map((i) => `${i.market}/${i.ticker}`));
+      return d;
+    },
     isEmpty: (d) => !d.items.length,
     render: (d) => {
       $("#list-meta").textContent = `${d.total}개 종목 · ${sortLabel} 순 · 시총 환산 환율 기준 ${dateTime(d.fx_rate_at)}`;
       const ul = h('<ul class="list stock-list" aria-label="종목 순위"></ul>');
       ul.append(h(`<li class="stock-row stock-row--head" aria-hidden="true"><span>#</span><span>종목</span><span>현재가·등락</span>
-        <span class="stock-row__col">거래량</span><span class="stock-row__col">시총(원화)</span></li>`));
-      ul.append(...d.items.map(stockRow));
+        <span class="stock-row__col">거래량</span><span class="stock-row__col">시총(원화)</span><span></span></li>`));
+      ul.append(...d.items.map((s) => stockRow(s, d.watched)));
       return ul;
     },
     empty: emptyState({ title: "조건에 맞는 종목이 없습니다", body: "검색어나 경쟁 그룹 필터를 바꿔 보세요." }),

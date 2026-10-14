@@ -56,7 +56,62 @@
 .stat__value { font-size: var(--fs-lg); font-weight: var(--fw-extra); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat__sub { color: var(--text-3); font-size: var(--fs-xs); }
 
+/* ---------------------------------------------------------------- 주식 리스트 ★ 열 [S2-A] */
+.stock-row { grid-template-columns: 28px minmax(180px, 2fr) minmax(130px, 1.2fr) minmax(90px, 1fr) minmax(90px, 1fr) 116px; }
+.stock-row__actions { display: flex; gap: var(--sp-1); align-items: center; justify-content: flex-end; }
+@media (max-width: 1023px) {
+  .stock-row { grid-template-columns: 24px minmax(150px, 2fr) minmax(110px, 1fr) 116px; }
+}
+@media (max-width: 767px) {
+  .stock-row { grid-template-columns: 20px 1fr auto; }
+  .stock-row__actions { grid-column: 2 / -1; justify-content: flex-start; }   /* 폰 폭: 버튼은 이름 아래 줄 */
+}
+
+/* 종목 상세 헤더 ★ 칸 [S2-A] */
+.stock-head { grid-template-columns: 1fr auto auto; }
+.stock-head__actions { display: flex; gap: var(--sp-2); align-items: center; }
+@media (max-width: 767px) {
+  .stock-head { grid-template-columns: 1fr; }
+}
+
 /* ---------------------------------------------------------------- 모의 포트폴리오 [S2-A] */
+/* TODO(D가 components.css로 이동): 폼 간격·진행 막대 — 원본 components.css의 .add-form·.field__label·.bar 블록과 같다 */
+.add-form { display: flex; flex-direction: column; gap: 18px; }
+.field__label { font-size: var(--fs-sm); color: var(--text-2); font-weight: var(--fw-semibold); }
+.bar { height: 10px; border-radius: var(--r-pill); background: var(--card-active); overflow: hidden; }
+.bar__fill { height: 100%; border-radius: var(--r-pill); background: var(--ice); }
+
+.pf { display: flex; flex-direction: column; gap: var(--sp-6); }
+.pf-picker { overflow-x: auto; }
+.pf-picker .segmented { white-space: nowrap; }
+.pf-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--sp-4); flex-wrap: wrap; }
+.pf-toolbar__actions { display: flex; gap: var(--sp-2); }
+.pf-summary { display: grid; grid-template-columns: minmax(260px, 1fr) 2fr; gap: var(--sp-4); }
+.pf-summary__hero { display: flex; flex-direction: column; gap: var(--sp-2); justify-content: center; }
+.pf-summary__big { font-size: var(--fs-3xl); font-weight: var(--fw-extra); letter-spacing: -0.02em; line-height: 1.1; }
+.pf-summary__pnl { font-size: var(--fs-lg); }
+.pf-summary .stat__sub { line-height: 1.4; }
+.pf-weights { display: flex; flex-direction: column; gap: var(--sp-3); }
+.pf-donut { position: relative; height: 220px; }
+.pf-donut__center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+.pf-donut__center strong { font-size: var(--fs-xl); font-weight: var(--fw-extra); }
+.pf-legend { justify-content: center; }
+.pf-item { display: grid; grid-template-columns: minmax(200px, 2fr) repeat(3, minmax(120px, 1fr)) auto; gap: var(--sp-4); align-items: center; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-row); }
+.pf-item:hover { background: var(--card-hover); }
+.pf-item__name { display: flex; gap: var(--sp-3); align-items: center; min-width: 0; }
+.pf-item__name:hover .row__title { text-decoration: underline; text-underline-offset: 3px; }
+.pf-item__col { display: flex; flex-direction: column; text-align: right; font-size: var(--fs-sm); }
+.pf-item__actions { display: flex; gap: var(--sp-1); }
+@media (max-width: 1023px) {
+  .pf-summary { grid-template-columns: 1fr; }
+  .pf-item { grid-template-columns: 1fr 1fr; }
+  .pf-item__name { grid-column: 1 / -1; }
+  .pf-item__col { text-align: left; }
+  .pf-item__actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+@media (max-width: 767px) {
+  .pf-summary__big { font-size: var(--fs-2xl); }
+}
 
 /* ---------------------------------------------------------------- 대시보드 홈 [S1-A] */
 .home { gap: var(--sp-6); }
@@ -74,20 +129,11 @@
 /* 스파크라인 기간 라벨 + 장 상태 배지(휴장·직전 거래일) */
 .metric-card__meta { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); min-height: 20px; font-size: 11px; color: var(--text-3); white-space: nowrap; }
 
-/* [S1-D] 발표용 임시: 주요 종목 (가격 카드 + 종가 추이) — TODO(Stage 2 A): 관심종목 카드로 교체 */
-.featured { display: flex; flex-direction: column; gap: var(--sp-4); }
-.featured-row { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: var(--sp-4); }
-.featured-card, .featured-chart { background: var(--card); border-radius: var(--r-card-sm); padding: var(--sp-5); min-width: 0; }
-.featured-card { display: flex; flex-direction: column; gap: var(--sp-2); color: inherit; text-decoration: none; }
-.featured-card__head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
-.featured-card__price { font-size: var(--fs-2xl); font-weight: var(--fw-extra); letter-spacing: -0.02em; line-height: 1.15; margin-top: var(--sp-2); }
-.featured-card__chg { display: flex; gap: var(--sp-2); align-items: baseline; font-weight: var(--fw-semibold); }
-.featured-card__sub { line-height: 1.6; }
-.featured-card__more { margin-top: auto; padding-top: var(--sp-2); }
-.featured-chart { display: flex; flex-direction: column; gap: var(--sp-3); }
-.featured-chart__head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
-.featured-chart__plot { position: relative; height: 180px; }
-.featured-chart.state { justify-content: center; }
-@media (max-width: 767px) {
-  .featured-row { grid-template-columns: 1fr; }
-}
+/* 홈 내 관심종목 카드 [S2-A] */
+.wl-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-4); }
+.wl-card { background: var(--card); border-radius: var(--r-card-sm); display: flex; flex-direction: column; min-width: 0; }
+.wl-card__link { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-5) var(--sp-5) var(--sp-3); color: inherit; text-decoration: none; flex: 1; }
+.wl-card__head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
+.wl-card__price { font-size: var(--fs-xl); font-weight: var(--fw-extra); letter-spacing: -0.02em; line-height: 1.15; margin-top: var(--sp-2); }
+.wl-card__chg { font-weight: var(--fw-semibold); }
+.wl-card__move { display: flex; gap: var(--sp-1); justify-content: flex-end; padding: 0 var(--sp-3) var(--sp-3); }

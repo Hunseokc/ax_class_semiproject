@@ -12,18 +12,21 @@
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/components.css">
   <link rel="stylesheet" href="/static/css/pages.css">
-  <!-- Stage 1: 담당(A)이 아래 인라인 스크립트를 js/pages/portfolio.js 로 바꾸고(mountSidebar 호출 포함) Chart.js CDN을 추가한다 -->
-  <script type="module">
-    import { mountSidebar } from "/static/js/components/sidebar.js";
-    mountSidebar("portfolio");
-  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" defer></script>
+  <script type="module" src="/static/js/pages/portfolio.js"></script>
 </head>
 <body>
   <div class="app">
     <aside id="sidebar" class="sidebar"></aside>
     <main class="main" id="main">
       <div class="main__inner">
-        <h1 class="sr-only">모의 포트폴리오</h1>
+        <header class="page-head">
+          <div><p class="subtle">Simulator</p><h1>모의 포트폴리오</h1></div>
+          <button class="btn btn--accent" type="button" id="create">+ 새 포트폴리오</button>
+        </header>
+        <div id="picker" class="pf-picker"></div>
+        <p class="notice">모의 계산이며 투자 권유가 아닙니다. 실제 매수·매도 체결이 아니라, 시드 안에서 종목을 담아 원가·비중·평가손익을 계산해 보는 도구입니다.</p>
+        <div id="content"></div>
       </div>
     </main>
   </div>
