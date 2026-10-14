@@ -61,7 +61,8 @@ export const getIndices = () => api.get("/market/indices");
 export const getFx = () => api.get("/market/fx");
 
 // ── [S2-A] Watchlist · Portfolios ──
-// TODO(선행 머지 후 제거): MOCK_S2 와 아래 mock* 코드 전부 — B(/watchlist)·C(/portfolios)가 머지되면 false 로 바꾸고 지운다.
+// TODO(연결): B의 /api/v1/watchlist (GET·POST·PATCH order·DELETE) — 연결 시 MOCK_S2=false 로 바꾸고 mockWatchlist 삭제
+// TODO(연결): C의 /api/v1/portfolios* — 연결 시 MOCK_S2=false 로 바꾸고 mockPortfolio·mock* 도우미 삭제
 const MOCK_S2 = true;
 
 // 관심종목 -------------------------------------------------------------------------
