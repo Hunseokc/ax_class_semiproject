@@ -213,7 +213,7 @@ const mockPortfolio = {
 
   async list() {
     const db = this._db();
-    return { user_id: 1, count: db.list.length, items: db.list.map((p) => this._out(p)) };
+    return db.list.map((p) => this._out(p));                          // 진짜 서버도 배열을 그대로 돌려준다
   },
   async create(name, seed_krw) {
     const db = this._db();
