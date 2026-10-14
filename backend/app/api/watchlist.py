@@ -11,11 +11,16 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, resolve_stock
 from app.core.errors import Conflict, NotFound
-from app.models import WatchlistItem
+from app.models import User, WatchlistItem
 from app.queries import sql
 from app.schemas.api import WatchlistAddIn, WatchlistItemOut, WatchlistOrderIn, WatchlistOut
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
+
+
+def _require_user(db: Session, user_id: int) -> None:
+    if db.get(User, user_id) is None:
+        raise NotFound(f"사용자(ID {user_id})를 찾을 수 없습니다", code="USER_NOT_FOUND")
 
 
 def _cards(db: Session, user_id: int) -> list[dict]:
@@ -24,12 +29,14 @@ def _cards(db: Session, user_id: int) -> list[dict]:
 
 @router.get("", response_model=WatchlistOut, summary="관심종목 카드 목록 (정렬순)")
 def list_watchlist(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    _require_user(db, user_id)
     items = _cards(db, user_id)
     return {"user_id": user_id, "count": len(items), "items": items}
 
 
 @router.post("", response_model=WatchlistItemOut, status_code=201, summary="관심종목 추가")
 def add_watchlist(body: WatchlistAddIn, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    _require_user(db, user_id)
     s = resolve_stock(db, body.market, body.ticker)
     next_order = db.execute(select(func.coalesce(func.max(WatchlistItem.sort_order), 0) + 1)
                             .where(WatchlistItem.user_id == user_id)).scalar_one()
@@ -45,6 +52,7 @@ def add_watchlist(body: WatchlistAddIn, user_id: int = Depends(get_current_user_
 
 @router.patch("/order", response_model=WatchlistOut, summary="관심종목 정렬 순서 변경")
 def reorder_watchlist(body: WatchlistOrderIn, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    _require_user(db, user_id)
     for it in body.items:
         s = resolve_stock(db, it.market, it.ticker)
         w = db.get(WatchlistItem, (user_id, s["stock_id"]))
@@ -60,6 +68,7 @@ def reorder_watchlist(body: WatchlistOrderIn, user_id: int = Depends(get_current
 @router.delete("/{market}/{ticker}", status_code=204, summary="관심종목 삭제")
 def delete_watchlist(market: MarketPath, ticker: TickerPath, user_id: int = Depends(get_current_user_id),
                      db: Session = Depends(get_db)):
+    _require_user(db, user_id)
     s = resolve_stock(db, market, ticker)
     w = db.get(WatchlistItem, (user_id, s["stock_id"]))
     if w is None:
