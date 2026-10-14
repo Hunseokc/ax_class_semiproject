@@ -4,7 +4,7 @@
 **D 선행 계약**: 마이그레이션 `001_scoring_v2.sql`·`002_presets.sql`과 schema 반영(scoring_presets, scoring_weights, stock_metric_values, stock_scores, peer_group_members.is_primary), `docs/05`에 `v_stock_metrics` 컬럼 목록과 `stock_scores` 구조 기록.
 **순서상 의존**: B의 `v_stock_metrics`가 C의 지표 입력이다 → **B는 1번(VIEW)부터 먼저 PR**하고 나머지를 이어서 한다.
 **머지 순서**: B(VIEW) → C → B(API) → D → A
-**PR 방식**: 앞 순서 작업이 머지되기 전에 끝나면 기다리지 않고 Draft PR → 시니어가 그 파트를 먼저 리뷰 → 앞 순서 머지 후 최신 stage를 합쳐 같은 PR을 Ready로 전환(CLAUDE.md 6절). 시니어는 Ready PR만 머지 순서대로 머지한다.
+**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. stage에 없는 다른 팀원 코드는 원본과 같은 이름으로 [연결 예정](CLAUDE.md 11절)로 두고, 연결은 D가 단계 통합 때 한다. 시니어는 자동 검사가 통과한 넘김 PR을 머지 순서대로 바로바로 머지한다.
 
 ---
 
@@ -46,7 +46,7 @@
   docker compose run --rm api python -m app.ingest explain   → 삼성전자 팩터별 기여도 출력
   pytest -q tests/test_scoring.py
 
-[선행 작업] B ①(feat/s4-b-metrics-view)의 v_stock_metrics. 컬럼 목록은 docs/05에 있으므로 그 이름대로 SQL·서비스를 먼저 작성하고, 실제 VIEW가 있어야 도는 테스트는 ⏸ B① 머지 후. B① 머지 전이면 Draft PR.
+[선행 작업] B ①(feat/s4-b-metrics-view)의 v_stock_metrics. 컬럼 목록은 docs/05에 있으므로 stage에 없으면 그 이름대로 [연결 예정] — 실제 VIEW가 있어야 도는 테스트는 연결 예정 목록에 적는다(D가 연결 후 추가).
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② "모델 한 장 요약"(9절 문체)만 먼저 출력하고, 그다음 CLAUDE.md 2절의 작업 계획표(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -92,7 +92,7 @@
   curl localhost:8000/api/v1/stocks/KOSPI/005930/peers/chart?range=1m → 휴장일 null 포함
   pytest -q tests/test_analysis.py
 
-[선행 작업] ①은 선행 없음 — 끝나면 바로 Ready PR(C가 이 VIEW를 기다린다). ②는 C(feat/s4-c-scoring)의 stock_scores 행이 필요하지만 테이블(D)은 이미 있으므로 테스트는 픽스처로 행을 직접 넣어 진행한다. ①이 머지 전이면 ②는 ①에서 갈라져 시작(CLAUDE.md 10절). C 머지 전이면 ②는 Draft PR.
+[선행 작업] ①은 선행 없음 — 파트가 끝나는 대로 넘긴다(C가 이 VIEW를 기다린다). ②는 C(feat/s4-c-scoring)의 stock_scores 행이 필요하지만 테이블(D)은 이미 있으므로 테스트는 픽스처로 행을 직접 넣어 진행한다. ①이 머지 전이면 ②는 ①에서 갈라져 시작(CLAUDE.md 10절). C 머지 전이면 ②는 Draft PR.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -106,7 +106,7 @@
 [이번 단계] Stage 4 — 분석 화면. 매력도는 "투자 권유가 아님" 문구를 항상 함께 표시한다.
 [내 파트] 투자 성향 메뉴 → 상세 매력도 → 수치 분석 → 경쟁 비교 → 리스트·홈 카드 매력도
 [브랜치] feat/s4-a-analysis-screens
-[참조 원본] ../ax_class_semiproject/frontend/js/components/preset-menu.js, js/pages/stock.js(분석 부분), docs/screenshots/{01_home,02_stocks,03_stock_detail}.png, docs/06 3-3 (읽기 전용)
+[참조 원본] ../ax_class_semiproject/frontend/js/components/preset-menu.js, js/pages/stock.js(분석 부분), docs/screenshots/{01_home,02_stocks,03_stock_detail}.png, docs/06 3-3 (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S4-A] 구역: getAnalysis·getPresets·getPeers·getPeersChart, 기존 함수에 preset 인자
@@ -127,7 +127,7 @@
 [완료 기준]
   프리셋 바꾸면 상세·리스트·홈 점수가 같이 바뀜 / 1인 그룹은 '비교 대상 없음' / 점수 없는 종목은 빈 상태 / 콘솔 에러 0
 
-[선행 작업] B ②(feat/s4-b-analysis-api)의 analysis·peers·presets API. 아직 없으면 docs/06 3-3 예시로 MOCK 하고 묻지 말고 진행한다. 머지 순서가 마지막이므로 B②·D 머지 전이면 Draft PR.
+[선행 작업] B ②(feat/s4-b-analysis-api)의 analysis·peers·presets API. stage에 없으면 [연결 예정](CLAUDE.md 11절) — docs/06 3-3 예시로 MOCK 하고 묻지 말고 진행한다(`TODO(연결)` 표시, D가 연결).
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -138,7 +138,8 @@
 
 ```
 시니어 모드. Stage 4.
-[PR] Draft PR은 코드 리뷰만 한다. Ready로 바뀐 PR을 머지 순서대로 머지하고, 머지할 때마다 다음 순서 팀원에게 알린다(그쪽 Claude가 동기화 중 머지를 감지해 Ready 전환을 시작한다).
+[PR] 파트 단위로 넘어온(Ready) PR을 자동 검사 통과 확인 후 머지 순서대로 당일 머지하고, 팀 채팅에 알린다. 진행 중(Draft) PR은 코드만 미리 본다. 받은 요청 메모는 추천안에 OK/다른 지시만 답한다.
+[연결 예정 처리] 이 단계 PR이 모두 머지되면 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "연결 예정 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 4` 통과 → 아래 통합으로.
 [선행] 001_scoring_v2.sql·002_presets.sql + schema·ORM, docs/05 v_stock_metrics 컬럼 계약 → 커밋 후 배포.
 [내 구현]
 1. 003_benchmark.sql(+schema: coverage, detail_synced_at), backend/app/ingest/benchmark.py — 국가·섹터별 시총 상위 비교군 선정·평시 데이터·정리

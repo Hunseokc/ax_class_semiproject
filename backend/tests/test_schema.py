@@ -59,7 +59,7 @@ def test_tables_are_stage1_and_2_only(engine):
     ("종료 < 시작", "INSERT INTO ingestion_logs (source, job_type, status, started_at, finished_at) "
                   "VALUES ('INTERNAL', 'PRICES', 'SUCCESS', now(), now() - interval '1 hour')"),
     # ── Stage 2 ──
-    ("사용자명 중복", "INSERT INTO users (username, display_name) VALUES ('demo', '중복')"),
+    ("닉네임 중복", "INSERT INTO users (nickname) VALUES ('demo')"),
     ("관심종목 중복(PK)", "INSERT INTO watchlist_items (user_id, stock_id) VALUES (1, 1), (1, 1)"),
     ("없는 사용자 관심종목 FK", "INSERT INTO watchlist_items (user_id, stock_id) VALUES (999, 1)"),
     ("시드 0", "INSERT INTO portfolios (user_id, name, seed_krw) VALUES (1, 'P', 0)"),

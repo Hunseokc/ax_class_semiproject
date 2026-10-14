@@ -10,7 +10,7 @@
   환율  DAILY 1,300 (3일), SNAPSHOT 1,300 (지금 → TTL 이내)
   지수  KOSPI 3일
 
-  사용자  1 demo (get_current_user_id가 찾는 데모 사용자)
+  사용자  demo(1), other(2)
 
 Stage 3 이후 테이블이 생기면 TABLES와 load_fixture에 해당 단계 담당자가 추가한다.
 """
@@ -53,7 +53,7 @@ def engine():
 
 def load_fixture(conn) -> None:
     conn.execute(text("""
-        INSERT INTO users (user_id, username, display_name) VALUES (1, 'demo', '데모 사용자');
+        INSERT INTO users (user_id, nickname) VALUES (1, 'demo'), (2, 'other');
         INSERT INTO markets (market_id, code, country, currency, timezone) VALUES
           (1, 'KOSPI', 'KR', 'KRW', 'Asia/Seoul'), (2, 'NASDAQ', 'US', 'USD', 'America/New_York');
         INSERT INTO stocks (stock_id, market_id, ticker, name, name_en) VALUES
@@ -64,7 +64,7 @@ def load_fixture(conn) -> None:
         INSERT INTO indices (index_id, code, name, market_id, source_symbol, display_order)
           VALUES (1, 'KOSPI', 'KOSPI', 1, '1001', 1);
         SELECT setval('stocks_stock_id_seq', 4), setval('peer_groups_group_id_seq', 2),
-               setval('indices_index_id_seq', 1), setval('markets_market_id_seq', 2), setval('users_user_id_seq', 1);
+               setval('indices_index_id_seq', 1), setval('markets_market_id_seq', 2), setval('users_user_id_seq', 2);
     """))
     closes = {1: [68000, 69000, 70000], 2: [150000] * 3, 3: [195, 198, 200], 4: [100, 105, 110]}
     volumes = {1: 1000, 2: 3000, 3: 500, 4: 800}
@@ -95,6 +95,14 @@ def client(engine):
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def as_user(client):
+    """이후 요청을 지정한 사용자로 보낸다 (2차에서 JWT가 정할 사용자를 대신함)."""
+    def _set(user_id: int) -> None:
+        app.dependency_overrides[deps.get_current_user_id] = lambda: user_id
+    return _set
 
 
 def scalar(engine, sql: str, **params):
