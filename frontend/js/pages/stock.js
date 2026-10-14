@@ -109,6 +109,7 @@ async function init() {
   }
   document.querySelectorAll(".detail-section").forEach((s) => (s.hidden = false));   // 다시 시도 성공 시 복구
   // [S2-A] 서버가 is_watched 를 주지 않으므로 내 관심종목 목록에서 찾는다 (실패해도 상세는 보여 준다)
+  // TODO(연결): D의 stock_list.sql·stock_detail.sql에 is_watched가 들어오면 원본처럼 starButton(s, s.is_watched)로 바꾸고 getWatchlist 호출 삭제
   const wl = await getWatchlist().catch(() => ({ items: [] }));
   renderHeader(stock, wl.items.some((i) => i.market === MARKET && i.ticker === TICKER));
   renderKeyMetrics(stock);
