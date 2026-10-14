@@ -169,7 +169,7 @@ class CandlesOut(Schema):
 # Stage 2에서 뺀 칸: 카드의 매력도(score)·메모·목표가·괴리율(target_gap)·updated_at, 목록의 preset, 메모·목표가 수정 요청(PUT)
 
 # ------------------------------------------------------------------ 관심종목
-class WatchlistAddIn(Schema):
+class WatchlistCreate(Schema):
     market: Market
     ticker: Ticker
 
@@ -180,11 +180,11 @@ class WatchlistOrderItem(Schema):
     sort_order: int = Field(ge=0, le=9999)
 
 
-class WatchlistOrderIn(Schema):
+class WatchlistOrder(Schema):
     items: list[WatchlistOrderItem] = Field(min_length=1, max_length=500)
 
 
-class WatchlistItemOut(Schema):
+class WatchlistCard(Schema):
     sort_order: int
     added_at: datetime
     stock_id: int
@@ -202,7 +202,7 @@ class WatchlistItemOut(Schema):
 class WatchlistOut(Schema):
     user_id: int
     count: int
-    items: list[WatchlistItemOut]
+    items: list[WatchlistCard]
 
 # ── [S2-C] portfolios ─────────────────────────────────────────────
 

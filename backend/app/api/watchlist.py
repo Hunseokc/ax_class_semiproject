@@ -13,7 +13,7 @@ from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, re
 from app.core.errors import Conflict, NotFound
 from app.models import User, WatchlistItem
 from app.queries import sql
-from app.schemas.api import WatchlistAddIn, WatchlistItemOut, WatchlistOrderIn, WatchlistOut
+from app.schemas.api import WatchlistCard, WatchlistCreate, WatchlistOrder, WatchlistOut
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 
@@ -34,8 +34,8 @@ def list_watchlist(user_id: int = Depends(get_current_user_id), db: Session = De
     return {"user_id": user_id, "count": len(items), "items": items}
 
 
-@router.post("", response_model=WatchlistItemOut, status_code=201, summary="관심종목 추가")
-def add_watchlist(body: WatchlistAddIn, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+@router.post("", response_model=WatchlistCard, status_code=201, summary="관심종목 추가")
+def add_watchlist(body: WatchlistCreate, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
     _require_user(db, user_id)
     s = resolve_stock(db, body.market, body.ticker)
     next_order = db.execute(select(func.coalesce(func.max(WatchlistItem.sort_order), 0) + 1)
@@ -51,7 +51,7 @@ def add_watchlist(body: WatchlistAddIn, user_id: int = Depends(get_current_user_
 
 
 @router.patch("/order", response_model=WatchlistOut, summary="관심종목 정렬 순서 변경")
-def reorder_watchlist(body: WatchlistOrderIn, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def reorder_watchlist(body: WatchlistOrder, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
     _require_user(db, user_id)
     for it in body.items:
         s = resolve_stock(db, it.market, it.ticker)
