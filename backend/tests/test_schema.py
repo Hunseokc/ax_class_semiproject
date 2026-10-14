@@ -1,4 +1,4 @@
-"""DB 설계(Stage 1 테이블 10개): ORM ↔ schema.sql 일치, 제약조건(CHECK/UNIQUE/FK/CASCADE) 방어.
+"""DB 설계(Stage 1 테이블 10개 + Stage 2 테이블 4개): ORM ↔ schema.sql 일치, 제약조건(CHECK/UNIQUE/FK/CASCADE) 방어.
 
 이후 단계 테이블이 추가되면 담당 단계에서 테이블 수와 제약 케이스를 늘린다.
 """
@@ -11,6 +11,7 @@ from app.models import Base
 
 STAGE1_TABLES = {"markets", "stocks", "peer_groups", "peer_group_members", "daily_prices", "valuation_snapshots",
                  "indices", "index_daily_prices", "fx_rates", "ingestion_logs"}
+STAGE2_TABLES = {"users", "watchlist_items", "portfolios", "portfolio_items"}
 
 
 def test_orm_matches_schema(engine):
@@ -31,9 +32,9 @@ def test_orm_matches_schema(engine):
     assert diffs == []
 
 
-def test_tables_are_stage1_only(engine):
-    assert set(Base.metadata.tables) == STAGE1_TABLES
-    assert set(inspect(engine).get_table_names()) == STAGE1_TABLES
+def test_tables_are_stage1_and_2_only(engine):
+    assert set(Base.metadata.tables) == STAGE1_TABLES | STAGE2_TABLES
+    assert set(inspect(engine).get_table_names()) == STAGE1_TABLES | STAGE2_TABLES
 
 
 @pytest.mark.parametrize("label, sql", [
@@ -55,6 +56,19 @@ def test_tables_are_stage1_only(engine):
     ("잘못된 job_type", "INSERT INTO ingestion_logs (source, job_type, status, started_at) VALUES ('INTERNAL', 'X', 'SUCCESS', now())"),
     ("종료 < 시작", "INSERT INTO ingestion_logs (source, job_type, status, started_at, finished_at) "
                   "VALUES ('INTERNAL', 'PRICES', 'SUCCESS', now(), now() - interval '1 hour')"),
+    # ── Stage 2 ──
+    ("사용자명 중복", "INSERT INTO users (username, display_name) VALUES ('demo', '중복')"),
+    ("관심종목 중복(PK)", "INSERT INTO watchlist_items (user_id, stock_id) VALUES (1, 1), (1, 1)"),
+    ("없는 사용자 관심종목 FK", "INSERT INTO watchlist_items (user_id, stock_id) VALUES (999, 1)"),
+    ("시드 0", "INSERT INTO portfolios (user_id, name, seed_amount) VALUES (1, 'P', 0)"),
+    ("포트폴리오 이름 중복", "INSERT INTO portfolios (user_id, name, seed_amount) VALUES (1, 'P', 100), (1, 'P', 100)"),
+    ("수량 0", "INSERT INTO portfolios (portfolio_id, user_id, name, seed_amount) VALUES (1, 1, 'P', 100);"
+              "INSERT INTO portfolio_items (portfolio_id, stock_id, quantity, ref_price, ref_fx_rate, ref_date) VALUES (1, 1, 0, 1, 1, '2030-01-01')"),
+    ("담은 가격 0", "INSERT INTO portfolios (portfolio_id, user_id, name, seed_amount) VALUES (1, 1, 'P', 100);"
+                 "INSERT INTO portfolio_items (portfolio_id, stock_id, quantity, ref_price, ref_fx_rate, ref_date) VALUES (1, 1, 1, 0, 1, '2030-01-01')"),
+    ("항목 종목 중복", "INSERT INTO portfolios (portfolio_id, user_id, name, seed_amount) VALUES (1, 1, 'P', 100);"
+                  "INSERT INTO portfolio_items (portfolio_id, stock_id, quantity, ref_price, ref_fx_rate, ref_date) "
+                  "VALUES (1, 1, 1, 1, 1, '2030-01-01'), (1, 1, 2, 1, 1, '2030-01-01')"),
 ])
 def test_constraints_reject_bad_rows(engine, label, sql):
     with pytest.raises(IntegrityError):
@@ -75,3 +89,20 @@ def test_delete_cascades(engine):
         assert tuple(left) == (0, 0, 0, None)
         conn.execute(text("DELETE FROM peer_groups WHERE group_id = 1"))
         assert conn.execute(text("SELECT count(*) FROM peer_group_members WHERE group_id = 1")).scalar() == 0
+
+
+def test_user_delete_cascades_and_updated_at_trigger(engine):
+    """사용자 삭제 → 관심종목·포트폴리오·항목 CASCADE. UPDATE 시 updated_at 트리거가 시각을 갱신한다."""
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO watchlist_items (user_id, stock_id) VALUES (1, 1)"))
+        conn.execute(text("INSERT INTO portfolios (portfolio_id, user_id, name, seed_amount) VALUES (1, 1, 'P', 1000000)"))
+        conn.execute(text("INSERT INTO portfolio_items (portfolio_id, stock_id, quantity, ref_price, ref_fx_rate, ref_date) "
+                          "VALUES (1, 3, 2, 195, 1300, '2030-01-01')"))
+        conn.execute(text("UPDATE portfolios SET created_at = created_at - interval '1 day', "
+                          "updated_at = updated_at - interval '1 day' WHERE portfolio_id = 1"))
+        conn.execute(text("UPDATE portfolios SET name = 'Q' WHERE portfolio_id = 1"))
+        assert conn.execute(text("SELECT updated_at > created_at + interval '12 hours' FROM portfolios")).scalar()
+        conn.execute(text("DELETE FROM users WHERE user_id = 1"))
+        left = conn.execute(text("""SELECT (SELECT count(*) FROM watchlist_items), (SELECT count(*) FROM portfolios),
+                                           (SELECT count(*) FROM portfolio_items)""")).one()
+        assert tuple(left) == (0, 0, 0)

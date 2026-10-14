@@ -29,7 +29,9 @@ class Settings(BaseSettings):
     price_source_kr: Literal["pykrx", "yfinance"] = "pykrx"
     krx_id: str = ""
     krx_pw: str = ""
-    # 이후 단계 설정(API 키·갱신 TTL·기본 사용자·스케줄러)은 해당 단계 담당자가 이 클래스에 추가한다
+    # ── [S2-D] 데모 사용자 ──
+    demo_username: str = "demo"   # 인증 없는 단일 사용자 모드: get_current_user_id가 이 username의 users 행을 쓴다
+    # 이후 단계 설정(API 키·갱신 TTL·스케줄러)은 해당 단계 담당자가 이 클래스에 추가한다
 
 
 @lru_cache
