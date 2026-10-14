@@ -8,7 +8,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from app.schemas.common import Num, Schema
+from pydantic import Field
+
+from app.schemas.common import Market, Num, Schema, Ticker
 
 
 # ------------------------------------------------------------------ 공통 오류
@@ -163,6 +165,44 @@ class CandlesOut(Schema):
     candles: list[Candle]
 
 # ── [S2-B] watchlist ──────────────────────────────────────────────
+# (관심종목 추가·순서 변경 요청, 카드·목록 응답. 요청에는 user_id를 받지 않는다 — 사용자는 get_current_user_id가 정한다)
+# Stage 2에서 뺀 칸: 카드의 매력도(score)·메모·목표가·괴리율(target_gap)·updated_at, 목록의 preset, 메모·목표가 수정 요청(PUT)
+
+# ------------------------------------------------------------------ 관심종목
+class WatchlistAddIn(Schema):
+    market: Market
+    ticker: Ticker
+
+
+class WatchlistOrderItem(Schema):
+    market: Market
+    ticker: Ticker
+    sort_order: int = Field(ge=0, le=9999)
+
+
+class WatchlistOrderIn(Schema):
+    items: list[WatchlistOrderItem] = Field(min_length=1, max_length=500)
+
+
+class WatchlistItemOut(Schema):
+    sort_order: int
+    added_at: datetime
+    stock_id: int
+    market: str
+    country: str
+    currency: str
+    ticker: str
+    name: str
+    as_of: date | None          # 시세가 아직 없는 종목은 아래 가격 칸과 함께 None
+    close: Num | None
+    change: Num | None
+    change_rate: Num | None
+
+
+class WatchlistOut(Schema):
+    user_id: int
+    count: int
+    items: list[WatchlistItemOut]
 
 # ── [S2-C] portfolios ─────────────────────────────────────────────
 
