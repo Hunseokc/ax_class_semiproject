@@ -37,7 +37,8 @@ class HealthDbOut(Schema):
 
 # ── [S1-B] stocks·market ──────────────────────────────────────────
 # (시장 지수·환율, 종목 목록·상세·candles·peer-groups 응답)
-# Stage 1에서 뺀 칸: 지수·환율의 52주 범위·장 상태, 리스트·상세의 매력도(score·preset)·관심(is_watched)·비교군(coverage·detail_status)·업종(sector·industry)
+# Stage 1에서 뺀 칸: 지수·환율의 52주 범위·장 상태, 리스트·상세의 매력도(score·preset)·비교군(coverage·detail_status)·업종(sector·industry)
+# Stage 2에서 넣은 칸: 리스트·상세의 관심(is_watched)
 
 # ------------------------------------------------------------------ 시장
 class SparkPoint(Schema):
@@ -99,6 +100,7 @@ class StockRow(Schema):
     volume: int | None
     market_cap: Num | None
     market_cap_krw: Num | None
+    is_watched: bool
 
 
 class StockListOut(Schema):
@@ -146,6 +148,7 @@ class StockDetailOut(Schema):
     market_cap_krw: Num | None
     shares_outstanding: int | None
     groups: list[GroupRef]                   # 소속 경쟁 그룹(없으면 빈 목록)
+    is_watched: bool
 
 
 class Candle(Schema):
