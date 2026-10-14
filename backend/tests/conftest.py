@@ -53,7 +53,7 @@ def engine():
 
 def load_fixture(conn) -> None:
     conn.execute(text("""
-        INSERT INTO users (user_id, username, display_name) VALUES (1, 'demo', '데모 사용자');
+        INSERT INTO users (user_id, nickname) VALUES (1, 'demo');
         INSERT INTO markets (market_id, code, country, currency, timezone) VALUES
           (1, 'KOSPI', 'KR', 'KRW', 'Asia/Seoul'), (2, 'NASDAQ', 'US', 'USD', 'America/New_York');
         INSERT INTO stocks (stock_id, market_id, ticker, name, name_en) VALUES

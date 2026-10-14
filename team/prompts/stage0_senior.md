@@ -29,6 +29,8 @@
    - sidebar.js의 '마지막 갱신 시각'은 Stage 3에서 추가.
 9. docs/: 원본 01·02·03·04(기획·요구사항·데이터 조사·도메인 모델)와 assets/design_reference.png는 그대로 가져오고, 05·06은 "Stage 1 범위" 절만 남긴 초안.
 
+[계약 규칙] DDL·ORM·deps·config는 원본 블록을 복사한 뒤 이번 단계에서 뺄 것만 지운다(이름·타입·제약을 다시 쓰지 않는다).
+  원본과의 차이는 team/contracts/stage{N}.toml에 전부 적고, `python team/tools/check_contract.py {N}`이 통과해야 커밋한다.
 [진행] 계획표 → 내가 승인 → 위 그룹 단위(1~9)로 작성·커밋. 각 그룹 끝에 원본과 차이 요약.
 [완료 기준] docker compose -f compose.yml -f compose.dev.yml up -d --build →
   curl localhost:8000/health/db 가 {"status":"ok","db":"ok"}, docker compose run --rm api pytest -q 통과, 화면 4개에 사이드바.
