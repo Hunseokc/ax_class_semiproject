@@ -11,24 +11,10 @@ from decimal import Decimal
 from statistics import median
 from zoneinfo import ZoneInfo
 
+# Bar·FxPoint는 Stage 2에서 providers/base.py로 옮겼다. 기존 import 경로(preprocess.Bar)도 그대로 동작한다.
+from app.providers.base import Bar, FxPoint
+
 MARKET_CLOSE = {"Asia/Seoul": time(15, 30), "America/New_York": time(16, 0)}
-
-
-# Stage 1 임시 정의: 원본은 app/providers/base.py에 있다(Stage 2 소유). Stage 2에서 그쪽으로 옮기고 여기서 import한다.
-@dataclass
-class Bar:
-    trade_date: date                 # 시장 현지 날짜
-    open: Decimal | None
-    high: Decimal | None
-    low: Decimal | None
-    close: Decimal | None
-    volume: int | None = None
-
-
-@dataclass
-class FxPoint:
-    rate_at: datetime                # tz-aware
-    usd_krw: Decimal | None
 
 
 @dataclass

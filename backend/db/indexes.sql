@@ -1,5 +1,5 @@
 -- =====================================================================
--- 보조 인덱스 (PK·UNIQUE가 자동 생성하는 인덱스는 제외) — Stage 1 테이블분
+-- 보조 인덱스 (PK·UNIQUE가 자동 생성하는 인덱스는 제외) — Stage 1·2 테이블분
 -- 각 인덱스가 받치는 조회 패턴을 주석으로 적는다.
 -- =====================================================================
 
@@ -23,4 +23,13 @@ CREATE INDEX ix_ingestion_logs_job_finished ON ingestion_logs (job_type, finishe
 -- 종목 → 소속 경쟁 그룹 조회. PK (group_id, stock_id)는 stock_id 단독 조건에 못 씀
 CREATE INDEX ix_peer_members_stock ON peer_group_members (stock_id);
 
--- 이후 단계에서 추가: ix_fin_stock_type_end·ix_disclosures_stock_filed(Stage 3), ix_watchlist_stock·ix_portfolio_items_stock(Stage 2)
+-- ── Stage 2 ──
+-- 종목 → 이 종목을 관심종목으로 담은 사용자 조회. PK (user_id, stock_id)는 stock_id 단독 조건에 못 씀
+CREATE INDEX ix_watchlist_stock ON watchlist_items (stock_id);
+
+-- 종목 → 이 종목이 담긴 포트폴리오 항목 조회(종목 삭제 전 확인 등). UNIQUE (portfolio_id, stock_id)는 stock_id 단독 조건에 못 씀
+CREATE INDEX ix_portfolio_items_stock ON portfolio_items (stock_id);
+
+-- 사용자별 포트폴리오 목록은 UNIQUE (user_id, name)이 받친다 → 별도 인덱스 만들지 않음
+
+-- 이후 단계에서 추가: ix_fin_stock_type_end·ix_disclosures_stock_filed(Stage 3)

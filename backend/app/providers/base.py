@@ -4,22 +4,36 @@
 테스트는 fake 구현을 주입한다. 반환값은 전처리 전 원본에 가까운 레코드이며 금액은 Decimal이다.
 
 Stage 1은 일봉·지수·환율만 둔다. 밸류에이션·재무·공시·대량 조회 인터페이스는 Stage 3에서 추가한다.
+Bar·FxPoint는 Stage 2에서 preprocess.py로부터 이곳으로 옮겼다(서비스·provider가 전처리 모듈에 기대지 않도록).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Protocol
-
-# Bar·FxPoint는 Stage 1에서 전처리(C)가 먼저 정의했다 → 같은 클래스를 그대로 다시 내보낸다(re-export).
-# Stage 3에서 이 파일로 옮기고 preprocess가 여기서 import하도록 바꾼다.
-from app.ingest.preprocess import Bar, FxPoint
 
 __all__ = ["Bar", "FxPoint", "StockRef", "IndexRef", "PriceProvider", "IndexProvider", "FxProvider",
            "ProviderError"]
 
 
 # ------------------------------------------------------------------ 레코드
+@dataclass
+class Bar:
+    trade_date: date                 # 시장 현지 날짜
+    open: Decimal | None
+    high: Decimal | None
+    low: Decimal | None
+    close: Decimal | None
+    volume: int | None = None
+
+
+@dataclass
+class FxPoint:
+    rate_at: datetime                # tz-aware
+    usd_krw: Decimal | None
+
+
 @dataclass(frozen=True)
 class StockRef:
     """수집 대상 종목 식별 정보 (universe.yaml + DB 매핑)."""

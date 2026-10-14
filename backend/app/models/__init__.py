@@ -1,14 +1,14 @@
 """SQLAlchemy ORM 모델 — db/schema.sql과 1:1 매핑 (DDL의 원본은 schema.sql).
 
-Stage 1 테이블만 정의한다. 이후 단계 테이블은 D가 단계 시작 시 schema.sql과 함께 추가한다.
+Stage 1 테이블 10개 + Stage 2 테이블 4개(users·watchlist_items·portfolios·portfolio_items). 이후 단계 테이블은 D가 단계 시작 시 schema.sql과 함께 추가한다.
 """
 from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import (CHAR, BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric,
-                        SmallInteger, String, Text, UniqueConstraint)
+from sqlalchemy import (CHAR, BigInteger, Boolean, CheckConstraint, Computed, Date, DateTime, ForeignKey, Integer,
+                        Numeric, SmallInteger, String, Text, UniqueConstraint, func)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -124,3 +124,55 @@ class IngestionLog(Base):
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime] = mapped_column()
     finished_at: Mapped[datetime | None] = mapped_column()
+
+
+# ── [S2-D] 사용자·관심종목·모의 포트폴리오 ── (updated_at은 DB 트리거 set_updated_at이 갱신한다. watchlist의 memo·target_price·updated_at은 Stage 5)
+class User(Base):
+    __tablename__ = "users"
+    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    nickname: Mapped[str] = mapped_column(String(50), unique=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class WatchlistItem(Base):
+    __tablename__ = "watchlist_items"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True)
+    stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
+    sort_order: Mapped[int] = mapped_column(Integer, server_default="0")
+    added_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    stock: Mapped[Stock] = relationship(lazy="joined")
+
+
+class Portfolio(Base):
+    __tablename__ = "portfolios"
+    portfolio_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(100))
+    seed_krw: Mapped[Decimal] = mapped_column(Numeric(20, 0))
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    items: Mapped[list[PortfolioItem]] = relationship(back_populates="portfolio", order_by="PortfolioItem.item_id",
+                                                      passive_deletes=True)
+    __table_args__ = (UniqueConstraint("user_id", "name"), CheckConstraint("seed_krw > 0"))
+
+
+class PortfolioItem(Base):
+    """ref_*는 담은 순간의 가격·환율 복사본(의도적 비정규화) — 평가손익을 가격/환율 효과로 나누는 기준."""
+    __tablename__ = "portfolio_items"
+    item_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    portfolio_id: Mapped[int] = mapped_column(ForeignKey("portfolios.portfolio_id", ondelete="CASCADE"))
+    stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="RESTRICT"))
+    quantity: Mapped[int] = mapped_column(Integer)
+    ref_price: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    ref_fx_rate: Mapped[Decimal] = mapped_column(Numeric(12, 4), server_default="1")
+    ref_date: Mapped[date] = mapped_column(Date)
+    memo: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    # 생성 컬럼: 쓰기 불가, DB가 계산
+    cost_krw: Mapped[Decimal] = mapped_column(Numeric(24, 2), Computed("quantity * ref_price * ref_fx_rate", persisted=True),
+                                              nullable=True)
+    portfolio: Mapped[Portfolio] = relationship(back_populates="items")
+    stock: Mapped[Stock] = relationship(lazy="joined")
+    __table_args__ = (UniqueConstraint("portfolio_id", "stock_id"), CheckConstraint("quantity > 0"),
+                      CheckConstraint("ref_price > 0"), CheckConstraint("ref_fx_rate > 0"))

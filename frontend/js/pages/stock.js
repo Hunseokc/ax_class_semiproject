@@ -4,6 +4,9 @@ import { DASH, changeHtml, date, esc, krw, num, price, usd } from "../format.js"
 import { color, dashedAxis, draw, plainAxis } from "../components/charts.js";
 import { mountSidebar } from "../components/sidebar.js";
 import { emptyState, errorState, h, load, marketBadge, segmented } from "../components/ui.js";
+import { icons } from "../components/icons.js";   // [S2-A]
+import { openAddToPortfolio } from "../components/add-to-portfolio.js";   // [S2-A]
+import { starButton } from "../components/watch.js";   // [S2-A]
 
 mountSidebar("stocks");
 const $ = (sel) => document.querySelector(sel);
@@ -31,7 +34,11 @@ function renderHeader(s) {
         ${s.currency === "USD" ? `<p class="subtle num">≈ ${krw(s.close_krw)} · 환율 ${num(s.fx_rate, 2)}${s.fx_stale ? " (지연)" : ""}</p>` : ""}
         <p class="subtle">일봉 기준 · ${date(s.as_of)} 종가</p>`}
       </div>
+      <div class="stock-head__actions"></div>
     </header>`);
+  const add = h(`<button class="btn btn--accent" type="button">${icons.plus}<span>포트폴리오에 담기</span></button>`);   // [S2-A]
+  add.addEventListener("click", () => openAddToPortfolio(s));
+  el.querySelector(".stock-head__actions").append(starButton(s, s.is_watched), add);
   $("#head").replaceChildren(el);
 }
 

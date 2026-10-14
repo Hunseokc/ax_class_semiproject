@@ -61,6 +61,23 @@ export const getIndices = () => api.get("/market/indices");
 export const getFx = () => api.get("/market/fx");
 
 // ── [S2-A] Watchlist · Portfolios ──
+// 관심종목 -------------------------------------------------------------------------
+export const getWatchlist = () => api.get("/watchlist");
+export const addWatch = (market, ticker) => api.post("/watchlist", { market, ticker });
+export const removeWatch = (market, ticker) => api.del(`/watchlist/${market}/${ticker}`);
+// items: [{market, ticker, sort_order}] — 바꿀 종목만 보내도 된다
+export const reorderWatchlist = (items) => api.patch("/watchlist/order", { items });
+
+// 포트폴리오 -----------------------------------------------------------------------
+// addPortfolioItem body: {market, ticker, mode: "quantity"|"amount"|"weight", value, memo?}
+export const getPortfolios = () => api.get("/portfolios");
+export const createPortfolio = (name, seed_krw) => api.post("/portfolios", { name, seed_krw });
+export const updatePortfolio = (id, name, seed_krw) => api.put(`/portfolios/${id}`, { name, seed_krw });
+export const deletePortfolio = (id) => api.del(`/portfolios/${id}`);
+export const getPortfolioSummary = (id) => api.get(`/portfolios/${id}/summary`);
+export const addPortfolioItem = (id, body) => api.post(`/portfolios/${id}/items`, body);
+export const updatePortfolioItem = (id, itemId, body) => api.put(`/portfolios/${id}/items/${itemId}`, body);
+export const deletePortfolioItem = (id, itemId) => api.del(`/portfolios/${id}/items/${itemId}`);
 
 // ── [S3-A] 갱신 상태 ──
 

@@ -6,9 +6,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Literal
 
-from app.schemas.common import Num, Schema
+from pydantic import Field, model_validator
+
+from app.schemas.common import INT_MAX, MONEY_MAX, Market, Num, Schema, Ticker
 
 
 # ------------------------------------------------------------------ 공통 오류
@@ -34,7 +37,8 @@ class HealthDbOut(Schema):
 
 # ── [S1-B] stocks·market ──────────────────────────────────────────
 # (시장 지수·환율, 종목 목록·상세·candles·peer-groups 응답)
-# Stage 1에서 뺀 칸: 지수·환율의 52주 범위·장 상태, 리스트·상세의 매력도(score·preset)·관심(is_watched)·비교군(coverage·detail_status)·업종(sector·industry)
+# Stage 1에서 뺀 칸: 지수·환율의 52주 범위·장 상태, 리스트·상세의 매력도(score·preset)·비교군(coverage·detail_status)·업종(sector·industry)
+# Stage 2에서 넣은 칸: 리스트·상세의 관심(is_watched)
 
 # ------------------------------------------------------------------ 시장
 class SparkPoint(Schema):
@@ -96,6 +100,7 @@ class StockRow(Schema):
     volume: int | None
     market_cap: Num | None
     market_cap_krw: Num | None
+    is_watched: bool
 
 
 class StockListOut(Schema):
@@ -143,6 +148,7 @@ class StockDetailOut(Schema):
     market_cap_krw: Num | None
     shares_outstanding: int | None
     groups: list[GroupRef]                   # 소속 경쟁 그룹(없으면 빈 목록)
+    is_watched: bool
 
 
 class Candle(Schema):
@@ -163,8 +169,185 @@ class CandlesOut(Schema):
     candles: list[Candle]
 
 # ── [S2-B] watchlist ──────────────────────────────────────────────
+# (관심종목 추가·순서 변경 요청, 카드·목록 응답. 요청에는 user_id를 받지 않는다 — 사용자는 get_current_user_id가 정한다)
+# Stage 2에서 뺀 칸: 카드의 매력도(score)·메모·목표가·괴리율(target_gap)·updated_at, 목록의 preset, 메모·목표가 수정 요청(PUT)
+
+# ------------------------------------------------------------------ 관심종목
+class WatchlistCreate(Schema):
+    market: Market
+    ticker: Ticker
+
+
+class WatchlistOrderItem(Schema):
+    market: Market
+    ticker: Ticker
+    sort_order: int = Field(ge=0, le=9999)
+
+
+class WatchlistOrder(Schema):
+    items: list[WatchlistOrderItem] = Field(min_length=1, max_length=500)
+
+
+class WatchlistCard(Schema):
+    sort_order: int
+    added_at: datetime
+    stock_id: int
+    market: str
+    country: str
+    currency: str
+    ticker: str
+    name: str
+    as_of: date | None          # 시세가 아직 없는 종목은 아래 가격 칸과 함께 None
+    close: Num | None
+    change: Num | None
+    change_rate: Num | None
+
+
+class WatchlistOut(Schema):
+    user_id: int
+    count: int
+    items: list[WatchlistCard]
 
 # ── [S2-C] portfolios ─────────────────────────────────────────────
+# ------------------------------------------------------------------ 포트폴리오
+class PortfolioCreate(Schema):
+    # pattern \S: 공백만으로 된 이름 거부 / 100자: portfolios.name VARCHAR(100)
+    name: str = Field(min_length=1, max_length=100, pattern=r"\S", examples=["반도체 집중"])
+    seed_krw: Decimal = Field(gt=0, le=MONEY_MAX, max_digits=20, decimal_places=0, examples=[10_000_000])
+
+
+class PortfolioUpdate(Schema):
+    name: str = Field(min_length=1, max_length=100, pattern=r"\S")
+    seed_krw: Decimal = Field(gt=0, le=MONEY_MAX, max_digits=20, decimal_places=0)
+
+
+class PortfolioOut(Schema):
+    portfolio_id: int
+    user_id: int
+    name: str
+    currency: str = "KRW"
+    seed_krw: Num
+    used_krw: Num
+    remaining_krw: Num
+    item_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ItemInput(Schema):
+    mode: Literal["quantity", "amount", "weight"] = Field(
+        description="quantity=수량(주), amount=금액(원), weight=시드 대비 비중(%)")
+    value: Decimal = Field(gt=0, le=MONEY_MAX, examples=[3_000_000])
+    memo: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _check(self):
+        if self.mode == "quantity" and self.value != self.value.to_integral_value():
+            raise ValueError("quantity 모드의 value는 정수여야 합니다")
+        if self.mode == "quantity" and self.value > INT_MAX:
+            raise ValueError(f"quantity 모드의 value는 {INT_MAX:,} 이하여야 합니다")
+        if self.mode == "weight" and self.value > 100:
+            raise ValueError("weight 모드의 value는 0 초과 100 이하(%)여야 합니다")
+        return self
+
+
+class ItemCreate(ItemInput):
+    market: Market
+    ticker: Ticker
+
+
+class ItemOut(Schema):
+    item_id: int
+    portfolio_id: int
+    stock_id: int
+    market: str
+    ticker: str
+    name: str
+    currency: str
+    quantity: int
+    ref_price: Num
+    ref_fx_rate: Num
+    ref_date: date
+    cost_krw: Num
+    memo: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ValuedItem(Schema):
+    item_id: int
+    stock_id: int
+    market: str
+    country: str
+    currency: str
+    ticker: str
+    name: str
+    quantity: int
+    ref_price: Num
+    ref_fx_rate: Num
+    ref_date: date
+    memo: str | None
+    score: Num | None
+    cost_krw: Num
+    weight: Num | None = None
+    current_price: Num | None
+    price_date: date | None
+    current_fx_rate: Num
+    value_krw: Num | None
+    pnl_krw: Num | None
+    pnl_rate: Num | None
+    local_return: Num | None
+    fx_return: Num
+    price_effect_krw: Num | None
+    fx_effect_krw: Num | None
+    groups: list[str]
+
+
+class ItemsOut(Schema):
+    portfolio_id: int
+    currency: str = "KRW"
+    fx_rate: Num | None
+    fx_rate_at: datetime | None
+    fx_stale: bool
+    items: list[ValuedItem]
+
+
+class WeightRow(Schema):
+    cost_krw: Num
+    weight: Num | None
+
+
+class MarketWeight(WeightRow):
+    country: str
+
+
+class GroupWeight(WeightRow):
+    group: str
+
+
+class SummaryOut(Schema):
+    portfolio_id: int
+    name: str
+    currency: str
+    seed_krw: Num
+    used_krw: Num
+    remaining_krw: Num
+    usage_rate: Num | None
+    items: list[ValuedItem]
+    market_weights: list[MarketWeight]
+    group_weights: list[GroupWeight]
+    weighted_score: Num | None
+    total_value_krw: Num
+    total_pnl_krw: Num
+    total_pnl_rate: Num | None
+    price_effect_krw: Num
+    fx_effect_krw: Num
+    fx_rate: Num | None
+    fx_rate_at: datetime | None
+    fx_stale: bool
+    as_of: date | None
+    disclaimer: str
+
 
 # ── [S3-B] financials·disclosures ─────────────────────────────────
 

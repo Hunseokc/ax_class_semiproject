@@ -40,7 +40,7 @@ def init_db(engine: Engine, reset: bool = False) -> None:
 
 # ---------------------------------------------------------------- 마스터
 def load_master(engine: Engine, offline: bool = True) -> None:
-    """universe.yaml → markets·stocks·indices·peer_groups·peer_group_members (재실행해도 행 수 불변).
+    """universe.yaml → markets·stocks·indices·peer_groups·peer_group_members + 기본 사용자 demo (재실행해도 행 수 불변).
 
     Stage 1은 오프라인 경로만 있다. DART corp_code·SEC CIK 매핑(온라인)은 Stage 3에서 추가한다.
     """
@@ -76,6 +76,8 @@ def load_master(engine: Engine, offline: bool = True) -> None:
             res.rows += upsert(conn, "peer_group_members", [
                 {"group_id": gid[g.name], "stock_id": sid[(market_of[t], t)]}
                 for g in u.peer_groups for t in g.members], ["group_id", "stock_id"])
+            # ── [S2-D] 기본 사용자(demo) — get_current_user_id가 돌려주는 DEFAULT_USER_ID(=1)의 행 ──
+            conn.execute(text("INSERT INTO users (nickname) VALUES ('demo') ON CONFLICT (nickname) DO NOTHING"))
 
 
 # ── [S1-D] 시세 수집 ──
@@ -204,3 +206,19 @@ def load_fx_daily(engine: Engine, providers: Providers, *, full: bool = False, t
                     for p in pts], ["granularity", "rate_at"])
             res.notes.append(f"{start}~{today}")
     return res.status
+
+
+# ---------------------------------------------------------------- 데모 사용자
+DEMO_WATCHLIST = [("KOSPI", "005930"), ("KOSPI", "000660"), ("KOSPI", "035420"), ("KOSPI", "373220"),
+                  ("NASDAQ", "AAPL"), ("NASDAQ", "NVDA"), ("NASDAQ", "MSFT"), ("NASDAQ", "TSLA")]
+
+
+def seed_demo_watchlist(engine: Engine) -> int:
+    with engine.begin() as conn:
+        uid = conn.execute(text("SELECT user_id FROM users WHERE nickname = 'demo'")).scalar_one()
+        rows = []
+        for order, (market, ticker) in enumerate(DEMO_WATCHLIST, start=1):
+            sid = conn.execute(text("""SELECT s.stock_id FROM stocks s JOIN markets m USING (market_id)
+                                       WHERE m.code = :m AND s.ticker = :t"""), {"m": market, "t": ticker}).scalar_one()
+            rows.append({"user_id": uid, "stock_id": sid, "sort_order": order})
+        return upsert(conn, "watchlist_items", rows, ["user_id", "stock_id"], update=["sort_order"])

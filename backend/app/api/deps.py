@@ -1,19 +1,24 @@
 """FastAPI 의존성. 테스트는 get_engine_dep를 override해 테스트 DB를 주입한다.
 
-이후 단계에서 추가: MarketPath·TickerPath(Stage 1-B), get_current_user_id(Stage 2-D), get_providers·서비스 팩토리(Stage 2~3)
+이후 단계에서 추가: get_providers·서비스 팩토리(Stage 2~3)
 """
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import date
 from typing import Annotated
 
 from fastapi import Depends, Path
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.db import get_engine, session_factory
 from app.core.errors import NotFound
-from app.schemas.common import MARKET_PATTERN, TICKER_PATTERN
+from app.providers.base import FxPoint, ProviderError
+from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN
+from app.services.fx import FxService
+from app.services.portfolio import PortfolioService
 
 
 def get_engine_dep() -> Engine:
@@ -43,3 +48,37 @@ def resolve_stock(db: Session, market: str, ticker: str) -> dict:
     if row is None:
         raise NotFound(f"종목 {market}/{ticker}을(를) 찾을 수 없습니다", code="STOCK_NOT_FOUND")
     return dict(row)
+
+
+# ── [S2-D] 현재 사용자·경로 id ──
+def get_current_user_id() -> int:
+    """1차는 단일 사용자(데모) 모드라 설정값을 그대로 쓴다. 2차에서 JWT 검증으로 교체한다."""
+    return get_settings().default_user_id
+
+
+# 정수 id 경로 파라미터(portfolio_id·item_id 등) — 범위 밖이면 DB 조회 전에 422 VALIDATION_ERROR
+IdPath = Annotated[int, Path(ge=1, le=INT_MAX, description="1 이상 PostgreSQL INT 범위")]
+
+
+# ── [S2-C] 환율·포트폴리오 서비스 ──
+class _UnavailableFxProvider:
+    """항상 실패하는 환율 provider. Stage 2에는 실제 환율 소스 연결이 없어 FxService가 저장된 마지막 값(+stale)으로 동작한다.
+
+    TODO(Stage 3): get_providers().fx 주입으로 교체하고 이 클래스를 제거한다.
+    """
+    source = "INTERNAL"
+
+    def get_daily_rates(self, start: date, end: date) -> list[FxPoint]:
+        raise ProviderError("환율 provider가 아직 연결되지 않았습니다 (Stage 3)")
+
+    def get_current_rate(self) -> FxPoint:
+        raise ProviderError("환율 provider가 아직 연결되지 않았습니다 (Stage 3)")
+
+
+def get_fx_service(engine: Engine = Depends(get_engine_dep)) -> FxService:
+    return FxService(engine, _UnavailableFxProvider(), get_settings().refresh_ttl_hours)
+
+
+def get_portfolio_service(db: Session = Depends(get_db), fx: FxService = Depends(get_fx_service),
+                          user_id: int = Depends(get_current_user_id)) -> PortfolioService:
+    return PortfolioService(db, fx, user_id)

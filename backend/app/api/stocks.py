@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.deps import MarketPath, TickerPath, get_db, resolve_stock
+from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, resolve_stock
 from app.core.errors import NotFound, Unprocessable
 from app.queries import raw, sql
 from app.schemas.api import CandlesOut, StockDetailOut, StockListOut
@@ -27,6 +27,7 @@ def list_stocks(
     q: str | None = Query(None, min_length=1, max_length=50, description="이름·티커 검색"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0, le=10_000),
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     if sort == "volume" and country is None:
@@ -34,7 +35,7 @@ def list_stocks(
                             detail={"allowed_sort_for_all": ["market_cap"]}, code="VOLUME_SORT_REQUIRES_MARKET")
     # order_col·order_dir은 위 화이트리스트(SORT_COLUMNS, Literal)에서만 나오므로 문자열 치환해도 안전하다
     stmt = text(raw("stock_list").format(order_col=SORT_COLUMNS[sort], order_dir=order.upper()))
-    params = {"country": country, "grp": group, "q": q, "limit": limit, "offset": offset}
+    params = {"user_id": user_id, "country": country, "grp": group, "q": q, "limit": limit, "offset": offset}
     rows = db.execute(stmt, params).mappings().all()
     # total은 COUNT(*) OVER()라 돌려줄 행이 없으면 읽을 곳이 없다 → offset이 끝을 넘었을 때만 첫 행으로 한 번 더 센다
     total_row = rows[0] if rows else (db.execute(stmt, {**params, "limit": 1, "offset": 0}).mappings().first() if offset else None)
@@ -44,8 +45,10 @@ def list_stocks(
 
 
 @router.get("/{market}/{ticker}", response_model=StockDetailOut, summary="종목 기본 정보 + 최신 시세·밸류에이션")
-def stock_detail(market: MarketPath, ticker: TickerPath, db: Session = Depends(get_db)):
-    row = db.execute(sql("stock_detail"), {"market": market.upper(), "ticker": ticker.upper()}).mappings().first()
+def stock_detail(market: MarketPath, ticker: TickerPath, user_id: int = Depends(get_current_user_id),
+                 db: Session = Depends(get_db)):
+    row = db.execute(sql("stock_detail"), {"market": market.upper(), "ticker": ticker.upper(),
+                                           "user_id": user_id}).mappings().first()
     if row is None:
         raise NotFound(f"종목 {market}/{ticker}을(를) 찾을 수 없습니다", code="STOCK_NOT_FOUND")
     out = dict(row)

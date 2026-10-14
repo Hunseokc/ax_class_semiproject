@@ -1,9 +1,9 @@
-// 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 주요 종목(발표용 임시 고정 2종목)
-import { getCandles, getFx, getIndices, getStock } from "../api.js";
-import { changeHtml, date, dateTime, esc, krw, num, price, shortDate, stockUrl, usd, volume } from "../format.js";
-import { color, dashedAxis, destroyCharts, draw, plainAxis, sparkline } from "../components/charts.js";
+// 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
+import { getFx, getIndices, getWatchlist, reorderWatchlist } from "../api.js";
+import { changeHtml, date, dateTime, esc, num, price, shortDate, stockUrl, usd } from "../format.js";
+import { color, destroyCharts, sparkline } from "../components/charts.js";
 import { mountSidebar } from "../components/sidebar.js";
-import { h, load, segmented, skeleton } from "../components/ui.js";
+import { emptyState, h, load, segmented, skeleton, toast } from "../components/ui.js";
 
 mountSidebar("home");
 const $ = (sel) => document.querySelector(sel);
@@ -112,85 +112,65 @@ $("#spark-range").append(segmented(SPARK_RANGES, sparkRange,
 
 loadMarket();
 
-// ---------------------------------------------------------------- 주요 종목 [S1-D 발표용 임시]
-// TODO(Stage 2 A): 관심종목 카드로 교체 — 원본 홈의 관심종목 자리. Stage 1에는 사용자·관심종목이 없어 2종목을 고정한다.
-// 기존 조회 API(상세·캔들)만 쓰고 백엔드는 바꾸지 않는다.
-const FEATURED = [{ market: "KOSPI", ticker: "005930" }, { market: "NASDAQ", ticker: "NVDA" }];
-const FEATURED_RANGES = [{ value: "1m", label: "1개월" }, { value: "3m", label: "3개월" }, { value: "1y", label: "1년" }];
-let featuredRange = "3m";
+// ---------------------------------------------------------------- 내 관심종목 [S2-A]
+let watchItems = [];
 
-// 축 눈금은 짧게: 원화는 "25만원", 달러는 소수점 없이 "$200"
-const axisMoney = (v, cur) => (cur === "USD" ? `$${num(v)}` : krw(v, { compact: true }));
-// 부호는 통화 기호 앞에: "-$2.96", "+1,500원"
-const signed = (v, cur) => (v === null || v === undefined ? "" : `${v > 0 ? "+" : v < 0 ? "-" : ""}${price(Math.abs(v), cur)}`);
-/** 16진 색에 투명도를 붙인다 — 차트 아래 채우기용 */
-const alpha = (hex, a) => (/^#[0-9a-f]{6}$/i.test(hex) ? `${hex}${Math.round(a * 255).toString(16).padStart(2, "0")}` : hex);
-
-function featuredCard(s) {
-  const us = s.currency === "USD";
-  return h(`<a class="featured-card card--link" href="${stockUrl(s.market, s.ticker)}" aria-label="${esc(s.name)} 상세 보기">
-      <div class="featured-card__head"><strong>${esc(s.name)}</strong>
-        <span class="badge ${us ? "badge--us" : "badge--kr"}">${esc(s.market)}</span></div>
-      <div class="subtle">${esc(s.ticker)} · ${shortDate(s.as_of)} 종가</div>
-      <div class="featured-card__price num">${price(s.close, s.currency)}</div>
-      <div class="featured-card__chg num">${changeHtml(s.change_rate, s.country)} <span class="subtle">${signed(s.change, s.currency)}</span></div>
-      <div class="featured-card__sub subtle num">${us ? `≈ ${krw(s.close_krw)} · 환율 ${num(s.fx_rate, 2)}${s.fx_stale ? " (지연)" : ""}<br>` : ""}거래량 ${volume(s.volume)}</div>
-      <span class="featured-card__more subtle">상세 보기 →</span>
-    </a>`);
+function watchCard(w, i) {
+  const us = w.currency === "USD";
+  const el = h(`<li class="wl-card">
+      <a class="wl-card__link card--link" href="${stockUrl(w.market, w.ticker)}" aria-label="${esc(w.name)} 상세 보기">
+        <div class="wl-card__head"><strong>${esc(w.name)}</strong>
+          <span class="badge ${us ? "badge--us" : "badge--kr"}">${esc(w.market)}</span></div>
+        <div class="subtle">${esc(w.ticker)} · ${shortDate(w.as_of)} 종가</div>
+        <div class="wl-card__price num">${price(w.close, w.currency)}</div>
+        <div class="wl-card__chg num">${changeHtml(w.change_rate, w.country)}</div>
+      </a>
+      <div class="wl-card__move">
+        <button class="btn btn--sm" type="button" data-dir="-1" aria-label="${esc(w.name)} 위로" ${i === 0 ? "disabled" : ""}>▲</button>
+        <button class="btn btn--sm" type="button" data-dir="1" aria-label="${esc(w.name)} 아래로" ${i === watchItems.length - 1 ? "disabled" : ""}>▼</button>
+      </div>
+    </li>`);
+  el.querySelectorAll("[data-dir]").forEach((b) => b.addEventListener("click", () => moveWatch(i, Number(b.dataset.dir))));
+  return el;
 }
 
-function featuredChart(s, candles) {
-  const closes = candles.map((c) => c.close);
-  const hi = Math.max(...closes), lo = Math.min(...closes);
-  const label = FEATURED_RANGES.find((r) => r.value === featuredRange).label;
-  const box = h(`<div class="featured-chart">
-      <div class="featured-chart__head"><strong>${esc(s.name)} 종가 추이</strong>
-        <span class="subtle num">${label} · 최고 ${price(hi, s.currency)} · 최저 ${price(lo, s.currency)}</span></div>
-      <div class="featured-chart__plot"><canvas role="img" aria-label="${esc(s.name)} ${label} 종가 차트"></canvas></div>
-    </div>`);
-  const line = trendColor(closes.at(-1) - closes[0]);           // 기간 수익이면 상승색, 손실이면 하락색
-  queueMicrotask(() => draw(box.querySelector("canvas"), {    // canvas가 화면에 붙은 뒤에 그린다
-    type: "line",
-    data: { labels: candles.map((c) => c.date), datasets: [{ label: "종가", data: closes, borderColor: line, borderWidth: 2,
-      pointRadius: 0, tension: 0.2, fill: true, backgroundColor: alpha(line, 0.12) }] },
-    options: {
-      responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-      scales: {
-        x: { ...plainAxis, ticks: { maxTicksLimit: 6, maxRotation: 0, callback(v) { return shortDate(this.getLabelForValue(v)); } } },
-        y: { ...dashedAxis, position: "right", ticks: { maxTicksLimit: 5, callback: (v) => axisMoney(v, s.currency) } },
-      },
-      plugins: { tooltip: { callbacks: { title: (items) => date(items[0].label), label: (ctx) => `종가 ${price(ctx.raw, s.currency)}` } } },
-    },
-  }));
-  return box;
+function renderWatch(items) {
+  watchItems = items;
+  $("#watch-count").textContent = `${items.length}개 종목`;
+  const ul = h('<ul class="wl-grid" aria-label="내 관심종목"></ul>');
+  ul.append(...items.map(watchCard));
+  return ul;
 }
 
-function loadFeaturedRow(row, { market, ticker }) {
-  destroyCharts(row);
-  return load(row, {
-    skeleton: h('<div class="featured-row"><div class="skeleton skeleton--card"></div><div class="skeleton skeleton--card"></div></div>'),
-    fetch: () => Promise.all([getStock(market, ticker), getCandles(market, ticker, featuredRange)]),
-    render: ([s, c]) => {
-      const el = h('<div class="featured-row"></div>');
-      el.append(featuredCard(s), c.candles.length ? featuredChart(s, c.candles)
-        : h('<div class="featured-chart state" role="status"><p class="state__title">해당 기간의 시세가 없습니다</p></div>'));
-      return el;
-    },
+// 이웃 카드와 자리를 바꾼다 — 화면은 먼저 바꾸고, 서버 저장이 실패하면 원래대로 되돌린다
+async function moveWatch(i, dir) {
+  const j = i + dir;
+  const before = watchItems;
+  const a = before[i], b = before[j];
+  const next = [...before];
+  next[i] = { ...b, sort_order: a.sort_order };
+  next[j] = { ...a, sort_order: b.sort_order };
+  $("#watchlist").replaceChildren(renderWatch(next));
+  try {
+    const res = await reorderWatchlist([
+      { market: a.market, ticker: a.ticker, sort_order: b.sort_order },
+      { market: b.market, ticker: b.ticker, sort_order: a.sort_order },
+    ]);
+    $("#watchlist").replaceChildren(renderWatch(res.items));
+  } catch (e) {
+    toast(e.message, "error");
+    $("#watchlist").replaceChildren(renderWatch(before));
+  }
+}
+
+function loadWatchlist() {
+  return load($("#watchlist"), {
+    skeleton: skeleton("card", 3),
+    fetch: async () => (await getWatchlist()).items,
+    render: renderWatch,
+    empty: emptyState({ title: "관심종목이 없습니다", body: "주식 리스트에서 ★를 눌러 담아 보세요.",
+      action: '<a class="btn btn--primary" href="/stocks">주식 리스트로</a>' }),
   });
 }
 
-function loadFeatured() {
-  const box = $("#featured");
-  destroyCharts(box);
-  box.replaceChildren(...FEATURED.map((f) => {
-    const row = h("<div></div>");
-    loadFeaturedRow(row, f);                                   // 한 종목이 실패해도 다른 종목은 보여준다
-    return row;
-  }));
-}
-
-$("#featured-count").textContent = `${FEATURED.length}개 종목`;
-$("#featured-range").append(segmented(FEATURED_RANGES, featuredRange,
-  (v) => { featuredRange = v; loadFeatured(); }, { label: "주요 종목 차트 기간" }));
-
-loadFeatured();
+loadWatchlist();

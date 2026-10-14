@@ -1,4 +1,4 @@
-"""수집·적재 CLI (Stage 1).
+"""수집·적재 CLI (Stage 2).
 
     python -m app.ingest init-db [--reset]   # db/schema.sql → indexes.sql → views.sql(있을 때만)
     python -m app.ingest master --offline    # universe.yaml → markets·stocks·indices·peer_groups
@@ -6,6 +6,7 @@
     python -m app.ingest prices [--full] [--tickers 005930 AAPL]   # 종목 일봉 (국내 pykrx, 미국 yfinance)
     python -m app.ingest indices [--full]
     python -m app.ingest fx [--full]         # USD/KRW DAILY
+    python -m app.ingest seed-demo           # demo 관심종목 8건 + 모의 포트폴리오 2개
 """
 from __future__ import annotations
 
@@ -32,6 +33,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tickers", nargs="*")
     for name in ("indices", "fx"):
         sub.add_parser(name).add_argument("--full", action="store_true")
+    # ── [S2-D] 데모 데이터 ──
+    sub.add_parser("seed-demo")
     args = ap.parse_args(argv)
 
     setup_logging(get_settings().log_level)
@@ -57,6 +60,10 @@ def main(argv: list[str] | None = None) -> int:
         jobs.load_indices(engine, providers(), full=args.full)
     elif args.cmd == "fx":
         jobs.load_fx_daily(engine, providers(), full=args.full)
+    # ── [S2-D] 데모 데이터 ──
+    elif args.cmd == "seed-demo":
+        from app.ingest.demo import seed_demo
+        print(seed_demo(engine, providers()))
     print(f"[{args.cmd}] 완료 {time.monotonic() - t0:.1f}s")
     return 0
 

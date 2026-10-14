@@ -1,10 +1,10 @@
 -- =====================================================================
 -- 주식 분석 대시보드 — 테이블 생성 SQL (PostgreSQL 16)
--- 실행 순서: schema.sql → indexes.sql  (views.sql은 Stage 1-B에서 추가)
+-- 실행 순서: schema.sql → indexes.sql → views.sql
 -- 금액·가격은 모두 NUMERIC (float 사용 안 함)
 --
--- Stage 0 범위: Stage 1 테이블 10개만. 이후 단계 테이블·컬럼은 D가 단계 시작 시 추가해 "계약"으로 배포한다.
---   Stage 2: users, watchlist_items, portfolios, portfolio_items (+ updated_at 트리거)
+-- Stage 1 테이블 10개 + Stage 2 테이블 4개. 이후 단계 테이블·컬럼은 D가 단계 시작 시 추가해 "계약"으로 배포한다.
+--   Stage 2: users, watchlist_items(memo·target_price는 Stage 5), portfolios, portfolio_items (+ updated_at 트리거)
 --   Stage 3: financial_statements, disclosures
 --   Stage 4+: 매력도·비교군·섹터 관련 테이블/컬럼
 -- =====================================================================
@@ -132,3 +132,69 @@ CREATE TABLE ingestion_logs (
   finished_at TIMESTAMPTZ,
   CHECK (finished_at IS NULL OR finished_at >= started_at)
 );
+
+-- =====================================================================
+-- Stage 2 — 사용자 기능 (D가 단계 시작 시 배포한 계약)
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 5. 사용자·관심종목·모의 포트폴리오
+-- ---------------------------------------------------------------------
+
+-- updated_at 자동 갱신: UPDATE가 일어나면 앱이 챙기지 않아도 DB가 현재 시각을 넣는다
+CREATE FUNCTION set_updated_at() RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 사용자: 인증 없음. 기본 사용자 1명(demo)은 load_master가 시드한다(get_current_user_id = 설정 DEFAULT_USER_ID). 2차에서 로그인으로 대체
+CREATE TABLE users (
+  user_id    SERIAL PRIMARY KEY,
+  nickname   VARCHAR(50) NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 관심종목: 사용자 ↔ 종목 N:M 교차 테이블 + 정렬 순서. 메모·목표가는 Stage 5에서 컬럼 추가
+CREATE TABLE watchlist_items (
+  user_id    INT         NOT NULL REFERENCES users  ON DELETE CASCADE,
+  stock_id   INT         NOT NULL REFERENCES stocks ON DELETE CASCADE,
+  sort_order INT         NOT NULL DEFAULT 0,                       -- 작을수록 먼저 (PATCH /watchlist/order가 다시 매김)
+  added_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, stock_id)                                  -- 같은 종목 중복 담기 금지 → 409 DUPLICATE_WATCHLIST
+);
+
+-- 모의 포트폴리오: "시드 안에서 담아보는 계산기 겸 장바구니" (거래 원장 아님)
+CREATE TABLE portfolios (
+  portfolio_id SERIAL PRIMARY KEY,
+  user_id      INT           NOT NULL REFERENCES users ON DELETE CASCADE,
+  name         VARCHAR(100)  NOT NULL,
+  seed_krw     NUMERIC(20,0) NOT NULL CHECK (seed_krw > 0),        -- 투자 시드(원)
+  created_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  UNIQUE (user_id, name)                                           -- 같은 사용자의 포트폴리오 이름 중복 → 409
+);
+CREATE TRIGGER trg_portfolios_updated_at BEFORE UPDATE ON portfolios
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 포트폴리오 항목. ref_*는 "담은 순간"의 가격·환율 복사본이다 (의도적 비정규화).
+--   현재가·현재 환율은 시간이 지나면 바뀌므로, 매입 기준(원가)을 daily_prices·fx_rates에서 다시 찾으면
+--   값이 달라진다 → 담을 때 복사해 두어야 평가손익을 "가격 효과 / 환율 효과"로 분리할 수 있다.
+CREATE TABLE portfolio_items (
+  item_id      SERIAL PRIMARY KEY,
+  portfolio_id INT           NOT NULL REFERENCES portfolios ON DELETE CASCADE,
+  stock_id     INT           NOT NULL REFERENCES stocks ON DELETE RESTRICT,  -- 담긴 종목은 삭제 불가
+  quantity     INT           NOT NULL CHECK (quantity > 0),        -- 정수 주식 수
+  ref_price    NUMERIC(18,4) NOT NULL CHECK (ref_price > 0),       -- 담은 시점 종가 (종목 통화)
+  ref_fx_rate  NUMERIC(12,4) NOT NULL DEFAULT 1 CHECK (ref_fx_rate > 0),  -- 담은 시점 환율 (KRW 종목은 1)
+  ref_date     DATE          NOT NULL,                             -- 위 가격·환율의 기준일
+  memo         TEXT,
+  created_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  cost_krw     NUMERIC(24,2) GENERATED ALWAYS AS (quantity * ref_price * ref_fx_rate) STORED,  -- 원가(원)
+  UNIQUE (portfolio_id, stock_id)                                  -- 같은 종목은 한 줄 (수량 수정으로 늘린다)
+);
+-- "원가 합계 ≤ 시드"는 행 간 제약이라 CHECK로 걸 수 없다 → 서비스에서 트랜잭션 + 포트폴리오 행 잠금(SELECT ... FOR UPDATE)으로 보장한다.
+CREATE TRIGGER trg_portfolio_items_updated_at BEFORE UPDATE ON portfolio_items
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
