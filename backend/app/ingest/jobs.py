@@ -1,4 +1,4 @@
-"""적재 작업: DB 초기화, 마스터(유니버스) 적재, 시세·지수·환율 수집.
+"""적재 작업: DB 초기화, 마스터(유니버스) 적재, 시세·지수·환율 수집, 밸류에이션·재무·공시 수집(Stage 3).
 
 수집 작업은 대상 1건(종목·지수)마다 ingestion_logs 1행을 남긴다.
 """
@@ -206,6 +206,47 @@ def load_fx_daily(engine: Engine, providers: Providers, *, full: bool = False, t
                     for p in pts], ["granularity", "rate_at"])
             res.notes.append(f"{start}~{today}")
     return res.status
+
+
+# ── [S3-C] 대량 일봉·밸류에이션 ──
+# D의 RefreshService가 load_prices_bulk·load_valuations를 부른다. 반환은 {대상: 상태}
+VALUATION_HISTORY_DAYS = 365   # KR 일별 밸류에이션 1년
+
+
+# TODO(껍데기): C — 원본 load_prices_bulk로 교체 (지금은 아무것도 받지 않고 빈 결과)
+def load_prices_bulk(engine: Engine, providers: Providers, stock_ids: list[int], *, history_days: int,
+                     today: date | None = None, end: dict[str, date] | None = None) -> dict[str, str]:
+    """종목이 많을 때의 일봉 증분 — 국내 날짜별 전 종목 조회, 미국 묶음 다운로드."""
+    return {}
+
+
+# TODO(껍데기): C — 원본 load_valuations로 교체 (지금은 아무것도 받지 않고 빈 결과)
+def load_valuations(engine: Engine, providers: Providers, *, full: bool = False,
+                    tickers: list[str] | None = None, today: date | None = None,
+                    stock_ids: list[int] | None = None, history_days: int = VALUATION_HISTORY_DAYS) -> dict[str, str]:
+    """KR: pykrx 일별(증분) / US: yfinance 스냅샷. KR provider가 없거나 실패하면 DART FY 기반 파생값(DERIVED)."""
+    return {}
+
+
+# ── [S3-B] 재무·공시 ──
+# D의 RefreshService·Stage 4 상세 수집이 load_financials·load_disclosures를 부른다. 반환은 {대상: 상태}
+DISCLOSURE_DAYS = 365
+FIN_YEARS = 5
+
+
+# TODO(껍데기): B — 원본 load_financials로 교체 (지금은 아무것도 받지 않고 빈 결과)
+def load_financials(engine: Engine, providers: Providers, *, years: int = FIN_YEARS,
+                    tickers: list[str] | None = None, stock_ids: list[int] | None = None) -> dict[str, str]:
+    """FY 재무 years개년 — 국내 DART, 미국 SEC(+yfinance 보완)."""
+    return {}
+
+
+# TODO(껍데기): B — 원본 load_disclosures로 교체 (지금은 아무것도 받지 않고 빈 결과)
+def load_disclosures(engine: Engine, providers: Providers, *, days: int = DISCLOSURE_DAYS,
+                     tickers: list[str] | None = None, today: date | None = None,
+                     stock_ids: list[int] | None = None) -> dict[str, str]:
+    """최근 days일 공시 — 국내 DART, 미국 SEC."""
+    return {}
 
 
 # ---------------------------------------------------------------- 데모 사용자

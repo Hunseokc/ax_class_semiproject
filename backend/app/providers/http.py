@@ -32,12 +32,28 @@ class Throttle:
             self._last = time.monotonic()
 
 
+# TODO(껍데기): C — WindowLimiter 본문을 원본대로 교체 (지금은 제한 없이 바로 통과)
+class WindowLimiter:
+    """최근 period초 동안의 호출을 max_calls회 이하로 제한한다(재시도 포함, 프로세스 안 스레드 공유).
+    가득 차면 가장 오래된 호출이 창을 벗어날 때까지 기다린다."""
+
+    def __init__(self, max_calls: int, period: float = 60.0, *, clock: Callable[[], float] = time.monotonic,
+                 sleep: Callable[[float], None] = time.sleep):
+        self.max_calls, self.period = max_calls, period
+        self.clock, self.sleep = clock, sleep
+
+    def wait(self) -> None:
+        return None
+
+
 def call_with_retry(fn: Callable[[], T], *, throttle: Throttle, what: str,
-                    retry_if: Callable[[T], bool] | None = None) -> T:
+                    retry_if: Callable[[T], bool] | None = None, limiter: WindowLimiter | None = None) -> T:
     """fn을 호출하고 예외(또는 retry_if가 True인 결과)면 지수 백오프로 재시도한다."""
     last_err: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
         throttle.wait()
+        if limiter is not None:
+            limiter.wait()
         try:
             result = fn()
             if retry_if is not None and retry_if(result):

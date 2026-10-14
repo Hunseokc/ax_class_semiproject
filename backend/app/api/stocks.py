@@ -1,4 +1,4 @@
-"""종목 조회 API: 리스트, 상세, 캔들, 경쟁 그룹 목록. (재무·공시·검색은 이후 단계)"""
+"""종목 조회 API: 리스트, 상세, 캔들, 재무, 공시, 경쟁 그룹 목록. (검색은 이후 단계)"""
 from __future__ import annotations
 
 from typing import Literal
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, resolve_stock
 from app.core.errors import NotFound, Unprocessable
 from app.queries import raw, sql
-from app.schemas.api import CandlesOut, StockDetailOut, StockListOut
+from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, StockDetailOut, StockListOut
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -63,6 +63,45 @@ def candles(market: MarketPath, ticker: TickerPath, range: Literal["1m", "3m", "
     rows = db.execute(sql("candles"), {"stock_id": s["stock_id"], "months": RANGE_MONTHS[range]}).mappings().all()
     return {"market": s["market"], "ticker": s["ticker"], "currency": s["currency"], "range": range,
             "as_of": rows[-1]["date"] if rows else None, "candles": rows}
+
+
+# ── [S3-B] 재무·공시 ──
+# TODO(껍데기): B — financials·disclosures 본문을 원본대로(queries/financials.sql·disclosures.sql) 교체.
+#   지금은 없는 종목만 404로 막고, 있는 종목에는 docs/06 3-2의 삼성전자 예시 값을 그대로 돌려준다(DB를 읽지 않음)
+_EXAMPLE_FINANCIALS = [
+    {"period_end": "2024-12-31", "period_type": "FY", "revenue": 300870903000000, "operating_income": 32725961000000,
+     "net_income": 33621363000000, "total_assets": 514531948000000, "total_equity": 391687603000000,
+     "total_debt": 112339878000000, "operating_margin": 0.108771, "roe": 0.085837,
+     "data_source": "DART", "accounting_std": "K-IFRS"},
+    {"period_end": "2025-12-31", "period_type": "FY", "revenue": 333605938000000, "operating_income": 43601051000000,
+     "net_income": 44260956000000, "total_assets": 566942110000000, "total_equity": 424313255000000,
+     "total_debt": 130621773000000, "operating_margin": 0.130696, "roe": 0.104312,
+     "data_source": "DART", "accounting_std": "K-IFRS"},
+]
+_EXAMPLE_DISCLOSURES = [
+    {"rcept_no": "20261002800981", "title": "최대주주등소유주식변동신고서", "report_type": "거래소공시",
+     "filed_at": "2026-10-01T15:00:00Z", "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261002800981",
+     "data_source": "DART"},
+    {"rcept_no": "20260918800754", "title": "최대주주등소유주식변동신고서", "report_type": "거래소공시",
+     "filed_at": "2026-09-17T15:00:00Z", "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260918800754",
+     "data_source": "DART"},
+]
+
+
+@router.get("/{market}/{ticker}/financials", response_model=FinancialsOut, summary="FY 재무 추이")
+def financials(market: MarketPath, ticker: TickerPath, limit: int = Query(5, ge=1, le=10), db: Session = Depends(get_db)):
+    s = resolve_stock(db, market, ticker)
+    rows = _EXAMPLE_FINANCIALS[-limit:]
+    return {"market": s["market"], "ticker": s["ticker"], "currency": s["currency"],
+            "as_of": rows[-1]["period_end"] if rows else None, "items": rows}
+
+
+@router.get("/{market}/{ticker}/disclosures", response_model=DisclosuresOut, summary="최근 공시")
+def disclosures(market: MarketPath, ticker: TickerPath, limit: int = Query(5, ge=1, le=50), db: Session = Depends(get_db)):
+    s = resolve_stock(db, market, ticker)
+    rows = _EXAMPLE_DISCLOSURES[:limit]
+    return {"market": s["market"], "ticker": s["ticker"],
+            "as_of": rows[0]["filed_at"] if rows else None, "items": rows}
 
 
 groups_router = APIRouter(prefix="/peer-groups", tags=["stocks"])
