@@ -66,6 +66,13 @@
   .stock-row { grid-template-columns: 20px 1fr auto auto; }
 }
 
+/* 종목 상세 헤더 ★ 칸 [S2-A] */
+.stock-head { grid-template-columns: 1fr auto auto; }
+.stock-head__actions { display: flex; gap: var(--sp-2); align-items: center; }
+@media (max-width: 767px) {
+  .stock-head { grid-template-columns: 1fr; }
+}
+
 /* ---------------------------------------------------------------- 모의 포트폴리오 [S2-A] */
 
 /* ---------------------------------------------------------------- 대시보드 홈 [S1-A] */
