@@ -57,10 +57,10 @@
 .stat__sub { color: var(--text-3); font-size: var(--fs-xs); }
 
 /* ---------------------------------------------------------------- 주식 리스트 ★ 열 [S2-A] */
-.stock-row { grid-template-columns: 28px minmax(180px, 2fr) minmax(130px, 1.2fr) minmax(90px, 1fr) minmax(90px, 1fr) 44px; }
+.stock-row { grid-template-columns: 28px minmax(180px, 2fr) minmax(130px, 1.2fr) minmax(90px, 1fr) minmax(90px, 1fr) 116px; }
 .stock-row__actions { display: flex; gap: var(--sp-1); align-items: center; justify-content: flex-end; }
 @media (max-width: 1023px) {
-  .stock-row { grid-template-columns: 24px minmax(150px, 2fr) minmax(110px, 1fr) 44px; }
+  .stock-row { grid-template-columns: 24px minmax(150px, 2fr) minmax(110px, 1fr) 116px; }
 }
 @media (max-width: 767px) {
   .stock-row { grid-template-columns: 20px 1fr auto auto; }

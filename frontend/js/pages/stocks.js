@@ -3,6 +3,8 @@ import { getPeerGroups, getStocks, getWatchlist } from "../api.js";
 import { changeHtml, dateTime, esc, initials, krw, price, stockUrl, volume } from "../format.js";
 import { mountSidebar } from "../components/sidebar.js";
 import { emptyState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";
+import { icons } from "../components/icons.js";   // [S2-A]
+import { openAddToPortfolio } from "../components/add-to-portfolio.js";   // [S2-A]
 import { starButton } from "../components/watch.js";   // [S2-A]
 
 mountSidebar("stocks");
@@ -76,7 +78,9 @@ function stockRow(s, watched) {
       <span class="stock-row__actions"></span>
     </li>`);
   // [S2-A] ★ — 서버가 is_watched 를 주지 않으므로 내 관심종목 목록과 맞춰 본다
-  li.querySelector(".stock-row__actions").append(starButton(s, watched.has(`${s.market}/${s.ticker}`)));
+  const add = h(`<button class="btn btn--sm btn--accent" type="button" aria-label="${esc(s.name)} 포트폴리오에 담기">${icons.plus}<span>담기</span></button>`);
+  add.addEventListener("click", () => openAddToPortfolio(s));
+  li.querySelector(".stock-row__actions").append(starButton(s, watched.has(`${s.market}/${s.ticker}`)), add);
   return li;
 }
 

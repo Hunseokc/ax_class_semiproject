@@ -4,6 +4,8 @@ import { DASH, changeHtml, date, esc, krw, num, price, usd } from "../format.js"
 import { color, dashedAxis, draw, plainAxis } from "../components/charts.js";
 import { mountSidebar } from "../components/sidebar.js";
 import { emptyState, errorState, h, load, marketBadge, segmented } from "../components/ui.js";
+import { icons } from "../components/icons.js";   // [S2-A]
+import { openAddToPortfolio } from "../components/add-to-portfolio.js";   // [S2-A]
 import { starButton } from "../components/watch.js";   // [S2-A]
 
 mountSidebar("stocks");
@@ -34,7 +36,9 @@ function renderHeader(s, watched) {
       </div>
       <div class="stock-head__actions"></div>
     </header>`);
-  el.querySelector(".stock-head__actions").append(starButton(s, watched));   // [S2-A]
+  const add = h(`<button class="btn btn--accent" type="button">${icons.plus}<span>포트폴리오에 담기</span></button>`);   // [S2-A]
+  add.addEventListener("click", () => openAddToPortfolio(s));
+  el.querySelector(".stock-head__actions").append(starButton(s, watched), add);
   $("#head").replaceChildren(el);
 }
 
