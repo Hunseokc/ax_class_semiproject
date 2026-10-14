@@ -91,20 +91,11 @@
 /* 스파크라인 기간 라벨 + 장 상태 배지(휴장·직전 거래일) */
 .metric-card__meta { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); min-height: 20px; font-size: 11px; color: var(--text-3); white-space: nowrap; }
 
-/* [S1-D] 발표용 임시: 주요 종목 (가격 카드 + 종가 추이) — TODO(Stage 2 A): 관심종목 카드로 교체 */
-.featured { display: flex; flex-direction: column; gap: var(--sp-4); }
-.featured-row { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: var(--sp-4); }
-.featured-card, .featured-chart { background: var(--card); border-radius: var(--r-card-sm); padding: var(--sp-5); min-width: 0; }
-.featured-card { display: flex; flex-direction: column; gap: var(--sp-2); color: inherit; text-decoration: none; }
-.featured-card__head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
-.featured-card__price { font-size: var(--fs-2xl); font-weight: var(--fw-extra); letter-spacing: -0.02em; line-height: 1.15; margin-top: var(--sp-2); }
-.featured-card__chg { display: flex; gap: var(--sp-2); align-items: baseline; font-weight: var(--fw-semibold); }
-.featured-card__sub { line-height: 1.6; }
-.featured-card__more { margin-top: auto; padding-top: var(--sp-2); }
-.featured-chart { display: flex; flex-direction: column; gap: var(--sp-3); }
-.featured-chart__head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
-.featured-chart__plot { position: relative; height: 180px; }
-.featured-chart.state { justify-content: center; }
-@media (max-width: 767px) {
-  .featured-row { grid-template-columns: 1fr; }
-}
+/* 홈 내 관심종목 카드 [S2-A] */
+.wl-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-4); }
+.wl-card { background: var(--card); border-radius: var(--r-card-sm); display: flex; flex-direction: column; min-width: 0; }
+.wl-card__link { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-5) var(--sp-5) var(--sp-3); color: inherit; text-decoration: none; flex: 1; }
+.wl-card__head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
+.wl-card__price { font-size: var(--fs-xl); font-weight: var(--fw-extra); letter-spacing: -0.02em; line-height: 1.15; margin-top: var(--sp-2); }
+.wl-card__chg { font-weight: var(--fw-semibold); }
+.wl-card__move { display: flex; gap: var(--sp-1); justify-content: flex-end; padding: 0 var(--sp-3) var(--sp-3); }
