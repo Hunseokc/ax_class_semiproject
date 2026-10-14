@@ -12,7 +12,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import health, market, stocks
+from app.api import health, market, stocks, watchlist
 from app.core.config import FRONTEND_DIR, get_settings
 from app.core.errors import NotFound, install_error_handlers, internal_error_response
 from app.core.logging import request_id_var, setup_logging
@@ -62,6 +62,7 @@ for r in (market.router, stocks.groups_router, stocks.router):
     api.include_router(r)
 
 # ── [S2-B] watchlist ──
+api.include_router(watchlist.router)
 
 # ── [S2-C] portfolios ──
 from app.api import portfolios  # noqa: E402

@@ -4,7 +4,7 @@
 **D 선행 계약**: `financial_statements`·`disclosures` 테이블과 ORM, `providers/base.py`에 재무·공시 인터페이스 보강.
 **공통 주의**: `.env`에 `KRX_ID`·`KRX_PW`·`DART_API_KEY`·`SEC_USER_AGENT` 필요. 단위 테스트는 실제 네트워크를 쓰지 않는다(`tests/fakes.py`).
 **머지 순서**: C → B → D → A
-**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. stage에 없는 다른 팀원 코드는 원본과 같은 이름으로 🔌 나중에 연결(CLAUDE.md 11절)로 두고, 연결은 D가 단계 통합 때 한다. 시니어는 자동 검사가 통과한 넘김 PR을 머지 순서대로 바로바로 머지한다.
+**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. stage에 없는 다른 팀원 코드는 원본과 같은 이름으로 [연결 예정](CLAUDE.md 11절)로 두고, 연결은 D가 단계 통합 때 한다. 시니어는 자동 검사가 통과한 넘김 PR을 머지 순서대로 바로바로 머지한다.
 
 ---
 
@@ -77,7 +77,7 @@
 파트 1 (1~2번 DART·SEC Provider) → 볼 것: 실제 호출로 005930의 FY 매출·영업이익·순이익 최근 연도, AAPL의 같은 값을 출력(1종목씩만). 계정 ID가 없어 계정명으로 대체된 항목이 있으면 짚어 준다. .env에 DART_API_KEY·SEC_USER_AGENT가 없으면 어떤 에러가 나는지 보여 주고 설정법 안내.
 파트 2 (4~6번 적재 작업·CLI) → 볼 것: `financials --tickers 005930 AAPL`, `disclosures --days 30 --tickers 005930` → psql로 financial_statements(종목·연도별 행)·disclosures 행 수와 예시 3행, ingestion_logs. 재실행해도 행 수가 그대로(멱등).
 파트 3 (7~8번 조회 SQL·API) → 볼 것: curl `/stocks/KOSPI/005930/financials?limit=2`, `/disclosures` — docs/06 예시와 칸 이름을 나란히 비교. 없는 종목 404. /docs에서 직접 해 보기.
-파트 4 (9번 테스트, 🔌 3번 factory는 D가 연결) → pytest -v 번역. 3번은 🔌 연결 목록에 적어 둔다(D가 연결한 뒤 get_providers()로 확인).
+파트 4 (9번 테스트, [연결 예정] 3번 factory는 D가 연결) → pytest -v 번역. 3번은 연결 예정 목록에 적어 둔다(D가 연결한 뒤 get_providers()로 확인).
 
 [건드리지 않을 파일] krx.py·yahoo.py·http.py(C — http.py 재사용만), base.py(D), refresh(D), frontend(A)
 [인터페이스 계약]
@@ -89,7 +89,7 @@
   curl "localhost:8000/api/v1/stocks/KOSPI/005930/financials?limit=2" → 원본 예시와 같은 구조
   pytest -q 통과
 
-[선행 작업] C(feat/s3-c-price-providers)의 http.py·factory.py. stage에 없으면 dart.py·sec.py를 원본과 같은 이름으로 🔌 나중에 연결(CLAUDE.md 11절) — 이를 쓰는 테스트는 🔌 연결 목록에 적는다(D가 연결 후 추가). 3번(factory.py [S3-B] 구역)은 C의 파일이므로 🔌 연결 목록에 적는다(D가 연결).
+[선행 작업] C(feat/s3-c-price-providers)의 http.py·factory.py. stage에 없으면 dart.py·sec.py를 원본과 같은 이름으로 [연결 예정](CLAUDE.md 11절) — 이를 쓰는 테스트는 연결 예정 목록에 적는다(D가 연결 후 추가). 3번(factory.py [S3-B] 구역)은 C의 파일이므로 연결 예정 목록에 적는다(D가 연결).
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage3에서 새로 만듦) → origin/stage3 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -103,7 +103,7 @@
 [이번 단계] Stage 3 — 실데이터 화면
 [내 파트] api.js 확장 → 상세 재무 추이 → 상세 최근 공시 → 사이드바 갱신 상태 → stale 표시
 [브랜치] feat/s3-a-financial-screens
-[참조 원본] ../ax_class_semiproject/frontend/js/pages/stock.js(재무·공시 부분), js/components/sidebar.js, docs/screenshots/{03_stock_detail,04_stock_detail_us}.png, docs/06 3-1 refresh·3-2 (읽기 전용)
+[참조 원본] ../ax_class_semiproject/frontend/js/pages/stock.js(재무·공시 부분), js/components/sidebar.js, docs/screenshots/{03_stock_detail,04_stock_detail_us}.png, docs/06 3-1 refresh·3-2 (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S3-A] 구역: getFinancials·getDisclosures·getRefreshStatus·postRefresh
@@ -126,7 +126,7 @@
 [완료 기준]
   삼성전자·AAPL 상세에서 재무·공시 표시, 데이터 없는 종목은 빈 상태 / 사이드바 갱신 시각이 status API와 일치 / 콘솔 에러 0
 
-[선행 작업] B(feat/s3-b-financials)의 financials·disclosures API, D의 /market/refresh·/refresh/status. stage에 없으면 🔌 나중에 연결(CLAUDE.md 11절) — docs/06 예시로 MOCK 하고 묻지 말고 진행한다(`TODO(연결)` 표시, D가 연결).
+[선행 작업] B(feat/s3-b-financials)의 financials·disclosures API, D의 /market/refresh·/refresh/status. stage에 없으면 [연결 예정](CLAUDE.md 11절) — docs/06 예시로 MOCK 하고 묻지 말고 진행한다(`TODO(연결)` 표시, D가 연결).
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage3에서 새로 만듦) → origin/stage3 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -138,7 +138,7 @@
 ```
 시니어 모드. Stage 3.
 [PR] 파트 단위로 넘어온(Ready) PR을 자동 검사 통과 확인 후 머지 순서대로 당일 머지하고, 팀 채팅에 알린다. 진행 중(Draft) PR은 코드만 미리 본다. 받은 요청 메모는 추천안에 OK/다른 지시만 답한다.
-[🔌 연결] 이 단계 PR이 모두 머지되면 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "🔌 연결 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 3` 통과 → 아래 통합으로.
+[연결 예정 처리] 이 단계 PR이 모두 머지되면 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "연결 예정 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 3` 통과 → 아래 통합으로.
 [선행] schema·ORM에 financial_statements·disclosures, providers/base.py 재무·공시 인터페이스 → 커밋 후 배포.
 [내 구현]
 1. backend/app/ingest/store.py — advisory_lock 추가 (C 파일이지만 동시성 설계라 D가 맡음 — C에게 공지)

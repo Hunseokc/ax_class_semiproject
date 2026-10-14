@@ -1,9 +1,12 @@
 // 종목 상세: 헤더(이름·가격·등락) · 가격 차트(종가 선 + 거래량 막대) · 핵심 정보(시총·PER·PBR)
-import { getCandles, getStock } from "../api.js";
+import { getCandles, getStock, getWatchlist } from "../api.js";
 import { DASH, changeHtml, date, esc, krw, num, price, usd } from "../format.js";
 import { color, dashedAxis, draw, plainAxis } from "../components/charts.js";
 import { mountSidebar } from "../components/sidebar.js";
 import { emptyState, errorState, h, load, marketBadge, segmented } from "../components/ui.js";
+import { icons } from "../components/icons.js";   // [S2-A]
+import { openAddToPortfolio } from "../components/add-to-portfolio.js";   // [S2-A]
+import { starButton } from "../components/watch.js";   // [S2-A]
 
 mountSidebar("stocks");
 const $ = (sel) => document.querySelector(sel);
@@ -16,7 +19,7 @@ const signColor = (v, c) => (v > 0 ? upColor(c) : v < 0 ? downColor(c) : color("
 const money = (v, cur, compact = true) => (cur === "USD" ? usd(v, { compact }) : krw(v, { compact }));
 
 // ---------------------------------------------------------------- 헤더
-function renderHeader(s) {
+function renderHeader(s, watched) {
   document.title = `${s.name} (${s.ticker}) · StockMind`;
   const el = h(`<header class="stock-head">
       <div class="stock-head__id">
@@ -31,7 +34,11 @@ function renderHeader(s) {
         ${s.currency === "USD" ? `<p class="subtle num">≈ ${krw(s.close_krw)} · 환율 ${num(s.fx_rate, 2)}${s.fx_stale ? " (지연)" : ""}</p>` : ""}
         <p class="subtle">일봉 기준 · ${date(s.as_of)} 종가</p>`}
       </div>
+      <div class="stock-head__actions"></div>
     </header>`);
+  const add = h(`<button class="btn btn--accent" type="button">${icons.plus}<span>포트폴리오에 담기</span></button>`);   // [S2-A]
+  add.addEventListener("click", () => openAddToPortfolio(s));
+  el.querySelector(".stock-head__actions").append(starButton(s, watched), add);
   $("#head").replaceChildren(el);
 }
 
@@ -101,7 +108,10 @@ async function init() {
     return;
   }
   document.querySelectorAll(".detail-section").forEach((s) => (s.hidden = false));   // 다시 시도 성공 시 복구
-  renderHeader(stock);
+  // [S2-A] 서버가 is_watched 를 주지 않으므로 내 관심종목 목록에서 찾는다 (실패해도 상세는 보여 준다)
+  // TODO(연결): D의 stock_list.sql·stock_detail.sql에 is_watched가 들어오면 원본처럼 starButton(s, s.is_watched)로 바꾸고 getWatchlist 호출 삭제
+  const wl = await getWatchlist().catch(() => ({ items: [] }));
+  renderHeader(stock, wl.items.some((i) => i.market === MARKET && i.ticker === TICKER));
   renderKeyMetrics(stock);
   loadCandles();
 }
