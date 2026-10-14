@@ -3,7 +3,7 @@
 **단계 목표**: 홈을 2열 대시보드(검색바·투자 성향 한 줄 → 관심종목 컴팩트 + 섹터 히트맵·시장 심리 지수 → 거래량 급증/매력도 순위 탭)로 개편하고, 상장 종목 전체를 상단 검색으로 찾을 수 있게 한다. 홈 위젯은 DB에 저장해 재사용(외부 호출 최소화).
 **D 선행 계약**: `005_listed_dividend.sql`(coverage 'listed', valuation_snapshots.dps)·`007_home_widgets.sql`(sector_performance_daily, market_sentiment_daily) + schema 반영. `be/app/api/home.py` 라우터 뼈대(`/home` prefix, 구역 주석)를 먼저 커밋.
 **머지 순서**: C → B → A → D 마감
-**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. stage에 없는 다른 팀원 코드는 원본과 같은 이름으로 🔌 나중에 연결(CLAUDE.md 11절)로 두고, 연결은 D가 단계 통합 때 한다. 시니어는 자동 검사가 통과한 넘김 PR을 머지 순서대로 바로바로 머지한다.
+**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. stage에 없는 다른 팀원 코드는 원본과 같은 이름으로 [연결 예정](CLAUDE.md 11절)로 두고, 연결은 D가 단계 통합 때 한다. 시니어는 자동 검사가 통과한 넘김 PR을 머지 순서대로 바로바로 머지한다.
 
 ---
 
@@ -85,10 +85,10 @@
 
 ```
 [역할] 너는 StockMind 팀 프로젝트에서 팀원 A(프론트엔드·사용자 경험, 주니어)의 페어 프로그래머다. 레포 루트 CLAUDE.md의 규칙을 반드시 따른다.
-[이번 단계] Stage 6 — 홈 대시보드 개편. 원본 최종 홈 화면(docs/screenshots/01_home.png)과 같아지는 것이 목표다.
+[이번 단계] Stage 6 — 홈 대시보드 개편. 원본 최종 홈 화면(docs/screenshots/01_home.png)의 기능(위젯 구성)을 갖추는 것이 목표다. 배치·디자인은 참고하되 A가 정해도 된다.
 [내 파트] 검색 컴포넌트 → 홈 레이아웃 2열 → 관심종목 컴팩트/카드 → 섹터 히트맵 → 시장 심리 지수 → 순위 탭 → 지수 카드 다듬기
 [브랜치] feat/s6-a-home-redesign
-[참조 원본] ../ax_class_semiproject/frontend/js/components/search.js, js/pages/home.js, index.html, css/pages.css, docs/screenshots/{01_home,06_mobile_home}.png (읽기 전용)
+[참조 원본] ../ax_class_semiproject/frontend/js/components/search.js, js/pages/home.js, index.html, css/pages.css, docs/screenshots/{01_home,06_mobile_home}.png (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S6-A] 구역: searchStocks·getHomeRanking·getSectors·getSentiment
@@ -102,14 +102,14 @@
 
 [파트별 확인 — 계획표의 "파트별 확인 지점"으로 그대로 쓴다. 파일마다 만든 직후 돌려 보고(CLAUDE.md 3절 ③), 파트가 끝날 때마다 실제로 실행해서 "여기까지 만든 것"을 보여 주고 아주 쉽게 설명한다(3-1)]
 파트 1 (1~2번 api.js·상단 검색) → 볼 것: 검색창에 '삼성' 입력 → 자동완성, 방향키·Enter 이동, listed 종목 '참고' 표시. Network 탭에서 글자마다가 아니라 멈춘 뒤 1번만 요청이 나가는 것(디바운스)을 보여 준다.
-파트 2 (3~4번 2열 배치·관심종목 컴팩트) → 볼 것: 원본 docs/screenshots/01_home.png와 나란히 놓고 같은 점·다른 점 체크. 컴팩트 ↔ 카드 전환.
+파트 2 (3~4번 2열 배치·관심종목 컴팩트) → 볼 것: 원본 docs/screenshots/01_home.png와 나란히 놓고 기능이 다 있는지 체크(배치가 다른 건 의도라면 PR "원본과 다르게 한 것"에 기록). 컴팩트 ↔ 카드 전환.
 파트 3 (5~6번 히트맵·심리 지수·순위 탭) → 볼 것: 섹터 색이 등락률과 맞는지 curl /home/sectors 값과 비교, 게이지 값, 탭 전환.
 파트 4 (7~8번 지수 카드·CSS·모바일) → 볼 것: 장 상태 배지·52주 범위, 기기 모드 390px에서 1열. 검색에서 listed 종목 클릭 → 상세 '데이터 수집 중' 안내. 화면별 스크린샷 안내.
 
 [건드리지 않을 파일] backend/ 전부, 공통 css(D)
 [완료 기준] 원본 01_home.png와 레이아웃 일치 / 검색에서 상장 목록 종목 클릭 → 상세(데이터 수집 중 안내) / 모바일 1열 / 콘솔 에러 0
 
-[선행 작업] C의 /home/sectors·/home/sentiment, B의 /stocks/search·/home/ranking, D의 market_calendar 응답 필드(7번). stage에 없으면 🔌 나중에 연결(CLAUDE.md 11절) — 원본 home.py·schemas 응답 모양으로 MOCK 하고 묻지 말고 진행한다(`TODO(연결)` 표시, D가 연결).
+[선행 작업] C의 /home/sectors·/home/sentiment, B의 /stocks/search·/home/ranking, D의 market_calendar 응답 필드(7번). stage에 없으면 [연결 예정](CLAUDE.md 11절) — 원본 home.py·schemas 응답 모양으로 MOCK 하고 묻지 말고 진행한다(`TODO(연결)` 표시, D가 연결).
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage6에서 새로 만듦) → origin/stage6 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -121,7 +121,7 @@
 ```
 시니어 모드. Stage 6 마감.
 [PR] 파트 단위로 넘어온(Ready) PR을 자동 검사 통과 확인 후 머지 순서대로 당일 머지하고, 팀 채팅에 알린다. 진행 중(Draft) PR은 코드만 미리 본다. 받은 요청 메모는 추천안에 OK/다른 지시만 답한다.
-[🔌 연결] 이 단계 PR이 모두 머지되면 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "🔌 연결 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 6` 통과 → 아래 통합으로.
+[연결 예정 처리] 이 단계 PR이 모두 머지되면 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "연결 예정 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 6` 통과 → 아래 통합으로.
 [선행] 005·007 마이그레이션 + schema, home.py 뼈대 → 커밋 후 배포.
 [내 구현]
 1. backend/app/services/market_calendar.py — exchange-calendars 기반 장 상태, /market/indices 응답에 추가

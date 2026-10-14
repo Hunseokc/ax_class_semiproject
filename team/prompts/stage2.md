@@ -3,7 +3,7 @@
 **단계 목표**: 단일 데모 사용자가 관심종목을 추가·정렬·삭제하고, 시드 안에서 국내·미국 종목을 담아 원화 기준 평가손익(환율 효과 분리)을 본다.
 **D 선행 계약(단계 시작 전 커밋됨)**: `users`·`watchlist_items`(memo·target_price 없음)·`portfolios`·`portfolio_items` 테이블과 ORM, `deps.get_current_user_id()`, `providers/base.py` 보강(FxProvider는 Stage 1-D에 있음 — Bar·FxPoint를 preprocess에서 base로 이동).
 **머지 순서**: C → B → A → D 통합
-**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. stage에 없는 다른 팀원 코드는 원본과 같은 이름으로 🔌 나중에 연결(CLAUDE.md 11절)로 두고, 연결은 D가 단계 통합 때 한다. 시니어는 자동 검사가 통과한 넘김 PR을 머지 순서대로 바로바로 머지한다.
+**PR 방식**: 파일마다 커밋·push, 파트 하나 = PR 하나로 끝나는 대로 D에게 넘긴다(CLAUDE.md 6절). 다른 팀원 브랜치는 받지 않는다. stage에 없는 다른 팀원 코드는 원본과 같은 이름으로 [연결 예정](CLAUDE.md 11절)로 두고, 연결은 D가 단계 통합 때 한다. 시니어는 자동 검사가 통과한 넘김 PR을 머지 순서대로 바로바로 머지한다.
 
 ---
 
@@ -96,7 +96,7 @@
 [이번 단계] Stage 2 — 사용자 기능 화면
 [내 파트] api.js 확장 → ★ 관심 토글(리스트·상세 연결) → 홈 관심종목 카드 → 포트폴리오 페이지 → 담기 모달
 [브랜치] feat/s2-a-user-screens
-[참조 원본] ../ax_class_semiproject/frontend/js/components/{watch,add-to-portfolio}.js, js/pages/portfolio.js, docs/screenshots/{05_portfolio,09_add_modal,08_mobile_portfolio}.png, docs/06 3-4·3-5 (읽기 전용)
+[참조 원본] ../ax_class_semiproject/frontend/js/components/{watch,add-to-portfolio}.js, js/pages/portfolio.js, docs/screenshots/{05_portfolio,09_add_modal,08_mobile_portfolio}.png, docs/06 3-4·3-5 (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S2-A] 구역: watchlist·portfolios 호출 함수
@@ -124,7 +124,7 @@
   리스트 ★ → 홈 카드 표시 → 정렬 변경 유지 → 포트폴리오 생성 → USD 종목 금액 모드 담기 → 시드 초과 메시지 → 요약 갱신
   모바일 폭(390px)에서 포트폴리오 페이지 가로 스크롤 없음
 
-[선행 작업] B(feat/s2-b-watchlist)의 /watchlist, C(feat/s2-c-portfolio)의 /portfolios. stage에 없으면 🔌 나중에 연결(CLAUDE.md 11절) — docs/06 3-4·3-5 예시로 MOCK 하고 묻지 말고 진행한다(`TODO(연결)` 표시, D가 연결).
+[선행 작업] B(feat/s2-b-watchlist)의 /watchlist, C(feat/s2-c-portfolio)의 /portfolios. stage에 없으면 [연결 예정](CLAUDE.md 11절) — docs/06 3-4·3-5 예시로 MOCK 하고 묻지 말고 진행한다(`TODO(연결)` 표시, D가 연결).
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage2에서 새로 만듦) → origin/stage2 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
 ② CLAUDE.md 2절의 작업 계획표만 출력하라(파트별 확인 지점 포함). 코드는 내가 승인한 뒤 파일 하나씩 진행하고, 파일마다 만든 직후 실제로 돌려서 보여 주며(3절 ③), 파트가 끝날 때마다 "여기까지 만든 것"을 실행해 보여 준다(3-1).
 ```
@@ -136,7 +136,7 @@
 ```
 시니어 모드. Stage 2.
 [PR] 파트 단위로 넘어온(Ready) PR을 자동 검사 통과 확인 후 머지 순서대로 당일 머지하고, 팀 채팅에 알린다. 진행 중(Draft) PR은 코드만 미리 본다. 받은 요청 메모는 추천안에 OK/다른 지시만 답한다.
-[🔌 연결] 이 단계 PR이 모두 머지되면 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "🔌 연결 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 2` 통과 → 아래 통합으로.
+[연결 예정 처리] 이 단계 PR이 모두 머지되면 stage에서 `git grep -n "TODO(연결)"` → 각 PR의 "연결 예정 목록"대로 연결(import를 원본처럼 맨 위로, MOCK 제거, 목록의 테스트 추가) → `pytest -q`·`python team/tools/check_contract.py 2` 통과 → 아래 통합으로.
 [선행] stage2 브랜치는 stage1 머지·팀 키트(CLAUDE.md 9~11절) 수정이 모두 들어간 main에서 만든다. schema.sql·models에 users·watchlist_items(memo·target_price·updated_at 제외)·portfolios·portfolio_items, deps.get_current_user_id·IdPath, config.default_user_id·refresh_ttl_hours, providers/base.py → `python team/tools/check_contract.py 2` 통과 → stage2에 커밋 후 프롬프트 배포.
 [통합 중]
 1. backend/app/ingest/demo.py + CLI seed-demo (데모 사용자·관심종목·포트폴리오)
