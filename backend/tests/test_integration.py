@@ -40,15 +40,20 @@ def test_frontend_imports_resolve():
 
 
 def test_user_journey_across_screens(client):
-    """홈 → 주식 리스트 → 종목 상세 → 모의 포트폴리오 → 정리."""
-    # 홈: 지수·환율
+    """홈 → 주식 리스트(★·담기) → 종목 상세 → 모의 포트폴리오 → 정리."""
+    # 홈: 지수·환율·관심종목(빈 상태)
     assert client.get(f"{API}/market/indices").json()["indices"]
     assert client.get(f"{API}/market/fx").json()["fx_stale"] is False
+    assert client.get(f"{API}/watchlist").json()["count"] == 0
 
     # 주식 리스트: 거래량 순위, 그룹 필터 목록, 전체 탭(시총 정렬)
     assert client.get(f"{API}/stocks?country=KR&sort=volume&limit=5").json()["items"][0]["ticker"] == "000660"
     assert {g["name"] for g in client.get(f"{API}/peer-groups").json()["groups"]} == {"반도체", "빅테크"}
     assert "NVDA" in {x["ticker"] for x in client.get(f"{API}/stocks").json()["items"]}
+
+    # ★ 추가 → 홈 카드에 표시
+    assert client.post(f"{API}/watchlist", json={"market": "NASDAQ", "ticker": "NVDA"}).status_code == 201
+    assert [c["ticker"] for c in client.get(f"{API}/watchlist").json()["items"]] == ["NVDA"]
 
     # 종목 상세: 상세·캔들
     base = f"{API}/stocks/NASDAQ/NVDA"
@@ -69,6 +74,8 @@ def test_user_journey_across_screens(client):
     assert client.put(f"{API}/portfolios/{pid}", json={"name": "여정", "seed_krw": 100_000}).status_code == 409
     assert client.delete(f"{API}/portfolios/{pid}/items/{krw_item['item_id']}").status_code == 204
     assert client.delete(f"{API}/portfolios/{pid}").status_code == 204
+    assert client.delete(f"{API}/watchlist/NASDAQ/NVDA").status_code == 204
+    assert client.get(f"{API}/watchlist").json()["count"] == 0
 
 
 def test_sample_import_serves_main_apis(engine, client):
