@@ -128,7 +128,7 @@ def test_portfolio_validation_and_duplicate_name(client, engine, as_user):
     r = client.post(API, json={"name": "같은이름", "seed_krw": 100})
     assert r.status_code == 409 and r.json()["error"]["code"] == "DUPLICATE_PORTFOLIO_NAME"
     with engine.begin() as conn:                                            # 공통 픽스처에는 demo(1)뿐 → 두 번째 사용자를 여기서 준비
-        conn.execute(text("INSERT INTO users (user_id, username, display_name) VALUES (2, 'other', '다른 사용자')"))
+        conn.execute(text("INSERT INTO users (user_id, nickname) VALUES (2, 'other')"))
     as_user(2)
     create(client, name="같은이름")                                         # 사용자가 다르면 허용
     as_user(99)
