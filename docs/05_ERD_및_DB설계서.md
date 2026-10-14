@@ -1,10 +1,10 @@
-# 05. ERD 및 DB 설계서 (Stage 1 범위)
+# 05. ERD 및 DB 설계서 (Stage 2 범위)
 
-> **상태: Stage 1 확정.** Stage 1 테이블 10개·VIEW 2개·보조 인덱스 6개를 실제 DDL 기준으로 담았다. 이후 단계에서 D가 테이블을 추가할 때 이 문서의 해당 절을 함께 확장한다.
-> (Stage 2: 사용자·관심종목·포트폴리오 / Stage 3: 재무·공시·밸류에이션 수집 / Stage 4+: 매력도·비교군·섹터 — 의도적 비정규화 2건, 트리거, `v_stock_metrics`, EXPLAIN 비교도 그때 채운다.)
+> **상태: Stage 2 확정.** Stage 1 테이블 10개 + Stage 2 사용자 테이블 4개, VIEW 2개, 보조 인덱스 8개, 트리거 2개를 실제 DDL 기준으로 담았다. 이후 단계에서 D가 테이블을 추가할 때 이 문서의 해당 절을 함께 확장한다.
+> (Stage 3: 재무·공시·밸류에이션 수집 / Stage 4+: 매력도·비교군·섹터 — 의도적 비정규화 5-2, `v_stock_metrics`, EXPLAIN 비교도 그때 채운다. `watchlist_items`의 메모·목표가·`updated_at`은 Stage 5.)
 
 - DDL 원문: `backend/db/schema.sql` → `backend/db/indexes.sql` → `backend/db/views.sql` 순서로 실행 (`python -m app.ingest init-db`가 같은 순서로 적용)
-- DBMS: PostgreSQL 16 / 테이블 10개, VIEW 2개, 보조 인덱스 6개
+- DBMS: PostgreSQL 16 / 테이블 14개, VIEW 2개, 보조 인덱스 8개, 트리거 2개(updated_at 자동 갱신 — portfolios·portfolio_items)
 - 금액·가격은 모두 `NUMERIC` (float 사용 안 함), 시각은 모두 `TIMESTAMPTZ`
 - ORM(`backend/app/models/__init__.py`)은 `schema.sql`과 1:1이며 `tests/test_schema.py`가 일치를 검증한다.
 
@@ -20,6 +20,11 @@ erDiagram
     stocks ||--o{ valuation_snapshots : "밸류에이션"
     indices ||--o{ index_daily_prices : "지수 일봉"
     stocks |o--o{ ingestion_logs : "SET NULL"
+    users ||--o{ watchlist_items : ""
+    stocks ||--o{ watchlist_items : ""
+    users ||--o{ portfolios : "소유"
+    portfolios ||--o{ portfolio_items : "담기"
+    stocks ||--o{ portfolio_items : "RESTRICT"
 
     markets {
         smallint market_id PK
@@ -101,9 +106,41 @@ erDiagram
         timestamptz started_at
         timestamptz finished_at
     }
+    users {
+        int user_id PK
+        varchar nickname UK
+        timestamptz created_at
+    }
+    watchlist_items {
+        int user_id PK,FK
+        int stock_id PK,FK
+        int sort_order
+        timestamptz added_at
+    }
+    portfolios {
+        int portfolio_id PK
+        int user_id FK
+        varchar name
+        numeric seed_krw
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    portfolio_items {
+        int item_id PK
+        int portfolio_id FK
+        int stock_id FK
+        int quantity
+        numeric ref_price
+        numeric ref_fx_rate
+        date ref_date
+        text memo
+        numeric cost_krw "GENERATED"
+        timestamptz created_at
+        timestamptz updated_at
+    }
 ```
 
-`fx_rates`는 FK 관계가 없는 독립 테이블이다(조회 시점에 참조하며, 담은 시점 환율의 복사본은 Stage 2의 `portfolio_items`가 갖는다).
+`fx_rates`는 FK 관계가 없는 독립 테이블이다(조회 시점에 참조하며, 담은 시점 환율은 `portfolio_items`에 복사 — 5절).
 
 ## 2. 테이블 목록
 
@@ -118,6 +155,10 @@ erDiagram
 | 배경 | indices | 지수 정의 | index_id |
 | 배경 | index_daily_prices | 지수 일봉 | (index_id, trade_date) |
 | 배경 | fx_rates | USD/KRW | fx_id, UQ (granularity, rate_at) |
+| 사용자 | users | 사용자(인증 없음, 기본 사용자 demo는 `master`가 시드) | user_id |
+| 사용자 | watchlist_items | 관심종목 N:M + 정렬 순서 | (user_id, stock_id) |
+| 사용자 | portfolios | 모의 포트폴리오 | portfolio_id, UQ (user_id, name) |
+| 사용자 | portfolio_items | 담은 종목 (담은 시점 가격·환율 복사) | item_id, UQ (portfolio_id, stock_id) |
 | 운영 | ingestion_logs | 적재·갱신 로그 | log_id |
 
 ## 3. 테이블 정의서
@@ -242,14 +283,73 @@ Stage 1에서 쓰는 값: `MASTER`(INTERNAL, `master`), `PRICES`(PYKRX·YFINANCE
 
 제약: `CHECK (job_type IN ('PRICES','INDICES','FX','VALUATION','MASTER'))` / `CHECK (status IN ('SUCCESS','FAILED','SKIPPED'))` / `CHECK (rows_loaded >= 0)` / `CHECK (finished_at IS NULL OR finished_at >= started_at)`
 
-## 4. 정규화 (Stage 1 범위)
+#### `users`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| user_id | integer | N | 자동 증가 | PK | 사용자 ID |
+| nickname | character varying(50) | N |  | UQ | 닉네임 |
+| created_at | timestamp with time zone | N | now() |  | 생성 시각 |
+
+요청 사용자는 `get_current_user_id`(설정 `DEFAULT_USER_ID`, 기본 1 = demo)가 정한다. 2차에서 로그인으로 대체한다.
+
+#### `watchlist_items`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| user_id | integer | N |  | PK, FK→users (CASCADE) | 사용자 ID |
+| stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
+| sort_order | integer | N | 0 |  | 표시 순서 |
+| added_at | timestamp with time zone | N | now() |  | 추가 시각 |
+
+메모·목표가·`updated_at`(트리거 `trg_watchlist_items_updated_at`)은 Stage 5에서 추가한다.
+
+#### `portfolios`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| portfolio_id | integer | N | 자동 증가 | PK | 포트폴리오 ID |
+| user_id | integer | N |  | UQ(복합), FK→users (CASCADE) | 사용자 ID |
+| name | character varying(100) | N |  | UQ(복합) | 이름 |
+| seed_krw | numeric(20,0) | N |  |  | 투자 시드(원) |
+| created_at | timestamp with time zone | N | now() |  | 생성 시각 |
+| updated_at | timestamp with time zone | N | now() |  | 수정 시각(트리거 갱신) |
+
+제약: `CHECK ((seed_krw > (0)::numeric))` / `UNIQUE (user_id, name)`
+
+#### `portfolio_items`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| item_id | integer | N | 자동 증가 | PK | 담은 항목 ID |
+| portfolio_id | integer | N |  | UQ(복합), FK→portfolios (CASCADE) | 포트폴리오 ID |
+| stock_id | integer | N |  | UQ(복합), FK→stocks (RESTRICT) | 담긴 종목은 삭제 불가 |
+| quantity | integer | N |  |  | 수량(정수 주) |
+| ref_price | numeric(18,4) | N |  |  | 담은 시점 종가(종목 통화) |
+| ref_fx_rate | numeric(12,4) | N | 1 |  | 담은 시점 환율 (KRW 종목은 1) |
+| ref_date | date | N |  |  | ref_price의 거래일 |
+| memo | text | Y |  |  | 메모 |
+| created_at | timestamp with time zone | N | now() |  | 생성 시각 |
+| updated_at | timestamp with time zone | N | now() |  | 수정 시각(트리거 갱신) |
+| cost_krw | numeric(24,2) | Y | GENERATED: (((quantity)::numeric * ref_price) * ref_fx_rate) |  | 원가(원) |
+
+제약: `CHECK ((quantity > 0))` / `CHECK ((ref_price > (0)::numeric))` / `CHECK ((ref_fx_rate > (0)::numeric))` / `UNIQUE (portfolio_id, stock_id)`. "원가 합계 ≤ 시드"는 행 간 제약이라 CHECK로 걸 수 없어 서비스가 트랜잭션 + 포트폴리오 행 잠금(`SELECT … FOR UPDATE`)으로 보장한다.
+
+## 4. 정규화 (Stage 2 범위)
 
 - **1NF**: 모든 컬럼이 원자값. 배열·쉼표 구분 값 없음.
-- **2NF**: 복합 PK 테이블(`daily_prices`, `valuation_snapshots`, `index_daily_prices`, `peer_group_members`)의 비키 컬럼은 PK 전체에 종속.
+- **2NF**: 복합 PK 테이블(`daily_prices`, `valuation_snapshots`, `index_daily_prices`, `peer_group_members`, `watchlist_items`)의 비키 컬럼은 PK 전체에 종속.
 - **3NF — `markets` 분리**: 통화·국가·시간대는 시장 단위 속성이므로 `stocks`에 반복하지 않는다(종목 → 시장 → 통화 이행적 종속 제거).
-- **N:M 교차 테이블**: `peer_group_members` (국내·해외 종목 혼합 가능).
+- **N:M 교차 테이블**: `peer_group_members` (국내·해외 종목 혼합 가능), `watchlist_items` (사용자 ↔ 종목, 속성 `sort_order`·`added_at`).
+- **파생값은 저장하지 않음**: 같은 행 값만으로 계산되는 `portfolio_items.cost_krw`는 저장형 생성 컬럼(`GENERATED ALWAYS … STORED`)으로 두어 직접 쓰기를 막는다.
 
-## 5. 인덱스 (Stage 1)
+## 4-1. 의도적 비정규화 — `portfolio_items.ref_price`·`ref_fx_rate`·`ref_date`
+- 형태: `daily_prices.close`와 `fx_rates.usd_krw`에서 가져올 수 있는 값을 항목 행에 복사해 둔다.
+- 사유: "담은 시점의 가격과 환율"은 **그 시점에 확정된 변하지 않는 사실**이다. 시세 테이블은 수정주가 재계산(배당·분할)으로 과거 종가가 바뀌고, 환율도 SNAPSHOT이 새로 쌓이며 재적재·보정될 수 있다. 참조로만 연결하면 이런 갱신이 일어날 때 이미 담은 원가와 평가손익이 소급해서 바뀐다.
+- 정합성: 항목 수정(PUT) 시 기준가·환율을 현재값으로 다시 저장하는 것만 허용한다(명세). `ref_date`로 어느 거래일 종가인지 추적할 수 있다.
+- (원본 5-2 매력도 파생 테이블은 Stage 4에서 추가)
+
+## 5. 인덱스 (Stage 2)
 
 | 인덱스 | 대상 | 받치는 조회 | 비고 |
 |---|---|---|---|
@@ -260,12 +360,14 @@ Stage 1에서 쓰는 값: `MASTER`(INTERNAL, `master`), `PRICES`(PYKRX·YFINANCE
 | ix_fx_granularity_rate_at | fx_rates (granularity, rate_at DESC) | 최신 SNAPSHOT(TTL 판단) | |
 | ix_ingestion_logs_job_finished | ingestion_logs (job_type, finished_at DESC) | 작업별 마지막 성공 시각 | |
 | ix_peer_members_stock | peer_group_members (stock_id) | 종목 → 소속 그룹 | PK가 group_id 선두라 필요 |
+| ix_watchlist_stock | watchlist_items (stock_id) | FK 역방향(CASCADE) | PK가 user_id 선두라 필요 |
+| ix_portfolio_items_stock | portfolio_items (stock_id) | FK 역방향(RESTRICT 검사) | UQ가 portfolio_id 선두라 필요 |
 
 (`valuation_snapshots (stock_id, as_of DESC)`는 PK 역방향 스캔과 중복이라 만들지 않는다.)
 
-FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으로 이미 인덱싱된다: `stocks.market_id`(UNIQUE 선두), 복합 PK의 선두 컬럼들. `indices.market_id`(10행), `ingestion_logs.stock_id`는 행 수가 적어 생략했다.
+FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으로 이미 인덱싱된다: `stocks.market_id`(UNIQUE 선두), `portfolios.user_id`(UNIQUE 선두), `portfolio_items.portfolio_id`(UNIQUE 선두), 복합 PK의 선두 컬럼들. `indices.market_id`(10행), `ingestion_logs.stock_id`는 행 수가 적어 생략했다.
 
-## 6. VIEW (Stage 1)
+## 6. VIEW (Stage 1~2)
 | VIEW | 내용 | 주요 SQL 요소 | 사용처 |
 |---|---|---|---|
 | v_latest_price | 종목별 최신 종가·전일 종가·등락·등락률·거래량 | LATERAL, 서브쿼리 LIMIT 2, LAG, NULLIF | `stock_list.sql`, `stock_detail.sql` |
@@ -273,18 +375,18 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 
 Stage 1에는 SNAPSHOT을 쓰는 환율 서비스가 없으므로(Stage 3) `v_fx_latest`는 `fx` 수집이 넣은 최신 DAILY 행을 돌려준다.
 
-## 7. 검증 결과 (Stage 1)
+## 7. 검증 결과 (Stage 1~2)
 | 검증 | 결과 |
 |---|---|
-| DDL 적용 (schema → indexes → views, 테스트 DB 카탈로그 조회) | 테이블 10, VIEW 2, 보조 인덱스 6 |
-| ORM ↔ DDL 컬럼 일치, Stage 1 외 테이블 없음 | `test_orm_matches_schema`, `test_tables_are_stage1_only` 통과 |
+| DDL 적용 (schema → indexes → views, 개발 DB 카탈로그 조회) | 테이블 14, VIEW 2, 보조 인덱스 8, 트리거 2 |
+| ORM ↔ DDL 컬럼 일치, Stage 1·2 외 테이블 없음 | `test_orm_matches_schema`, `test_tables_are_stage1_and_2_only` 통과 |
 | 제약 위반 18건(고가<저가, 음수 거래량, 가격 0, PK·UNIQUE 중복, 없는 FK, 잘못된 국가·통화·granularity·job_type, 환율 0, 종료<시작 등) 거부, 종목 삭제 시 CASCADE | `test_constraints_reject_bad_rows`, `test_delete_cascades` 통과 |
+| Stage 2 제약 위반 8건(관심종목 중복, 없는 사용자 FK, 시드 0, 포트폴리오 이름 중복, 수량 0, 담은 가격 0, 항목 종목 중복, 담긴 종목 삭제 RESTRICT) 거부, 사용자 삭제 시 CASCADE·`updated_at` 트리거 | `test_constraints_reject_bad_rows`(26건), `test_user_delete_cascades_and_updated_at_trigger` 통과 |
 | 같은 데이터 재적재 시 행 수 불변(upsert) | `test_ingest.py`의 샘플·전체 재적재 테스트 통과 |
 | 실제 수집 적재 (2026-10-13, 개발 DB) | 25종목 `daily_prices` 12,276행, 지수 10개 4,960행, USD/KRW DAILY 516행, `ingestion_logs` 성공 41 / 실패 0 |
 
 ## 8. 이후 단계에서 채울 절
 
-- 사용자·관심종목·포트폴리오 테이블, `updated_at` 트리거, 의도적 비정규화(`portfolio_items.ref_*`) — Stage 2
 - 재무제표·공시 테이블, `valuation_snapshots` 수집 — Stage 3
 - 매력도·비교군·섹터 관련 테이블/컬럼, `v_stock_metrics`, 마이그레이션 파일 — Stage 4 이후
 - 인덱스 전후 `EXPLAIN (ANALYZE)` 비교, 분석 쿼리와 SQL 요소 정리 — Stage 5
