@@ -126,14 +126,12 @@ class IngestionLog(Base):
     finished_at: Mapped[datetime | None] = mapped_column()
 
 
-# ── [S2-D] 사용자·관심종목·모의 포트폴리오 ── (updated_at은 DB 트리거 set_updated_at이 갱신한다)
+# ── [S2-D] 사용자·관심종목·모의 포트폴리오 ── (updated_at은 DB 트리거 set_updated_at이 갱신한다. watchlist의 memo·target_price·updated_at은 Stage 5)
 class User(Base):
     __tablename__ = "users"
     user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    username: Mapped[str] = mapped_column(String(32), unique=True)
-    display_name: Mapped[str] = mapped_column(String(64))
+    nickname: Mapped[str] = mapped_column(String(50), unique=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 class WatchlistItem(Base):
@@ -142,6 +140,7 @@ class WatchlistItem(Base):
     stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
     sort_order: Mapped[int] = mapped_column(Integer, server_default="0")
     added_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    stock: Mapped[Stock] = relationship(lazy="joined")
 
 
 class Portfolio(Base):

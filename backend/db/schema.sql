@@ -149,19 +149,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 사용자: 인증 없는 단일 데모 사용자(username='demo') 모드. 그래도 user_id FK를 두어 다중 사용자로 확장 가능하게 한다
+-- 사용자: 인증 없음. 기본 사용자 1명(demo)은 load_master가 시드한다(get_current_user_id = 설정 DEFAULT_USER_ID). 2차에서 로그인으로 대체
 CREATE TABLE users (
-  user_id      SERIAL PRIMARY KEY,
-  username     VARCHAR(32)  NOT NULL UNIQUE,
-  display_name VARCHAR(64)  NOT NULL,
-  created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
+  user_id    SERIAL PRIMARY KEY,
+  nickname   VARCHAR(50) NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON users
-  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
--- 데모 사용자 1명 (get_current_user_id가 username으로 찾는다). seed-demo가 관심종목·포트폴리오를 채운다
-INSERT INTO users (username, display_name) VALUES ('demo', '데모 사용자');
 
 -- 관심종목: 사용자 ↔ 종목 N:M 교차 테이블 + 정렬 순서. 메모·목표가는 Stage 5에서 컬럼 추가
 CREATE TABLE watchlist_items (
