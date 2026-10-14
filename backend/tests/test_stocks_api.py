@@ -1,27 +1,17 @@
 """종목·시장 조회 API: 리스트(정렬·필터·검색·페이지), 상세, 캔들, 경쟁 그룹, 지수, 환율.
 
 데이터는 conftest의 고정 픽스처를 쓰고(기준일 D = today - 4일), 필요한 경우에만 테스트 안에서 행을 추가·수정한다.
-TODO(선행 머지 후 확인): stocks.py가 core/errors.py의 Unprocessable(D 추가 예정)을 import한다.
-  D가 추가하기 전에는 앱이 시작되지 않아 이 파일(과 다른 모든 테스트)이 실패한다.
 """
 from datetime import timedelta
 
 import pytest
 from sqlalchemy import text
 
-from app.core.config import ROOT_DIR
 from tests.conftest import D, DAYS
 
 API = "/api/v1"
 LIST_KEYS = {"rank", "stock_id", "market", "country", "currency", "ticker", "name", "name_en", "as_of",
              "close", "change", "change_rate", "volume", "market_cap", "market_cap_krw"}
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _views(engine):
-    """TODO(선행 머지 후 제거): D가 conftest.apply_schema에 views.sql을 추가하면 이 픽스처는 필요 없다. (CREATE OR REPLACE라 반복해도 안전)"""
-    with engine.begin() as conn:
-        conn.connection.driver_connection.execute((ROOT_DIR / "db" / "views.sql").read_text(encoding="utf-8"))
 
 
 def get(client, path):
