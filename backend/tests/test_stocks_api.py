@@ -1,4 +1,4 @@
-"""종목·시장 조회 API: 리스트(정렬·필터·검색·페이지), 상세, 캔들, 경쟁 그룹, 지수, 환율.
+"""종목·시장 조회 API: 리스트(정렬·필터·검색·페이지·is_watched), 상세, 캔들, 경쟁 그룹, 지수, 환율.
 
 데이터는 conftest의 고정 픽스처를 쓰고(기준일 D = today - 4일), 필요한 경우에만 테스트 안에서 행을 추가·수정한다.
 """
@@ -11,7 +11,7 @@ from tests.conftest import D, DAYS
 
 API = "/api/v1"
 LIST_KEYS = {"rank", "stock_id", "market", "country", "currency", "ticker", "name", "name_en", "as_of",
-             "close", "change", "change_rate", "volume", "market_cap", "market_cap_krw"}
+             "close", "change", "change_rate", "volume", "market_cap", "market_cap_krw", "is_watched"}
 
 
 def get(client, path):
@@ -45,6 +45,17 @@ def test_list_default_is_market_cap_in_krw_desc(client):
     assert b["sort"] == "market_cap" and b["fx_rate_at"] is not None
 
 
+def test_is_watched_flag(client, engine, as_user):
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO watchlist_items (user_id, stock_id) VALUES (1, 3)"))
+    items = {x["ticker"]: x["is_watched"] for x in client.get(f"{API}/stocks").json()["items"]}
+    assert items == {"AAPL": True, "NVDA": False, "005930": False, "000660": False}
+    as_user(2)
+    other = {x["ticker"]: x["is_watched"] for x in client.get(f"{API}/stocks").json()["items"]}
+    assert not any(other.values())
+    assert client.get(f"{API}/stocks/NASDAQ/AAPL").json()["is_watched"] is False
+
+
 def test_list_ascending(client):
     r, b = get(client, "/stocks?order=asc")
     assert tickers(b) == ["000660", "005930", "NVDA", "AAPL"] and b["order"] == "asc"
@@ -53,7 +64,7 @@ def test_list_ascending(client):
 def test_list_item_shape_and_change_rate(client):
     r, b = get(client, "/stocks?country=KR&sort=volume&order=asc&limit=1")
     item = b["items"][0]                                             # 거래량 오름차순 첫 줄 = 삼성전자
-    assert set(item) == LIST_KEYS                                    # 매력도(score)·관심(is_watched) 칸은 Stage 1에 없다
+    assert set(item) == LIST_KEYS                                    # 매력도(score) 칸은 아직 없다
     assert item["ticker"] == "005930" and item["close"] == 70000 and item["change"] == 1000
     assert item["change_rate"] == pytest.approx(0.014493)            # 1000 / 69000
     assert item["as_of"] == D.isoformat() and item["name_en"] == "Samsung Electronics"
@@ -156,7 +167,7 @@ def test_detail_krw_stock(client):
     assert b["market_cap_krw"] == 400_000_000_000_000 and b["close_krw"] == 70000
     assert b["fx_rate"] is None and b["fx_rate_at"] is None and b["fx_stale"] is False
     assert b["groups"] == [{"group_id": 1, "name": "반도체"}]
-    assert "score" not in b and "is_watched" not in b and "preset" not in b
+    assert "score" not in b and "preset" not in b and b["is_watched"] is False
 
 
 def test_detail_usd_stock_converts_to_krw(client):

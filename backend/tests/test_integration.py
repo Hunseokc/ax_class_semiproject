@@ -51,13 +51,15 @@ def test_user_journey_across_screens(client):
     assert {g["name"] for g in client.get(f"{API}/peer-groups").json()["groups"]} == {"반도체", "빅테크"}
     assert "NVDA" in {x["ticker"] for x in client.get(f"{API}/stocks").json()["items"]}
 
-    # ★ 추가 → 홈 카드에 표시
+    # ★ 추가 → is_watched 반영 → 홈 카드에 표시
     assert client.post(f"{API}/watchlist", json={"market": "NASDAQ", "ticker": "NVDA"}).status_code == 201
+    nvda = next(x for x in client.get(f"{API}/stocks").json()["items"] if x["ticker"] == "NVDA")
+    assert nvda["is_watched"] is True
     assert [c["ticker"] for c in client.get(f"{API}/watchlist").json()["items"]] == ["NVDA"]
 
     # 종목 상세: 상세·캔들
     base = f"{API}/stocks/NASDAQ/NVDA"
-    assert client.get(base).json()["ticker"] == "NVDA"
+    assert client.get(base).json()["is_watched"] is True
     for sub in ("/candles?range=1m",):
         assert client.get(base + sub).status_code == 200, sub
 
