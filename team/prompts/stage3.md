@@ -103,7 +103,7 @@
 [이번 단계] Stage 3 — 실데이터 화면
 [내 파트] api.js 확장 → 상세 재무 추이 → 상세 최근 공시 → 사이드바 갱신 상태 → stale 표시
 [브랜치] feat/s3-a-financial-screens
-[참조 원본] ../ax_class_semiproject/frontend/js/pages/stock.js(재무·공시 부분), js/components/sidebar.js, docs/screenshots/{03_stock_detail,04_stock_detail_us}.png, docs/06 3-1 refresh·3-2 (읽기 전용)
+[참조 원본] ../ax_class_semiproject/frontend/js/pages/stock.js(재무·공시 부분), js/components/sidebar.js, docs/screenshots/{03_stock_detail,04_stock_detail_us}.png, docs/06 3-1 refresh·3-2 (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S3-A] 구역: getFinancials·getDisclosures·getRefreshStatus·postRefresh

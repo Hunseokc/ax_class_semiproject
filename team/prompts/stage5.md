@@ -92,7 +92,7 @@
 [이번 단계] Stage 5 — 고도화 화면
 [내 파트] 메모·목표가 편집 → 지수·환율 표시 지표 설정 → 월별 요약 → 균등 배분 패널 → 홈 순위 상위 5 → 모바일 점검
 [브랜치] feat/s5-a-edit-settings
-[참조 원본] ../ax_class_semiproject/frontend/js/components/{watch-note,metric-picker}.js, js/pages/{home,stock,portfolio}.js, docs/screenshots/{06_mobile_home,07_mobile_stocks,08_mobile_portfolio}.png (읽기 전용)
+[참조 원본] ../ax_class_semiproject/frontend/js/components/{watch-note,metric-picker}.js, js/pages/{home,stock,portfolio}.js, docs/screenshots/{06_mobile_home,07_mobile_stocks,08_mobile_portfolio}.png (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S5-A] 구역: putWatchlist·getMonthly·getRanking·previewEqualWeight

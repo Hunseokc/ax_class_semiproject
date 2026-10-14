@@ -85,10 +85,10 @@
 
 ```
 [역할] 너는 StockMind 팀 프로젝트에서 팀원 A(프론트엔드·사용자 경험, 주니어)의 페어 프로그래머다. 레포 루트 CLAUDE.md의 규칙을 반드시 따른다.
-[이번 단계] Stage 6 — 홈 대시보드 개편. 원본 최종 홈 화면(docs/screenshots/01_home.png)과 같아지는 것이 목표다.
+[이번 단계] Stage 6 — 홈 대시보드 개편. 원본 최종 홈 화면(docs/screenshots/01_home.png)의 기능(위젯 구성)을 갖추는 것이 목표다. 배치·디자인은 참고하되 A가 정해도 된다.
 [내 파트] 검색 컴포넌트 → 홈 레이아웃 2열 → 관심종목 컴팩트/카드 → 섹터 히트맵 → 시장 심리 지수 → 순위 탭 → 지수 카드 다듬기
 [브랜치] feat/s6-a-home-redesign
-[참조 원본] ../ax_class_semiproject/frontend/js/components/search.js, js/pages/home.js, index.html, css/pages.css, docs/screenshots/{01_home,06_mobile_home}.png (읽기 전용)
+[참조 원본] ../ax_class_semiproject/frontend/js/components/search.js, js/pages/home.js, index.html, css/pages.css, docs/screenshots/{01_home,06_mobile_home}.png (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S6-A] 구역: searchStocks·getHomeRanking·getSectors·getSentiment
@@ -102,7 +102,7 @@
 
 [파트별 확인 — 계획표의 "파트별 확인 지점"으로 그대로 쓴다. 파일마다 만든 직후 돌려 보고(CLAUDE.md 3절 ③), 파트가 끝날 때마다 실제로 실행해서 "여기까지 만든 것"을 보여 주고 아주 쉽게 설명한다(3-1)]
 파트 1 (1~2번 api.js·상단 검색) → 볼 것: 검색창에 '삼성' 입력 → 자동완성, 방향키·Enter 이동, listed 종목 '참고' 표시. Network 탭에서 글자마다가 아니라 멈춘 뒤 1번만 요청이 나가는 것(디바운스)을 보여 준다.
-파트 2 (3~4번 2열 배치·관심종목 컴팩트) → 볼 것: 원본 docs/screenshots/01_home.png와 나란히 놓고 같은 점·다른 점 체크. 컴팩트 ↔ 카드 전환.
+파트 2 (3~4번 2열 배치·관심종목 컴팩트) → 볼 것: 원본 docs/screenshots/01_home.png와 나란히 놓고 기능이 다 있는지 체크(배치가 다른 건 의도라면 PR "원본과 다르게 한 것"에 기록). 컴팩트 ↔ 카드 전환.
 파트 3 (5~6번 히트맵·심리 지수·순위 탭) → 볼 것: 섹터 색이 등락률과 맞는지 curl /home/sectors 값과 비교, 게이지 값, 탭 전환.
 파트 4 (7~8번 지수 카드·CSS·모바일) → 볼 것: 장 상태 배지·52주 범위, 기기 모드 390px에서 1열. 검색에서 listed 종목 클릭 → 상세 '데이터 수집 중' 안내. 화면별 스크린샷 안내.
 
