@@ -74,7 +74,7 @@ function editPortfolio(pf) {
       err.hidden = false;
       err.textContent = ex.code === "SEED_BELOW_USED"
         ? `시드를 담은 원가 합계(${krw(ex.detail.used_krw)})보다 작게 줄일 수 없습니다.`
-        : ex.code === "DUPLICATE_PORTFOLIO" ? "같은 이름의 포트폴리오가 이미 있습니다." : ex.message;
+        : ex.message;
     }
   });
 }
