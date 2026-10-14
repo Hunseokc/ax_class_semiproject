@@ -1,5 +1,5 @@
 -- =====================================================================
--- 보조 인덱스 (PK·UNIQUE가 자동 생성하는 인덱스는 제외) — Stage 1·2 테이블분
+-- 보조 인덱스 (PK·UNIQUE가 자동 생성하는 인덱스는 제외) — Stage 1~3 테이블분
 -- 각 인덱스가 받치는 조회 패턴을 주석으로 적는다.
 -- =====================================================================
 
@@ -32,4 +32,9 @@ CREATE INDEX ix_portfolio_items_stock ON portfolio_items (stock_id);
 
 -- 사용자별 포트폴리오 목록은 UNIQUE (user_id, name)이 받친다 → 별도 인덱스 만들지 않음
 
--- 이후 단계에서 추가: ix_fin_stock_type_end·ix_disclosures_stock_filed(Stage 3)
+-- ── Stage 3 ──
+-- 종목별 최신 FY 재무 N건. UNIQUE (stock_id, period_end, period_type)는 period_type 필터 후 정렬에 불리
+CREATE INDEX ix_fin_stock_type_end ON financial_statements (stock_id, period_type, period_end DESC);
+
+-- 종목별 최근 공시 N건
+CREATE INDEX ix_disclosures_stock_filed ON disclosures (stock_id, filed_at DESC);
