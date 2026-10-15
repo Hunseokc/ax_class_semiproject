@@ -76,4 +76,6 @@ class FakeFx:
 
 def make_providers(fx: FakeFx | None = None) -> Providers:
     price, index = FakePrice(), FakeIndex()
-    return Providers(kr_price=price, us_price=price, kr_index=index, us_index=index, fx=fx or FakeFx())
+    return Providers(kr_price=price, us_price=price, kr_index=index, us_index=index, fx=fx or FakeFx(),
+                     kr_valuation=None, us_valuation=None, kr_financial=None, us_financial=None,
+                     us_financial_supplement=None, kr_disclosure=None, us_disclosure=None)
