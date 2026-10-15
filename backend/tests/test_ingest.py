@@ -220,3 +220,88 @@ def test_yahoo_short_range_without_prices_is_holiday_not_failure(monkeypatch):
     assert len(calls) == 1                                               # 재시도 없음
     with pytest.raises(ProviderError):                                   # 긴 구간의 '데이터 없음'은 실패(상장폐지·심볼 오류)
         yahoo._history("AAPL", holiday - timedelta(days=30), holiday, "America/New_York")
+
+
+# ── [S3-B] 재무·공시 ──
+from app.providers.base import Disclosure, Financial
+from app.providers.dart import DartClient
+
+
+def test_dart_account_mapping_falls_back_to_account_name():
+    rows = [
+        {"sj_div": "CIS", "account_id": "-표준계정코드 미사용-", "account_nm": "Ⅰ. 영업수익", "thstrm_amount": "1,000"},
+        {"sj_div": "CIS", "account_id": "dart_OperatingIncomeLoss", "account_nm": "영업이익", "thstrm_amount": "100"},
+        {"sj_div": "CIS", "account_id": "ifrs-full_ProfitLoss", "account_nm": "당기순이익", "thstrm_amount": "80"},
+        {"sj_div": "CIS", "account_id": "ifrs-full_ProfitLossAttributableToOwnersOfParent", "account_nm": "지배", "thstrm_amount": "70"},
+        {"sj_div": "BS", "account_id": "ifrs-full_Assets", "account_nm": "자산총계", "thstrm_amount": "5000"},
+        {"sj_div": "BS", "account_id": "ifrs-full_Equity", "account_nm": "자본총계", "thstrm_amount": "2000"},
+        {"sj_div": "BS", "account_id": "x", "account_nm": "부채총계", "thstrm_amount": "3000"},
+    ]
+    vals, notes = DartClient._extract(rows, "thstrm_amount")
+    assert vals == {"revenue": Decimal(1000), "operating_income": Decimal(100), "net_income": Decimal(70),
+                    "total_assets": Decimal(5000), "total_equity": Decimal(2000), "total_debt": Decimal(3000)}
+    assert "revenue←계정명:Ⅰ. 영업수익" in notes and "total_equity←ifrs-full_Equity" in notes
+
+
+def test_merge_supplement_fills_only_missing_values():
+    sec = [Financial(date(2025, 12, 31), "FY", revenue=Decimal(100), total_debt=None, data_source="SEC")]
+    yf = [Financial(date(2025, 12, 31), "FY", revenue=Decimal(999), total_debt=Decimal(50), data_source="YFINANCE"),
+          Financial(date(2021, 12, 31), "FY", revenue=Decimal(70), data_source="YFINANCE")]
+    merged = jobs.merge_supplement(sec, yf)
+    assert [(f.period_end.year, f.data_source) for f in merged] == [(2021, "YFINANCE"), (2025, "SEC")]
+    assert merged[1].revenue == 100 and merged[1].total_debt == 50      # 주 소스 값 우선, 빈 값만 보완
+    assert "total_debt←yfinance" in merged[1].notes
+
+
+class FakeFundamentals:
+    """재무·공시 가짜 provider — 인터넷 없이 늘 같은 값을 준다. fail_for에 든 종목코드는 ProviderError."""
+
+    def __init__(self, source="DART", fail_for=()):
+        self.source, self.fail_for, self.calls = source, set(fail_for), []
+
+    def get_annual_financials(self, stock, years):
+        self.calls.append(stock.ticker)
+        if stock.ticker in self.fail_for:
+            raise ProviderError(f"{stock.ticker} 가짜 실패")
+        return [Financial(date(2024 + i, 12, 31), "FY", revenue=Decimal(100 + i), net_income=Decimal(10 + i),
+                          data_source=self.source, accounting_std="K-IFRS") for i in range(years)]
+
+    def get_disclosures(self, stock, start, end):
+        if stock.ticker in self.fail_for:
+            raise ProviderError(f"{stock.ticker} 가짜 실패")
+        return [Disclosure(rcept_no=f"{stock.ticker}-{n}", title=f"공시 {n}", report_type="정기공시",
+                           filed_at=datetime(2026, 1, 1 + n, tzinfo=timezone.utc), url=None) for n in range(3)]
+
+
+def _fundamental_providers(**kw):
+    dart, sec = FakeFundamentals("DART", **kw), FakeFundamentals("SEC")
+    return replace(make_providers(), kr_financial=dart, kr_disclosure=dart, us_financial=sec, us_disclosure=sec)
+
+
+def test_load_financials_and_disclosures_upsert_and_are_idempotent(engine):
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE stocks SET corp_code = 'C' || ticker WHERE stock_id IN (1, 2)"))
+        conn.execute(text("UPDATE stocks SET cik = '0000320193' WHERE stock_id = 3"))
+    pv = _fundamental_providers()
+    for _ in range(2):                                    # 두 번 돌려도 행 수가 같다(upsert)
+        assert jobs.load_financials(engine, pv, years=2, stock_ids=[1, 3]) == {"005930": "SUCCESS", "AAPL": "SUCCESS"}
+        assert jobs.load_disclosures(engine, pv, days=30, stock_ids=[1]) == {"005930": "SUCCESS"}
+        assert scalar(engine, "SELECT count(*) FROM financial_statements") == 4      # 2종목 × 2개년
+        assert scalar(engine, "SELECT count(*) FROM disclosures") == 3
+    assert scalar(engine, "SELECT data_source FROM financial_statements WHERE stock_id = 3 LIMIT 1") == "SEC"
+    assert scalar(engine, "SELECT count(*) FROM ingestion_logs WHERE job_type = 'FINANCIALS' AND status = 'SUCCESS'") == 4
+
+
+def test_one_stock_failure_does_not_stop_others_in_financials(engine):
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE stocks SET corp_code = 'C' || ticker WHERE stock_id IN (1, 2)"))
+    pv = _fundamental_providers(fail_for=["005930"])
+    st = jobs.load_financials(engine, pv, years=2, stock_ids=[1, 2])
+    assert st == {"005930": "FAILED", "000660": "SUCCESS"}                # 한 종목이 실패해도 나머지는 계속
+    assert scalar(engine, "SELECT count(*) FROM financial_statements WHERE stock_id = 2") == 2
+    assert scalar(engine, "SELECT count(*) FROM financial_statements WHERE stock_id = 1") == 0
+    assert "가짜 실패" in scalar(engine, "SELECT error FROM ingestion_logs WHERE job_type = 'FINANCIALS' AND status = 'FAILED'")
+    # corp_code가 비어 있는 종목은 외부 호출 없이 FAILED로 기록된다
+    st = jobs.load_financials(engine, pv, years=2, tickers=["AAPL"])
+    assert st == {"AAPL": "FAILED"} and "미매핑" in scalar(
+        engine, "SELECT error FROM ingestion_logs WHERE job_type = 'FINANCIALS' AND stock_id = 3 AND status = 'FAILED'")
