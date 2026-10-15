@@ -1,11 +1,13 @@
 // 주식 리스트: 시장 탭·정렬(거래량/시총)·검색·경쟁 그룹 필터
-import { getPeerGroups, getStocks } from "../api.js";
+import { PRESET_EVENT, getPeerGroups, getPreset, getStocks } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset
 import { changeHtml, dateTime, esc, initials, krw, price, stockUrl, volume } from "../format.js";
 import { mountSidebar } from "../components/sidebar.js";
 import { emptyState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";
 import { icons } from "../components/icons.js";   // [S2-A]
 import { openAddToPortfolio } from "../components/add-to-portfolio.js";   // [S2-A]
 import { starButton } from "../components/watch.js";   // [S2-A]
+import { scoreBadge } from "../components/charts.js";   // [S4-A]
+import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";   // [S4-A]
 
 mountSidebar("stocks");
 const $ = (sel) => document.querySelector(sel);
@@ -24,6 +26,8 @@ if (!state.country && state.sort === "volume") state.sort = "market_cap";
 function syncUrl() {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(state)) if (v) p.set(k, v);
+  const preset = new URLSearchParams(location.search).get("preset");   // [S4-A] 투자 성향은 api.js가 관리하는 값이라 지우지 않는다
+  if (preset) p.set("preset", preset);
   history.replaceState(null, "", `${location.pathname}${p.size ? `?${p}` : ""}`);
 }
 
@@ -63,11 +67,30 @@ getPeerGroups().then(({ groups }) => {
 }).catch(() => { groupSel.disabled = true; });
 groupSel.addEventListener("change", () => { state.group = groupSel.value; refresh(); });
 
+// ── [S4-A] 투자 성향: 대시보드·종목 상세와 같은 값 (헤더 오른쪽 펼침 메뉴) ──
+// stocks.html은 A의 담당 파일 목록에 없어서, 이 파일이 메뉴 자리를 시장 탭 옆에 만들어 붙인다
+const presetBox = h('<div id="preset-menu"></div>');
+$("#market-tabs").after(presetBox);
+let presetNames = {};
+let lastList = null;
+const renderMeta = () => {
+  if (!lastList) return;
+  const { d, sortLabel } = lastList;
+  const preset = presetNames[getPreset()] ? ` · 매력도 ${presetNames[getPreset()]} 기준` : "";
+  $("#list-meta").textContent = `${d.total}개 종목 · ${sortLabel} 순${preset} · 시총 환산 환율 기준 ${dateTime(d.fx_rate_at)}`;
+};
+loadPresets().then(({ presets }) => {
+  presetNames = Object.fromEntries(presets.map((p) => [p.code, p.name]));
+  renderMeta();
+});
+mountPresetMenu(presetBox);
+document.addEventListener(PRESET_EVENT, () => refresh());   // 성향이 바뀌면 같은 조건으로 다시 조회
+
 // ---------------------------------------------------------------- 리스트
 function stockRow(s) {
   const li = h(`<li class="stock-row">
       <span class="rank">${s.rank}</span>
-      <a class="stock-row__name" href="${stockUrl(s.market, s.ticker)}">
+      <a class="stock-row__name" href="${stockUrl(s.market, s.ticker)}?preset=${encodeURIComponent(getPreset())}">
         <span class="avatar" aria-hidden="true">${esc(initials(s.name))}</span>
         <span class="row__main"><span class="row__title">${esc(s.name)}</span>
           <span class="row__sub">${esc(s.ticker)} ${marketBadge(s.market, s.country)}</span></span>
@@ -75,6 +98,7 @@ function stockRow(s) {
       <span class="stock-row__price num"><strong>${price(s.close, s.currency)}</strong>${changeHtml(s.change_rate, s.country)}</span>
       <span class="stock-row__col num" data-label="거래량">${volume(s.volume)}</span>
       <span class="stock-row__col num" data-label="시총(원화)">${krw(s.market_cap_krw, { compact: true })}</span>
+      <span class="stock-row__score">${scoreBadge(s.score)}</span>
       <span class="stock-row__actions"></span>
     </li>`);
   const add = h(`<button class="btn btn--sm btn--accent" type="button" aria-label="${esc(s.name)} 포트폴리오에 담기">${icons.plus}<span>담기</span></button>`);
@@ -91,10 +115,11 @@ function refresh() {
     fetch: () => getStocks({ country: state.country, sort: state.sort, group: state.group, q: state.q }),
     isEmpty: (d) => !d.items.length,
     render: (d) => {
-      $("#list-meta").textContent = `${d.total}개 종목 · ${sortLabel} 순 · 시총 환산 환율 기준 ${dateTime(d.fx_rate_at)}`;
+      lastList = { d, sortLabel };   // [S4-A]
+      renderMeta();
       const ul = h('<ul class="list stock-list" aria-label="종목 순위"></ul>');
       ul.append(h(`<li class="stock-row stock-row--head" aria-hidden="true"><span>#</span><span>종목</span><span>현재가·등락</span>
-        <span class="stock-row__col">거래량</span><span class="stock-row__col">시총(원화)</span><span></span></li>`));
+        <span class="stock-row__col">거래량</span><span class="stock-row__col">시총(원화)</span><span>매력도</span><span></span></li>`));   // [S4-A] 매력도 열
       ul.append(...d.items.map(stockRow));
       return ul;
     },
