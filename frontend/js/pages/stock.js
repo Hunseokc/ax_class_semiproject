@@ -359,6 +359,7 @@ async function loadAnalysis() {
     analysisData = null;
     $("#score").replaceChildren(errorState(e, loadAnalysis));
   }
+  reloadFold("metrics");   // 수치 분석 칸이 펼쳐져 있으면 지금 다시, 접혀 있으면 다음에 펼칠 때
 }
 
 let presetMounted = false;   // init()이 새로고침마다 다시 돌아도 메뉴·이벤트 연결은 한 번만
@@ -369,6 +370,68 @@ async function mountPresetControl() {
   await mountPresetMenu($("#preset-menu"));
   document.addEventListener(PRESET_EVENT, loadAnalysis);
 }
+
+// ── [S4-A] 수치 분석 (접힌 '투자 지표 상세') ──
+// 복잡한 자료는 기본으로 접어 두고, 처음 펼칠 때 그린다. stock.html을 못 고쳐서 이 파일이 칸을 만들어 핵심 정보 바로 아래(재무 추이 위)에 붙인다
+const foldMetrics = h(`<details class="section card detail-section fold" id="fold-metrics">
+    <summary><h2>투자 지표 상세</h2><span class="subtle">ROE·영업이익률·기간 수익률·변동성·낙폭</span></summary>
+    <div class="fold__body"><div id="detail-metrics"></div><div id="numeric"></div></div></details>`);
+$("#key-metrics").closest("section").after(foldMetrics);
+
+// ---------------------------------------------------------------- 접힌 섹션: 처음 펼칠 때 불러온다
+const folds = {};
+function fold(name, loader) {
+  const el = $(`#fold-${name}`);
+  const f = folds[name] = { el, loader, loaded: false };
+  el.addEventListener("toggle", () => {
+    if (el.open && !f.loaded && stock) { f.loaded = true; loader(); }
+  });
+}
+/** 데이터가 바뀌었을 때: 펼쳐져 있으면 지금 다시, 접혀 있으면 다음에 펼칠 때 */
+function reloadFold(name) {
+  const f = folds[name];
+  if (f.el.open && stock) { f.loaded = true; f.loader(); } else f.loaded = false;
+}
+
+// PER·PBR은 위의 '핵심 정보'에 이미 있어서 여기서는 재무 기반 두 지표만 둔다
+function renderDetailMetrics(a) {
+  const m = a.metrics;
+  $("#detail-metrics").replaceChildren(h(`<div class="stat-grid">
+      ${stat("ROE", pct(m.roe), a.fin_period_end ? `FY ${a.fin_period_end.slice(0, 4)} · ${esc(a.accounting_std || "")}` : "재무 없음")}
+      ${stat("영업이익률", pct(m.operating_margin), "영업이익 ÷ 매출")}
+    </div>`));
+  renderNumeric(a);
+}
+
+function renderNumeric(a) {
+  const m = a.metrics;
+  const labels = ["1주", "1개월", "3개월", "6개월", "1년"];
+  const data = [m.return_1w, m.return_1m, m.return_3m, m.return_6m, m.return_1y];
+  const el = h(`<div class="numeric">
+      <h3>기간 수익률과 위험</h3>
+      <div class="chart-box chart-box--sm"><canvas role="img" aria-label="기간별 수익률 막대"></canvas></div>
+      <div class="stat-grid">
+        ${stat("연환산 변동성", pct(m.volatility_1y, { digits: 1 }), "최근 252거래일")}
+        ${stat("최대낙폭(MDD)", pct(m.max_drawdown_1y, { digits: 1 }), "최근 252거래일")}
+        ${stat("120일선 괴리율", pct(m.ma120_gap, { sign: true, digits: 1 }), m.ma120 ? `120일선 ${price(m.ma120, a.currency)}` : "")}
+        ${stat("거래량/20일 평균", m.volume_ratio_20d !== null ? `${num(m.volume_ratio_20d, 2)}배` : DASH, `최신 ${num(m.volume)}주`)}
+      </div></div>`);
+  queueMicrotask(() => draw(el.querySelector("canvas"), {
+    type: "bar",
+    data: { labels, datasets: [{ data: data.map((x) => (x === null ? null : x * 100)), backgroundColor: data.map((x) => signColor(x, stock.country)), borderRadius: 10, maxBarThickness: 44 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { x: plainAxis, y: { ...dashedAxis, ticks: { callback: (v) => `${v}%` } } },
+      plugins: { tooltip: { callbacks: { label: (ctx) => (ctx.raw === null ? "데이터 부족" : `${ctx.raw > 0 ? "+" : ""}${ctx.raw.toFixed(2)}%`) } } },
+    },
+  }));
+  $("#numeric").replaceChildren(el);
+}
+
+fold("metrics", () => {
+  if (analysisData) renderDetailMetrics(analysisData);
+  else $("#detail-metrics").replaceChildren(emptyState({ title: "지표를 아직 불러오지 못했습니다" }));
+});
 
 // ---------------------------------------------------------------- 시작
 async function init() {
