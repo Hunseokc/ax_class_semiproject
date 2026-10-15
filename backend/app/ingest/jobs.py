@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 from zoneinfo import ZoneInfo
 
@@ -13,9 +14,9 @@ from sqlalchemy import Connection, Engine, text
 
 from app.core.config import ROOT_DIR
 from app.ingest.preprocess import clean_bars, clean_fx
-from app.ingest.store import job_log, upsert
+from app.ingest.store import DART_LOCK_KEY, advisory_lock, job_log, upsert
 from app.ingest.universe import load_universe, yf_symbol
-from app.providers.base import IndexRef, StockRef
+from app.providers.base import Financial, IndexRef, ProviderError, StockRef
 from app.providers.factory import Providers
 
 log = logging.getLogger(__name__)
@@ -234,19 +235,102 @@ DISCLOSURE_DAYS = 365
 FIN_YEARS = 5
 
 
-# TODO(껍데기): B — 원본 load_financials로 교체 (지금은 아무것도 받지 않고 빈 결과)
+FIN_FIELDS = ["revenue", "operating_income", "net_income", "total_assets", "total_equity", "total_debt"]
+
+
+def merge_supplement(primary: list[Financial], supplement: list[Financial], tolerance_days: int = 7) -> list[Financial]:
+    """주 소스(SEC)의 빈 값을 보완 소스(yfinance)의 같은 결산기 값으로 채운다.
+    주 소스에 없는 결산기는 보완 소스 행을 그대로 추가한다(data_source=YFINANCE)."""
+    out = list(primary)
+    for s in supplement:
+        match = next((p for p in out if abs((p.period_end - s.period_end).days) <= tolerance_days), None)
+        if match is None:
+            out.append(s)
+            continue
+        if match is s:
+            continue
+        for f in FIN_FIELDS:
+            pv, sv = getattr(match, f), getattr(s, f)
+            if pv is None and sv is not None:
+                setattr(match, f, sv)
+                match.notes.append(f"{f}←yfinance")
+            elif f == "revenue" and pv and sv and abs(pv / sv - 1) > Decimal("0.02"):
+                match.notes.append(f"매출 SEC/yfinance 차이 {pv / sv - 1:+.1%}")
+    return sorted(out, key=lambda x: x.period_end)
+
+
 def load_financials(engine: Engine, providers: Providers, *, years: int = FIN_YEARS,
                     tickers: list[str] | None = None, stock_ids: list[int] | None = None) -> dict[str, str]:
     """FY 재무 years개년 — 국내 DART, 미국 SEC(+yfinance 보완)."""
-    return {}
+    with engine.connect() as conn:
+        refs = stock_refs(conn, tickers)
+    if stock_ids is not None:
+        refs = [r for r in refs if r.stock_id in stock_ids]
+    with advisory_lock(engine, DART_LOCK_KEY):
+        return _load_financials(engine, providers, refs, years)
 
 
-# TODO(껍데기): B — 원본 load_disclosures로 교체 (지금은 아무것도 받지 않고 빈 결과)
+def _load_financials(engine: Engine, providers: Providers, refs: list, years: int) -> dict[str, str]:
+    statuses = {}
+    for ref in refs:
+        p = providers.financial(ref.country)
+        source = p.source if p else ("DART" if ref.country == "KR" else "SEC")
+        with job_log(engine, source=source, job_type="FINANCIALS", stock_id=ref.stock_id, label=ref.ticker) as res:
+            if p is None:
+                raise ProviderError(f"{source} 설정 없음(API 키/User-Agent)")
+            if ref.country == "KR" and not ref.corp_code or ref.country == "US" and not ref.cik:
+                raise ProviderError("corp_code/CIK 미매핑 — master 먼저 실행")
+            fins = p.get_annual_financials(ref, years)
+            if ref.country == "US" and providers.us_financial_supplement:
+                try:
+                    fins = merge_supplement(fins, providers.us_financial_supplement.get_annual_financials(ref, years))
+                except ProviderError as e:
+                    res.notes.append(f"yfinance 보완 실패: {e}")
+                fins = fins[-years:]
+            with engine.begin() as conn:
+                res.rows = upsert(conn, "financial_statements", [
+                    {"stock_id": ref.stock_id, "period_end": f.period_end, "period_type": f.period_type,
+                     **{k: getattr(f, k) for k in FIN_FIELDS},
+                     "data_source": f.data_source, "accounting_std": f.accounting_std} for f in fins],
+                    ["stock_id", "period_end", "period_type"])
+            for f in fins:
+                missing = [k for k in FIN_FIELDS if getattr(f, k) is None]
+                if f.notes or missing:
+                    res.notes.append(f"{f.period_end.year}: " + ", ".join(f.notes + [f"{m} 없음" for m in missing]))
+            if len(fins) < years:
+                res.notes.append(f"FY {len(fins)}/{years}개")
+        statuses[ref.ticker] = res.status
+    return statuses
+
+
 def load_disclosures(engine: Engine, providers: Providers, *, days: int = DISCLOSURE_DAYS,
                      tickers: list[str] | None = None, today: date | None = None,
                      stock_ids: list[int] | None = None) -> dict[str, str]:
     """최근 days일 공시 — 국내 DART, 미국 SEC."""
-    return {}
+    today = today or date.today()
+    with engine.connect() as conn:
+        refs = stock_refs(conn, tickers)
+    if stock_ids is not None:
+        refs = [r for r in refs if r.stock_id in stock_ids]
+    with advisory_lock(engine, DART_LOCK_KEY):
+        return _load_disclosures(engine, providers, refs, days, today)
+
+
+def _load_disclosures(engine: Engine, providers: Providers, refs: list, days: int, today: date) -> dict[str, str]:
+    statuses = {}
+    for ref in refs:
+        p = providers.disclosure(ref.country)
+        source = p.source if p else ("DART" if ref.country == "KR" else "SEC")
+        with job_log(engine, source=source, job_type="DISCLOSURES", stock_id=ref.stock_id, label=ref.ticker) as res:
+            if p is None:
+                raise ProviderError(f"{source} 설정 없음(API 키/User-Agent)")
+            items = p.get_disclosures(ref, today - timedelta(days=days), today)
+            with engine.begin() as conn:
+                res.rows = upsert(conn, "disclosures", [
+                    {"stock_id": ref.stock_id, "rcept_no": d.rcept_no, "title": d.title, "report_type": d.report_type,
+                     "filed_at": d.filed_at, "url": d.url, "data_source": source} for d in items], ["rcept_no"])
+        statuses[ref.ticker] = res.status
+    return statuses
 
 
 # ---------------------------------------------------------------- 데모 사용자
