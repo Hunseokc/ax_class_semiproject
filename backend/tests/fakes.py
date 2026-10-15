@@ -1,6 +1,6 @@
 """테스트용 fake provider. 외부 호출 대신 고정 데이터를 돌려주고 호출 횟수·인자를 기록한다.
 
-Stage 1은 일봉·지수·환율만 있다. 밸류에이션·재무·공시·대량 조회 fake는 Stage 3에서 추가한다.
+이후 단계: 상장 목록(FakeListing)·미국 참조 데이터(FakeReference)·업종 분류·비교군 시가총액(caps)은 Stage 4~6.
 """
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from app.providers.base import Bar, FxPoint, IndexRef, StockRef, Valuation
+from app.providers.base import Bar, Disclosure, Financial, FxPoint, IndexRef, StockRef, Valuation
 from app.providers.factory import Providers
 
 SAFE_LAG = timedelta(days=2)    # 어느 시장 기준으로도 '오늘(미확정 봉)'이 되지 않도록 이틀 전까지만 돌려준다
@@ -83,8 +83,88 @@ class FakeValuation(CallLog):
                           shares_outstanding=10**9)]
 
 
-def make_providers(fx: FakeFx | None = None) -> Providers:
+class FakeFinancial(CallLog):
+    """직전 연도·그 전 연도 FY 2개. 고유번호(corp_codes)·CIK(ciks) 매핑도 흉내 낸다."""
+
+    def __init__(self, source: str):
+        super().__init__()
+        self.source = source
+
+    def get_annual_financials(self, stock: StockRef, years: int) -> list[Financial]:
+        self.record(stock.ticker, years)
+        y = date.today().year - 1
+        return [Financial(date(yy, 12, 31), "FY", revenue=Decimal(100 + i * 10), operating_income=Decimal(10),
+                          net_income=Decimal(8 + i), total_assets=Decimal(300), total_equity=Decimal(100),
+                          total_debt=Decimal(50), data_source=self.source) for i, yy in enumerate((y - 1, y))]
+
+    def corp_codes(self, codes: set[str]) -> dict[str, str]:
+        return {c: f"C{c}" for c in codes}
+
+    def ciks(self, tickers: set[str]) -> dict[str, str]:
+        return {t: f"{abs(hash(t)) % 10**10:010d}" for t in tickers}
+
+
+class FakeDisclosure(CallLog):
+    def __init__(self, source: str):
+        super().__init__()
+        self.source = source
+
+    def get_disclosures(self, stock: StockRef, start: date, end: date) -> list[Disclosure]:
+        self.record(stock.ticker, start, end)
+        return [Disclosure(rcept_no=f"{stock.ticker}-1", title="사업보고서", report_type="정기공시",
+                           filed_at=datetime.now(timezone.utc) - timedelta(days=30), url=None)]   # 재무를 받기 전에 낸 보고서
+
+
+class FakeKrBulk(CallLog):
+    """국내 날짜별 전 종목 조회. 주말은 휴장(빈 결과). override = {티커: (종가, 등락률%)}로 수정주가 이벤트를 흉내 낸다."""
+    source = "PYKRX"
+
+    def __init__(self, tickers: set[str] | None = None):
+        super().__init__()
+        self.tickers = tickers if tickers is not None else set()
+        self.override: dict[str, tuple[Decimal, Decimal]] = {}
+
+    def get_bars_by_date(self, day: date) -> dict[str, Bar]:
+        self.record("bars", day)
+        if day.weekday() >= 5:
+            return {}
+        out = {}
+        for t in self.tickers:
+            close, rate = self.override.get(t, (Decimal(105), Decimal(0)))
+            out[t] = Bar(day, close, close + 5, close - 5, close, 1000, change_rate=rate)
+        return out
+
+    def get_valuations_by_date(self, day: date) -> dict[str, Valuation]:
+        self.record("vals", day)
+        if day.weekday() >= 5:
+            return {}
+        return {t: Valuation(as_of=day, per=Decimal(10), pbr=Decimal(1), eps=Decimal(10), bps=Decimal(100),
+                             market_cap=None, shares_outstanding=10**6) for t in self.tickers}
+
+
+class FakeUsBatch(CallLog):
+    """미국 묶음 다운로드. closes = {티커: 종가}(기본 105)."""
+    source = "YFINANCE"
+
+    def __init__(self):
+        super().__init__()
+        self.closes: dict[str, Decimal] = {}
+
+    def get_daily_prices_batch(self, stocks: list[StockRef], start: date, end: date) -> dict[str, list[Bar]]:
+        self.record(tuple(s.ticker for s in stocks), start, end)
+        out = {}
+        for s in stocks:
+            c = self.closes.get(s.ticker, Decimal(105))
+            out[s.ticker] = [Bar(d, c, c + 5, c - 5, c, 1000) for d in _days(start, end) if d.weekday() < 5]
+        return out
+
+
+def make_providers(fx: FakeFx | None = None, *, with_fundamentals: bool = False) -> Providers:
     price, index, val = FakePrice(), FakeIndex(), FakeValuation()
-    return Providers(kr_price=price, us_price=price, kr_index=index, us_index=index, fx=fx or FakeFx(),
-                     kr_valuation=val, us_valuation=val, kr_financial=None, us_financial=None,
-                     us_financial_supplement=None, kr_disclosure=None, us_disclosure=None)
+    fx = fx or FakeFx()
+    fin = {"kr_financial": None, "us_financial": None, "kr_disclosure": None, "us_disclosure": None}
+    if with_fundamentals:
+        fin = {"kr_financial": FakeFinancial("DART"), "us_financial": FakeFinancial("SEC"),
+               "kr_disclosure": FakeDisclosure("DART"), "us_disclosure": FakeDisclosure("SEC")}
+    return Providers(kr_price=price, us_price=price, kr_index=index, us_index=index, fx=fx,
+                     kr_valuation=val, us_valuation=val, us_financial_supplement=None, **fin)
