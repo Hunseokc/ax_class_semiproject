@@ -1,9 +1,7 @@
 """분석 API: 종목 수치 분석·매력도, 경쟁 그룹 비교·기준일=100 차트, DB 통계.
 
-TODO(껍데기): B — 엔드포인트 본문을 원본대로 교체(queries/stats_*.sql). 주소·인자·응답 모델은 원본 그대로다.
-  /analysis·/scoring/presets·/peers·/peers/chart는 교체했다. 남은 /statistics/*는 docs/06 예시 값을 돌려준다.
-  이번 단계에서 뺀 것: 응답의 reference·reference_note(listed 참고 점수), metrics의 dps·dividend_yield,
-  통계 monthly·ranking·data-quality(Stage 5).
+Stage 4에서 뺀 것: 응답의 reference·reference_note(listed 참고 점수), metrics의 dps·dividend_yield,
+통계 monthly·ranking·data-quality(Stage 5).
 """
 from __future__ import annotations
 
@@ -309,41 +307,26 @@ def peers_chart(market: MarketPath, ticker: TickerPath, range: Literal["1m", "3m
 
 # ------------------------------------------------------------------ 통계
 @stats_router.get("/overview", summary="데이터 개요: 행 수·기간·마지막 갱신")
-def stats_overview():
-    return {"stocks": 25, "peer_groups": 8, "daily_prices": 12276, "price_from": "2024-10-07", "price_to": "2026-10-06",
-            "index_daily_prices": 2472, "fx_daily": 517, "fx_snapshots": 1, "valuation_snapshots": 3881,
-            "financial_fy": 125, "disclosures": 1349, "stock_scores": 25, "scores_as_of": "2026-10-06",
-            "last_refreshed_at": "2026-10-06T12:45:18.945590+00:00", "failed_jobs": 1}
+def stats_overview(db: Session = Depends(get_db)):
+    return dict(db.execute(sql("stats_overview")).mappings().one())
 
 
 @stats_router.get("/market-valuation", summary="시장별 평균 PER/PBR/ROE (HAVING 표본 수 이상)")
-def stats_market_valuation(min_samples: int = Query(3, ge=1, le=25)):
+def stats_market_valuation(min_samples: int = Query(3, ge=1, le=25), db: Session = Depends(get_db)):
+    p = {"min_samples": min_samples}
     return {"min_samples": min_samples,
-            "markets": [
-                {"market": "NASDAQ", "country": "US", "currency": "USD", "stocks": 9, "per_samples": 9, "avg_per": 80.1,
-                 "min_per": 17.38, "max_per": 350.68, "avg_pbr": 16.46, "avg_roe": 0.4189,
-                 "total_market_cap_krw": 36989834635994727},
-                {"market": "KOSPI", "country": "KR", "currency": "KRW", "stocks": 15, "per_samples": 12, "avg_per": 31.38,
-                 "min_per": 5.81, "max_per": 67.75, "avg_pbr": 3.51, "avg_roe": 0.1003,
-                 "total_market_cap_krw": 3391496760067950}],
-            "excluded": [{"market": "KOSDAQ", "stocks": 1}],
+            "markets": [dict(r) for r in db.execute(sql("stats_market_valuation"), p).mappings()],
+            "excluded": [dict(r) for r in db.execute(sql("stats_market_excluded"), p).mappings()],
             "note": "PER·PBR은 양수만 평균. 시총 합계는 원화 환산"}
 
 
 @stats_router.get("/peer-group-valuation", summary="경쟁 그룹별 평균·최고·최저 지표")
-def stats_peer_group_valuation():
-    return {"groups": [
-        {"group_id": 4, "group_name": "빅테크", "members": 3, "kr_members": 0, "us_members": 3, "avg_per": 29.08,
-         "min_per": 20.23, "max_per": 38.18, "avg_pbr": 19.65, "avg_roe": 0.6701, "min_roe": 0.1889, "max_roe": 1.5191,
-         "avg_operating_margin": 0.2997, "avg_revenue_yoy": 0.122, "avg_return_1y": 0.1546, "min_return_1y": 0.0235,
-         "max_return_1y": 0.2949, "total_market_cap_krw": 15358824734219305}]}
+def stats_peer_group_valuation(db: Session = Depends(get_db)):
+    return {"groups": [dict(r) for r in db.execute(sql("stats_peer_group_valuation")).mappings()]}
 
 
 @stats_router.get("/disclosure-frequency", summary="기간별 공시 빈도 (월·분기·주)")
 def stats_disclosure_frequency(period: Literal["week", "month", "quarter"] = "month",
-                               days: int = Query(365, ge=7, le=1095)):
-    return {"period": period, "days": days, "items": [
-        {"period_start": "2025-10-01", "total": 277, "dart": 245, "sec": 32, "periodic_reports": 25, "share": 0.2055,
-         "cumulative": 277},
-        {"period_start": "2026-01-01", "total": 416, "dart": 375, "sec": 41, "periodic_reports": 25, "share": 0.3086,
-         "cumulative": 693}]}
+                               days: int = Query(365, ge=7, le=1095), db: Session = Depends(get_db)):
+    rows = db.execute(sql("stats_disclosure_frequency"), {"period": period, "days": days}).mappings().all()
+    return {"period": period, "days": days, "items": [dict(r) for r in rows]}
