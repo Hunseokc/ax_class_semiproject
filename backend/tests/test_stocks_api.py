@@ -344,3 +344,53 @@ def test_openapi_lists_the_endpoints(client):
     for p in ("/stocks", "/stocks/{market}/{ticker}", "/stocks/{market}/{ticker}/candles", "/peer-groups",
               "/market/indices", "/market/fx"):
         assert API + p in paths
+
+
+# ── [S3-B] 재무·공시 ──
+def _insert_financials(engine):
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO financial_statements (stock_id, period_end, period_type, revenue, operating_income, net_income,
+                                              total_assets, total_equity, total_debt, data_source, accounting_std)
+            VALUES (1, '2023-12-31', 'FY', 800, 100, 80, 2000, 400, 900, 'DART', 'K-IFRS'),
+                   (1, '2024-12-31', 'FY', 1000, 200, 100, 2500, 500, 1000, 'DART', 'K-IFRS'),
+                   (1, '2025-12-31', 'FY', 1200, 300, 150, 3000, 0, 1200, 'DART', 'K-IFRS')"""))
+
+
+def test_financials_endpoint_returns_latest_n_oldest_first(client, engine):
+    _insert_financials(engine)
+    r, b = get(client, "/stocks/KOSPI/005930/financials?limit=2")
+    assert r.status_code == 200
+    assert set(b) == {"market", "ticker", "currency", "as_of", "items"} and b["currency"] == "KRW"
+    assert [i["period_end"] for i in b["items"]] == ["2024-12-31", "2025-12-31"]     # 최근 2개를 오래된 순으로
+    assert b["as_of"] == "2025-12-31"
+    first = b["items"][0]
+    assert first["revenue"] == 1000 and first["data_source"] == "DART" and first["accounting_std"] == "K-IFRS"
+    assert first["operating_margin"] == 0.2 and first["roe"] == 0.2              # 200/1000, 100/500
+    assert b["items"][1]["roe"] is None                                         # 자본 0 → ROE 계산 안 함
+    assert len(get(client, "/stocks/KOSPI/005930/financials")[1]["items"]) == 3   # 기본 limit 5 ≥ 3행
+
+
+def test_financials_empty_and_unknown_stock(client):
+    r, b = get(client, "/stocks/KOSPI/000660/financials")
+    assert r.status_code == 200 and b["items"] == [] and b["as_of"] is None      # 종목은 있고 데이터만 없음
+    r, b = get(client, "/stocks/KOSPI/999999/financials")
+    assert r.status_code == 404 and code(b) == "STOCK_NOT_FOUND"
+    assert get(client, "/stocks/KOSPI/005930/financials?limit=0")[0].status_code == 422
+    assert get(client, "/stocks/KOSPI/005930/disclosures?limit=51")[0].status_code == 422
+
+
+def test_disclosures_endpoint_returns_newest_first_with_limit(client, engine):
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO disclosures (stock_id, rcept_no, title, report_type, filed_at, url, data_source) VALUES
+              (1, 'r1', '오래된 공시', '정기공시', '2026-01-01T00:00:00+09', 'https://dart.example/r1', 'DART'),
+              (1, 'r2', '중간 공시',  '거래소공시', '2026-02-01T00:00:00+09', NULL, 'DART'),
+              (1, 'r3', '최신 공시',  '기타공시',   '2026-03-01T00:00:00+09', 'https://dart.example/r3', 'DART'),
+              (3, 'a1', '애플 공시',  '8-K',        '2026-03-02T00:00:00Z',   'https://sec.example/a1', 'SEC')"""))
+    r, b = get(client, "/stocks/KOSPI/005930/disclosures?limit=2")
+    assert r.status_code == 200 and set(b) == {"market", "ticker", "as_of", "items"}
+    assert [i["rcept_no"] for i in b["items"]] == ["r3", "r2"]                   # 최신순, limit 2건
+    assert set(b["items"][0]) == {"rcept_no", "title", "report_type", "filed_at", "url", "data_source"}
+    assert b["items"][1]["url"] is None and b["as_of"] == b["items"][0]["filed_at"]
+    assert [i["rcept_no"] for i in get(client, "/stocks/NASDAQ/AAPL/disclosures")[1]["items"]] == ["a1"]   # 종목별로 분리
