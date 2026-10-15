@@ -80,9 +80,9 @@
 2. backend/app/queries/analysis.sql — v_stock_metrics + stock_scores, 국가 내 RANK·PERCENT_RANK, 주 그룹 평균(peer_average)
 3. backend/app/api/deps.py — [S4-B] get_preset(없으면 422 UNKNOWN_PRESET)
 4. backend/app/api/analysis.py — router: /stocks/{m}/{t}/analysis, /peers, /peers/chart / scoring_router: /scoring/presets
-   + schemas [S4-B] 구역에 이 응답 모델, main.py [S4-B]에 router·scoring_router 등록 (등록해야 바로 curl로 돌려 볼 수 있다)
-5. backend/app/queries/peers.sql(그룹 내 RANK·AVG, 1인 그룹 처리), peers_chart.sql(기준일=100, 합집합 날짜 + 휴장 null) (+ 응답 모델)
-6. backend/app/api/analysis.py stats_router + queries: stats_overview, stats_market_valuation(+stats_market_excluded, HAVING min_samples), stats_peer_group_valuation, stats_disclosure_frequency (+ 응답 모델, main.py에 stats_router 등록)
+   (응답 모델은 원본처럼 analysis.py 안에 있다. 라우터 3개는 D가 main.py [S4]에 등록해 두었다 — 껍데기 본문을 원본대로 교체)
+5. backend/app/queries/peers.sql(그룹 내 RANK·AVG, 1인 그룹 처리), peers_chart.sql(기준일=100, 합집합 날짜 + 휴장 null)
+6. backend/app/api/analysis.py stats_router + queries: stats_overview, stats_market_valuation(+stats_market_excluded, HAVING min_samples), stats_peer_group_valuation, stats_disclosure_frequency
 7. 기존 응답에 매력도 추가 — [S4-B] 구역: stock_list.sql·stock_detail.sql·watchlist.sql에 preset별 score JOIN, /stocks·/watchlist에 preset 파라미터 (포트폴리오 summary 가중 매력도는 C에게 요청 메모)
 8. schemas [S4-B] 구역 남은 정리(공통 모델·필드 설명)
 9. backend/tests/test_analysis.py

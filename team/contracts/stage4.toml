@@ -59,6 +59,11 @@ columns = ["memo", "target_price", "updated_at"]
 until = "Stage 5-B 메모·목표가 (원본 migration 004_watchlist_memo — updated_at·트리거도 이 마이그레이션)"
 keys = ["trigger:watchlist_items:CREATE TRIGGER trg_watchlist_items_updated_at BEFORE UPDATE ON public.watchlist_items FOR EACH ROW EXECUTE FUNCTION set_updated_at()"]
 
+# ------------------------------------------------------------------ 원본과 다르게 둔 것
+[[allow]]
+keys = ["view:v_stock_metrics"]
+reason = "원본 끝 열 dps·dividend_yield(배당, migration 005)는 Stage 5+ — 그 전까지는 B가 원본으로 바꿔도 이 두 열만큼 다르다. 지금은 D 껍데기(값 일부만 채움)"
+
 # ------------------------------------------------------------------ 이번 단계에 팀원이 만드는 것
 # owner는 본문을 원본대로 쓰는 사람. D가 단계 시작 때 껍데기(TODO(껍데기))를 먼저 넣는 이름도 여기 적는다.
 [[planned]]

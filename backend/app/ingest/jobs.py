@@ -18,6 +18,7 @@ from app.ingest.store import DART_LOCK_KEY, advisory_lock, job_log, upsert
 from app.ingest.universe import load_universe, yf_symbol
 from app.providers.base import Financial, IndexRef, ProviderError, StockRef
 from app.providers.factory import Providers
+from app.services.scoring import sync_presets
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,19 @@ def init_db(engine: Engine, reset: bool = False) -> None:
                 continue
             raw.execute(path.read_text(encoding="utf-8"))
             log.info("적용: db/%s", name)
+        sync_presets(conn)
+
+
+# ── [S4-D] 마이그레이션 ──
+def migrate(engine: Engine, name: str) -> None:
+    """마이그레이션 파일 → views.sql 재적용(CREATE OR REPLACE라 멱등, 뷰에 붙인 열을 반영) → 프리셋 동기화."""
+    path = ROOT_DIR / "db" / "migrations" / f"{name}.sql"
+    with engine.begin() as conn:
+        raw = conn.connection.driver_connection
+        raw.execute(path.read_text(encoding="utf-8"))
+        raw.execute((ROOT_DIR / "db" / "views.sql").read_text(encoding="utf-8"))
+        sync_presets(conn)
+    log.info("적용: %s", path.relative_to(ROOT_DIR))
 
 
 # ---------------------------------------------------------------- 마스터

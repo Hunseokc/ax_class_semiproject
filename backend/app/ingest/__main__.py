@@ -1,6 +1,7 @@
-"""수집·적재 CLI (Stage 2).
+"""수집·적재 CLI.
 
-    python -m app.ingest init-db [--reset]   # db/schema.sql → indexes.sql → views.sql(있을 때만)
+    python -m app.ingest init-db [--reset]   # db/schema.sql → indexes.sql → views.sql(있을 때만) (+ 매력도 프리셋)
+    python -m app.ingest migrate 001_scoring_v2   # db/migrations/<이름>.sql을 기존 DB에 적용
     python -m app.ingest master --offline    # universe.yaml → markets·stocks·indices·peer_groups
     python -m app.ingest import-sample       # sample_data/*.csv → 시세·지수·환율·밸류에이션 (수집이 안 될 때 대체)
     python -m app.ingest prices [--full] [--tickers 005930 AAPL]   # 종목 일봉 (국내 pykrx, 미국 yfinance)
@@ -27,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m app.ingest")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init-db").add_argument("--reset", action="store_true", help="스키마를 지우고 다시 만든다")
+    sub.add_parser("migrate").add_argument("name", help="db/migrations/<name>.sql")
     # Stage 1에는 온라인(DART·SEC) 경로가 없어 --offline을 필수로 둔다. Stage 3에서 선택 옵션으로 바꾼다
     sub.add_parser("master").add_argument("--offline", action="store_true", required=True, help="DART/SEC 매핑 생략")
     sub.add_parser("import-sample")
@@ -47,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tickers", nargs="*")
     # ── [S3-D] 갱신 ──
     sub.add_parser("refresh")
+    # ── [S4-C] 매력도 ──
     args = ap.parse_args(argv)
 
     setup_logging(get_settings().log_level)
@@ -60,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "init-db":
         jobs.init_db(engine, reset=args.reset)
+    elif args.cmd == "migrate":
+        jobs.migrate(engine, args.name)
     elif args.cmd == "master":
         jobs.load_master(engine, offline=args.offline)
     elif args.cmd == "import-sample":
@@ -92,6 +97,7 @@ def main(argv: list[str] | None = None) -> int:
         for j in result.jobs:
             print(f"{j.job_type:<10} {j.status:<8} {j.detail or ''}")
         print("next_refresh_available_at:", result.next_refresh_available_at.isoformat())
+    # ── [S4-C] 매력도 ──
     print(f"[{args.cmd}] 완료 {time.monotonic() - t0:.1f}s")
     return 0
 
