@@ -397,7 +397,7 @@ A·B·C에게 보여주는 모든 글(계획표, 설계 설명, 코드 해설, �
    - 브랜치를 바꾼 뒤에는 **CLAUDE.md를 다시 읽고** 그 내용을 따른다 (단계마다 규칙이 갱신될 수 있다).
 4. 내 브랜치가 원격에도 있으면 `git merge origin/<내 브랜치>` (다른 PC에서 한 작업, 리뷰 반영분).
 5. `git merge origin/stage{N}` — 다른 팀원이 머지한 최신 코드를 내 브랜치에 합친다.
-6. 새로 들어온 것을 요약한다: `git diff --stat ORIG_HEAD HEAD` (합칠 게 없었으면 생략).
+6. 새로 들어온 것을 요약한다: `git diff --stat ORIG_HEAD HEAD` (합칠 게 없었으면 생략). 3번에서 브랜치를 `origin/stage{N}`에서 새로 만들었으면 `git diff --stat origin/stage{N-1} HEAD`로 본다.
    - `backend/requirements.txt`·`Dockerfile`·`compose*.yml`이 바뀌었으면: "실행 환경이 바뀌었어요. 다음 검증 때 `--build`로 다시 띄울게요." 라고 알리고 다음 검증에서 그렇게 한다.
    - `schema.sql`·`views.sql`·`sample_data/`·마이그레이션이 바뀌었으면: 다음 검증 전에 단계 문서의 적재 명령(init-db 등)을 다시 실행한다.
      - 이미 DB가 있으면 `init-db`만으로는 "이미 있는 테이블" 오류가 난다. 이때는 `init-db --reset` → `master --offline` → `import-sample` → `seed-demo` 순서로 실행한다. `--reset`은 DB를 통째로 비우므로 관심종목·포트폴리오·직접 넣은 데이터가 사라진다는 것을 한 줄로 알리고 한다. (실데이터 수집이 완성되는 Stage 3 통합 전까지는 샘플 데이터를 쓴다.)
