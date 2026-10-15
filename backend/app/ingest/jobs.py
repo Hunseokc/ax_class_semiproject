@@ -298,9 +298,7 @@ def load_financials(engine: Engine, providers: Providers, *, years: int = FIN_YE
                     tickers: list[str] | None = None, stock_ids: list[int] | None = None) -> dict[str, str]:
     """FY 재무 years개년 — 국내 DART, 미국 SEC(+yfinance 보완)."""
     with engine.connect() as conn:
-        refs = stock_refs(conn, tickers)
-    if stock_ids is not None:
-        refs = [r for r in refs if r.stock_id in stock_ids]
+        refs = stock_refs(conn, tickers, stock_ids=stock_ids)
     with advisory_lock(engine, DART_LOCK_KEY):
         return _load_financials(engine, providers, refs, years)
 
@@ -344,9 +342,7 @@ def load_disclosures(engine: Engine, providers: Providers, *, days: int = DISCLO
     """최근 days일 공시 — 국내 DART, 미국 SEC."""
     today = today or date.today()
     with engine.connect() as conn:
-        refs = stock_refs(conn, tickers)
-    if stock_ids is not None:
-        refs = [r for r in refs if r.stock_id in stock_ids]
+        refs = stock_refs(conn, tickers, stock_ids=stock_ids)
     with advisory_lock(engine, DART_LOCK_KEY):
         return _load_disclosures(engine, providers, refs, days, today)
 
