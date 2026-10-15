@@ -1,9 +1,9 @@
 // 종목 상세: 헤더(이름·가격·등락) · 가격 차트(종가 선 + 거래량 막대) · 핵심 정보(시총·PER·PBR)
-import { getCandles, getFinancials, getStock } from "../api.js";
+import { getCandles, getDisclosures, getFinancials, getStock } from "../api.js";
 import { DASH, changeHtml, date, esc, krw, num, pct, price, usd } from "../format.js";
 import { color, dashedAxis, draw, plainAxis } from "../components/charts.js";
 import { mountSidebar } from "../components/sidebar.js";
-import { emptyState, errorState, h, load, marketBadge, segmented } from "../components/ui.js";
+import { emptyState, errorState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";
 import { icons } from "../components/icons.js";   // [S2-A]
 import { openAddToPortfolio } from "../components/add-to-portfolio.js";   // [S2-A]
 import { starButton } from "../components/watch.js";   // [S2-A]
@@ -143,6 +143,33 @@ function loadFinancials() {
   });
 }
 
+// ── [S3-A] 최근 공시 ──
+const discSection = h(`<section class="section detail-section" aria-labelledby="h-disc">
+    <h2 id="h-disc">최근 공시</h2><div id="disclosures"></div></section>`);
+finSection.after(discSection);
+
+function loadDisclosures() {
+  return load($("#disclosures"), {
+    skeleton: skeleton("row", 5),
+    fetch: () => getDisclosures(MARKET, TICKER),
+    isEmpty: (d) => !d.items.length,
+    empty: emptyState({ title: "최근 공시가 없습니다" }),
+    render: (d) => {
+      const ul = h('<ul class="list card card--flush"></ul>');
+      ul.append(...d.items.map((x) => {
+        const inner = `<span class="avatar" aria-hidden="true">${x.data_source === "DART" ? "D" : "S"}</span>
+          <span class="row__main"><span class="row__title">${esc(x.title)}</span>
+            <span class="row__sub">${esc(x.report_type || "")} · ${esc(x.data_source)}${x.url ? ' <span class="sr-only">(새 창)</span>' : ""}</span></span>
+          <span class="row__value subtle num">${date(x.filed_at)}</span>`;
+        return h(`<li>${x.url   // 원문 링크가 없으면 글자만 보여 준다
+          ? `<a class="row" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+          : `<div class="row">${inner}</div>`}</li>`);
+      }));
+      return ul;
+    },
+  });
+}
+
 // ---------------------------------------------------------------- 시작
 async function init() {
   $("#head").replaceChildren(h('<div class="skeleton" style="height:120px"></div>'));
@@ -160,5 +187,6 @@ async function init() {
   renderKeyMetrics(stock);
   loadCandles();
   loadFinancials();   // [S3-A]
+  loadDisclosures();  // [S3-A]
 }
 init();
