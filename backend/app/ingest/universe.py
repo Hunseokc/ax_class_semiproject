@@ -1,12 +1,14 @@
-"""config/universe.yaml 읽기 — YAML을 불변 데이터클래스로 바꿔 돌려준다."""
+"""config/universe.yaml 읽기(불변 데이터클래스)와 DB 마스터 → Provider 참조 객체 변환."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
 
 import yaml
+from sqlalchemy import Connection, text
 
 from app.core.config import CONFIG_DIR
+from app.providers.base import IndexRef, StockRef
 
 
 @dataclass(frozen=True)
@@ -73,3 +75,28 @@ def load_universe() -> Universe:
 def yf_symbol(market: str, ticker: str) -> str:
     """yfinance 심볼: 코스피 .KS, 코스닥 .KQ, 미국은 티커 그대로."""
     return {"KOSPI": f"{ticker}.KS", "KOSDAQ": f"{ticker}.KQ"}.get(market, ticker)
+
+
+def stock_refs(conn: Connection, tickers: list[str] | None = None) -> list[StockRef]:
+    """수집 대상(활성 종목). tickers를 주면 그 종목만.
+    yfinance 심볼은 universe.yaml 값을 쓰고, 없으면 시장 규칙(.KS/.KQ)으로 만든다."""
+    where, params = "s.is_active", {}
+    if tickers:
+        where, params = "s.is_active AND s.ticker = ANY(:tickers)", {"tickers": tickers}
+    yf = {(s.market, s.ticker): s.yf_symbol for s in load_universe().stocks}
+    rows = conn.execute(text(f"""
+        SELECT s.stock_id, m.code, m.country, s.ticker, m.timezone, s.corp_code, s.cik
+        FROM stocks s JOIN markets m ON m.market_id = s.market_id
+        WHERE {where} ORDER BY s.stock_id"""), params).all()
+    return [StockRef(stock_id=r[0], market=r[1], country=r[2], ticker=r[3],
+                     yf_symbol=yf.get((r[1], r[3])) or yf_symbol(r[1], r[3]),
+                     timezone=r[4], corp_code=r[5], cik=r[6]) for r in rows]
+
+
+def index_refs(conn: Connection) -> list[IndexRef]:
+    meta = {i.code: i for i in load_universe().indices}
+    rows = conn.execute(text("""
+        SELECT i.index_id, i.code, m.country, m.timezone
+        FROM indices i JOIN markets m ON m.market_id = i.market_id ORDER BY i.display_order""")).all()
+    return [IndexRef(index_id=r[0], code=r[1], country=r[2], timezone=r[3],
+                     pykrx_code=meta[r[1]].pykrx, yf_symbol=meta[r[1]].yf_symbol) for r in rows]
