@@ -3,10 +3,12 @@
 -- 실행 순서: schema.sql → indexes.sql → views.sql
 -- 금액·가격은 모두 NUMERIC (float 사용 안 함)
 --
--- Stage 1 테이블 10개 + Stage 2 테이블 4개 + Stage 3 테이블 2개. 이후 단계 테이블·컬럼은 D가 단계 시작 시 추가해 "계약"으로 배포한다.
+-- Stage 1 테이블 10개 + Stage 2 테이블 4개 + Stage 3 테이블 2개 + Stage 4 테이블 4개. 이후 단계 테이블·컬럼은 D가 단계 시작 시 추가해 "계약"으로 배포한다.
 --   Stage 2: users, watchlist_items(memo·target_price는 Stage 5), portfolios, portfolio_items (+ updated_at 트리거)
 --   Stage 3: financial_statements, disclosures (+ ingestion_logs.job_type에 FINANCIALS·DISCLOSURES)
---   Stage 4+: 매력도·비교군·섹터 관련 테이블/컬럼
+--   Stage 4: scoring_presets, scoring_weights, stock_metric_values, stock_scores, peer_group_members.is_primary
+--            (+ ingestion_logs.job_type에 SCORES) — 기존 DB는 db/migrations/001_scoring_v2 → 002_presets
+--   Stage 4-D 비교군(coverage·detail_synced_at, BENCHMARK·HYDRATE)·Stage 5+ 섹터는 그 작업 때 추가
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -43,11 +45,14 @@ CREATE TABLE peer_groups (
 );
 
 -- 종목 ↔ 경쟁 그룹 N:M 교차 테이블 (국내·해외 종목 혼합 가능)
+-- is_primary: 매력도 섹터 중립화에 쓰는 주 그룹. 종목당 최대 1개(부분 UNIQUE 인덱스) — Stage 4 (migration 001)
 CREATE TABLE peer_group_members (
-  group_id   INT NOT NULL REFERENCES peer_groups ON DELETE CASCADE,
-  stock_id   INT NOT NULL REFERENCES stocks      ON DELETE CASCADE,
+  group_id   INT     NOT NULL REFERENCES peer_groups ON DELETE CASCADE,
+  stock_id   INT     NOT NULL REFERENCES stocks      ON DELETE CASCADE,
+  is_primary BOOLEAN NOT NULL DEFAULT false,
   PRIMARY KEY (group_id, stock_id)
 );
+CREATE UNIQUE INDEX ux_pgm_primary ON peer_group_members (stock_id) WHERE is_primary;
 
 -- ---------------------------------------------------------------------
 -- 2. 종목별 시계열
@@ -119,12 +124,12 @@ CREATE TABLE fx_rates (
 -- ---------------------------------------------------------------------
 
 -- 수집·갱신 작업 로그. 갱신 TTL 판단(작업별 마지막 성공 시각)에도 사용
--- job_type은 Stage 3까지의 작업만 허용한다. 이후 단계에서 SCORES·BENCHMARK 등을 추가한다.
+-- job_type은 Stage 4 매력도(SCORES)까지의 작업만 허용한다. BENCHMARK·HYDRATE(Stage 4-D 비교군)·SECTORS_*는 그 작업 때 추가한다.
 CREATE TABLE ingestion_logs (
   log_id      SERIAL PRIMARY KEY,
   source      VARCHAR(20) NOT NULL,                              -- PYKRX / YFINANCE / DART / SEC / INTERNAL
   job_type    VARCHAR(30) NOT NULL CHECK (job_type IN
-                ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','MASTER')),
+                ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','SCORES','MASTER')),
   stock_id    INT         REFERENCES stocks ON DELETE SET NULL,  -- 종목 단위 작업일 때만
   status      VARCHAR(10) NOT NULL CHECK (status IN ('SUCCESS','FAILED','SKIPPED')),
   rows_loaded INT         NOT NULL DEFAULT 0 CHECK (rows_loaded >= 0),
@@ -235,4 +240,61 @@ CREATE TABLE disclosures (
   filed_at      TIMESTAMPTZ  NOT NULL,
   url           TEXT,
   data_source   VARCHAR(20)  NOT NULL CHECK (data_source IN ('DART','SEC'))
+);
+
+-- =====================================================================
+-- Stage 4 — 매력도 (D가 단계 시작 시 배포한 계약, 원본 migration 001_scoring_v2·002_presets)
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 7. 매력도 설정·파생 결과
+-- ---------------------------------------------------------------------
+
+-- 매력도 가중치 프리셋 (config/scoring.yaml에서 적재). "프리셋별 가중치 합 = 1"은 행 간 제약이라
+--   CHECK로 걸 수 없다 → 적재 시 검증(app/services/scoring.py)하고 테스트로 보장한다.
+CREATE TABLE scoring_presets (
+  preset_id   SMALLSERIAL PRIMARY KEY,
+  code        VARCHAR(20) NOT NULL UNIQUE,                       -- aggressive / growth / balanced / value
+  name        VARCHAR(50) NOT NULL,
+  description TEXT,
+  sort_order  SMALLINT    NOT NULL DEFAULT 0                     -- 화면 표시 순서 (위험 → 성장 → 균형 → 가치)
+);
+
+CREATE TABLE scoring_weights (
+  preset_id SMALLINT     NOT NULL REFERENCES scoring_presets ON DELETE CASCADE,
+  factor    VARCHAR(12)  NOT NULL CHECK (factor IN ('value','quality','growth','safety','momentum')),
+  weight    NUMERIC(4,3) NOT NULL CHECK (weight >= 0 AND weight <= 1),
+  PRIMARY KEY (preset_id, factor)
+);
+
+-- [의도적 비정규화 2] 매력도 계산 결과를 as_of별로 저장하는 재생성 가능한 파생 테이블 2개.
+--   국가별 중앙값·MAD·그룹 평균을 화면 요청마다 다시 계산하지 않고, 점수의 근거(지표 원값·Z)를 설명하기 위해 저장한다.
+--   같은 as_of는 DELETE 후 INSERT로 재생성한다(python -m app.ingest scores, POST /market/refresh).
+-- 지표별 원값과 Z — 프리셋과 무관하므로 as_of당 한 번만 계산
+CREATE TABLE stock_metric_values (
+  stock_id  INT          NOT NULL REFERENCES stocks ON DELETE CASCADE,
+  as_of     DATE         NOT NULL,
+  metric    VARCHAR(24)  NOT NULL,                                -- earnings_yield, book_yield, roe …
+  factor    VARCHAR(12)  NOT NULL CHECK (factor IN ('value','quality','growth','safety','momentum')),
+  raw_value NUMERIC,                                              -- 계산 불가면 NULL
+  z_raw     NUMERIC(8,4),                                         -- 국가 내 로버스트 Z(방향 반영, ±3 클리핑)
+  z_adj     NUMERIC(8,4),                                         -- 주 그룹 축소 추정으로 섹터 중립화한 Z
+  PRIMARY KEY (stock_id, as_of, metric)
+);
+
+-- 프리셋별 팩터 점수·종합 점수
+CREATE TABLE stock_scores (
+  stock_id        INT          NOT NULL REFERENCES stocks ON DELETE CASCADE,
+  as_of           DATE         NOT NULL,
+  preset_id       SMALLINT     NOT NULL REFERENCES scoring_presets,
+  value_score     NUMERIC(8,4),                                   -- 팩터 점수 = 유효 지표 z_adj 평균 (Z 단위)
+  quality_score   NUMERIC(8,4),
+  growth_score    NUMERIC(8,4),
+  safety_score    NUMERIC(8,4),
+  momentum_score  NUMERIC(8,4),
+  composite       NUMERIC(8,4),                                   -- 유효 팩터 가중 평균(가중치 재정규화), 유효 팩터 < 3이면 NULL
+  score           NUMERIC(5,2) CHECK (score BETWEEN 0 AND 100),   -- 100·Φ(국가 내 표준화한 composite)
+  factor_coverage SMALLINT     NOT NULL CHECK (factor_coverage BETWEEN 0 AND 5),
+  data_quality    JSONB        NOT NULL DEFAULT '{}',             -- 계산 불가 지표·팩터와 사유
+  PRIMARY KEY (stock_id, as_of, preset_id)
 );

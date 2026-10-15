@@ -2,6 +2,7 @@
 
 > **상태: Stage 2 확정.** Stage 1 테이블 10개 + Stage 2 사용자 테이블 4개, VIEW 2개, 보조 인덱스 8개, 트리거 2개를 실제 DDL 기준으로 담았다. 이후 단계에서 D가 테이블을 추가할 때 이 문서의 해당 절을 함께 확장한다.
 > (Stage 3: 재무·공시·밸류에이션 수집 / Stage 4+: 매력도·비교군·섹터 — 의도적 비정규화 5-2, `v_stock_metrics`, EXPLAIN 비교도 그때 채운다. `watchlist_items`의 메모·목표가·`updated_at`은 Stage 5.)
+> **Stage 4 계약**(매력도 테이블 4개, `peer_group_members.is_primary`, `v_stock_metrics` 컬럼, 마이그레이션 001·002)은 9절에 모았다. 1~8절의 Stage 4 반영은 단계 통합 때 한다.
 
 - DDL 원문: `backend/db/schema.sql` → `backend/db/indexes.sql` → `backend/db/views.sql` 순서로 실행 (`python -m app.ingest init-db`가 같은 순서로 적용)
 - DBMS: PostgreSQL 16 / 테이블 14개, VIEW 2개, 보조 인덱스 8개, 트리거 2개(updated_at 자동 갱신 — portfolios·portfolio_items)
@@ -204,6 +205,9 @@ erDiagram
 |---|---|---|---|---|---|
 | group_id | integer | N |  | PK, FK→peer_groups (CASCADE) | 경쟁 그룹 ID |
 | stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
+| is_primary | boolean | N | false |  | 매력도 섹터 중립화의 주 그룹 여부 (Stage 4) |
+
+제약(Stage 4): 부분 UNIQUE 인덱스 `CREATE UNIQUE INDEX ux_pgm_primary ON peer_group_members (stock_id) WHERE is_primary` — 종목당 주 그룹 최대 1개
 
 #### `daily_prices`
 
@@ -388,5 +392,137 @@ Stage 1에는 SNAPSHOT을 쓰는 환율 서비스가 없으므로(Stage 3) `v_fx
 ## 8. 이후 단계에서 채울 절
 
 - 재무제표·공시 테이블, `valuation_snapshots` 수집 — Stage 3
-- 매력도·비교군·섹터 관련 테이블/컬럼, `v_stock_metrics`, 마이그레이션 파일 — Stage 4 이후
+- 매력도 테이블·`v_stock_metrics`·마이그레이션 001·002 — Stage 4 (계약은 9절) / 비교군(`stocks.coverage`·`detail_synced_at`, 003) — Stage 4-D / 섹터 — Stage 5+
 - 인덱스 전후 `EXPLAIN (ANALYZE)` 비교, 분석 쿼리와 SQL 요소 정리 — Stage 5
+
+## 9. Stage 4 — 매력도 (D 계약)
+
+계산 정의는 `docs/09_매력도_점수_정의서.md`(C). 새로 만드는 DB는 `schema.sql`에 반영되어 있고, 이미 적재된 DB는 마이그레이션으로 바꾼다.
+
+### 9-1. 마이그레이션
+| 파일 | 내용 | 실행 |
+|---|---|---|
+| `backend/db/migrations/001_scoring_v2.sql` | `peer_group_members.is_primary` + `ux_pgm_primary`, `scoring_presets`·`scoring_weights`·`stock_metric_values`·`stock_scores` 생성 | `python -m app.ingest migrate 001_scoring_v2` |
+| `backend/db/migrations/002_presets.sql` | 프리셋 4종(aggressive·growth·balanced·value)과 가중치 20행 — 멱등 | `python -m app.ingest migrate 002_presets` |
+
+둘 다 적용한 뒤 `python -m app.ingest scores`로 점수를 다시 만든다. `ingestion_logs.job_type` CHECK에는 `SCORES`가 추가된다(`schema.sql`). 마이그레이션 파일은 원본 그대로라 이 CHECK는 바꾸지 않으므로, 기존 DB는 `init-db --reset` → `master --offline` → `import-sample` → `seed-demo`로 다시 만든다(CLAUDE.md 10절).
+
+### 9-2. 테이블 정의서
+
+#### `scoring_presets`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| preset_id | smallint | N | 자동 증가 | PK | 프리셋 ID |
+| code | character varying(20) | N |  | UQ | aggressive / growth / balanced / value |
+| name | character varying(50) | N |  |  | 화면 이름 (위험·성장·균형·가치) |
+| description | text | Y |  |  | 설명 |
+| sort_order | smallint | N | 0 |  | 화면 표시 순서 (위험 1 → 가치 4) |
+
+`backend/config/scoring.yaml`에서 적재(init-db·migrate·scores 실행 시). 프리셋별 가중치 합 = 1은 행 간 제약이라 적재 시 검증한다.
+
+#### `scoring_weights`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| preset_id | smallint | N |  | PK, FK→scoring_presets (CASCADE) | 프리셋 ID |
+| factor | character varying(12) | N |  | PK | value / quality / growth / safety / momentum |
+| weight | numeric(4,3) | N |  |  | 가중치 0~1 |
+
+제약: `CHECK (((factor)::text = ANY ((ARRAY['value'::character varying, 'quality'::character varying, 'growth'::character varying, 'safety'::character varying, 'momentum'::character varying])::text[])))` / `CHECK (((weight >= (0)::numeric) AND (weight <= (1)::numeric)))`
+
+#### `stock_metric_values`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
+| as_of | date | N |  | PK | 기준일 |
+| metric | character varying(24) | N |  | PK | 지표 (earnings_yield, book_yield, roe … 9종, docs/09 2절) |
+| factor | character varying(12) | N |  |  | 소속 팩터 |
+| raw_value | numeric | Y |  |  | 지표 원값, 계산 불가면 NULL |
+| z_raw | numeric(8,4) | Y |  |  | 국가 내 로버스트 Z(방향 반영, ±3 클리핑) |
+| z_adj | numeric(8,4) | Y |  |  | 주 그룹 축소 추정으로 섹터 중립화한 Z |
+
+제약: `CHECK (((factor)::text = ANY ((ARRAY['value'::character varying, 'quality'::character varying, 'growth'::character varying, 'safety'::character varying, 'momentum'::character varying])::text[])))`
+
+#### `stock_scores`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
+| as_of | date | N |  | PK | 기준일 |
+| preset_id | smallint | N |  | PK, FK→scoring_presets | 프리셋 ID |
+| value_score | numeric(8,4) | Y |  |  | 가치 팩터 점수(유효 지표 z_adj 평균, Z 단위) |
+| quality_score | numeric(8,4) | Y |  |  | 퀄리티 팩터 점수 |
+| growth_score | numeric(8,4) | Y |  |  | 성장 팩터 점수 |
+| safety_score | numeric(8,4) | Y |  |  | 안정성 팩터 점수 |
+| momentum_score | numeric(8,4) | Y |  |  | 모멘텀 팩터 점수 |
+| composite | numeric(8,4) | Y |  |  | 유효 팩터 가중 평균(재정규화), 유효 팩터 < 3이면 NULL |
+| score | numeric(5,2) | Y |  |  | 0~100 = 100·Φ(국가 내 표준화한 composite) |
+| factor_coverage | smallint | N |  |  | 유효 팩터 수 0~5 |
+| data_quality | jsonb | N | '{}'::jsonb |  | 계산 불가 지표·팩터와 사유, 대체 계산 메모 |
+
+제약: `CHECK (((factor_coverage >= 0) AND (factor_coverage <= 5)))` / `CHECK (((score >= (0)::numeric) AND (score <= (100)::numeric)))`
+
+### 9-3. 의도적 비정규화 — `stock_metric_values`·`stock_scores` (매력도 파생 테이블)
+- 형태: `v_stock_metrics`·`valuation_snapshots`·`financial_statements`·`daily_prices`에서 계산할 수 있는 지표 원값·Z(`stock_metric_values`)와 프리셋별 점수(`stock_scores`)를 as_of별로 저장한다.
+- 사유: 매력도는 같은 시장 전체의 중앙값·MAD, 주 그룹 평균, 국가 내 재표준화를 거치는 상대 점수라서 종목 1개를 보여 줘도 유니버스 전체를 계산해야 한다. 리스트·관심종목·포트폴리오 요약에서 반복 조회되고, 상세 화면은 점수의 근거(지표 원값·z_raw·z_adj)를 설명해야 하므로 결과를 저장한다. 지표 Z는 프리셋과 무관해 한 번만 저장하고, 프리셋별로는 가중합·변환 결과만 저장한다.
+- 정합성: **재생성 가능한 파생 테이블**이다. `python -m app.ingest scores`·`POST /market/refresh`가 해당 `as_of`의 두 테이블을 한 트랜잭션에서 DELETE 후 INSERT로 다시 만든다. 가중치는 `scoring_weights`에서 읽으므로 점수 행이 어떤 프리셋으로 계산됐는지 `preset_id`로 추적된다.
+
+### 9-4. `v_stock_metrics` 컬럼 계약 (B가 `views.sql`에 작성, C가 입력으로 씀 — 이름·순서 변경 금지)
+종목별 최신 지표 1행. 비율은 소수(0.05 = 5%), 데이터가 부족하면 NULL. 원본의 끝 열 `dps`·`dividend_yield`(배당, migration 005)는 Stage 5+에서 붙인다(`CREATE OR REPLACE VIEW`는 끝에 붙인 열만 허용).
+
+| # | 컬럼 | 타입 | 내용 |
+|---|---|---|---|
+| 1 | stock_id | integer | 종목 ID |
+| 2 | market | varchar | 시장 코드 |
+| 3 | country | char(2) | KR / US |
+| 4 | currency | char(3) | KRW / USD |
+| 5 | as_of | date | 기준일(종목별 최신 거래일) |
+| 6 | close | numeric | 최신 종가 |
+| 7 | change_rate | numeric | 전일 대비 등락률 |
+| 8~12 | return_1w, return_1m, return_3m, return_6m, return_1y | numeric | 기간 수익률 |
+| 13 | volatility_1y | numeric | 연환산 변동성 |
+| 14 | max_drawdown_1y | numeric | 1년 최대 낙폭 |
+| 15~17 | ma20, ma60, ma120 | numeric | 이동평균 |
+| 18 | ma120_gap | numeric | 120일선 괴리율 |
+| 19~21 | high_52w, low_52w, position_52w | numeric | 52주 고가·저가·위치 |
+| 22 | volume | bigint | 최신 거래량 |
+| 23 | avg_volume_20d | numeric | 직전 20거래일 평균 거래량 |
+| 24 | volume_ratio_20d | numeric | 거래량 비율 |
+| 25 | valuation_as_of | date | 최신 밸류에이션 기준일 |
+| 26~29 | per, pbr, eps, bps | numeric | 최신 밸류에이션 |
+| 30 | market_cap | numeric | 시가총액(종목 통화) |
+| 31 | market_cap_krw | numeric | 시가총액 원화 환산 |
+| 32 | fx_usd_krw | numeric | 환산에 쓴 USD/KRW |
+| 33 | fx_rate_at | timestamptz | 환율 시각 |
+| 34 | fin_period_end | date | 최신 FY 결산일 |
+| 35 | accounting_std | varchar | 회계 기준 |
+| 36 | operating_margin | numeric | 영업이익률 |
+| 37 | roe | numeric | ROE |
+| 38 | debt_ratio | numeric | 부채비율 |
+| 39 | revenue_yoy | numeric | 매출 YoY |
+| 40 | operating_income_yoy | numeric | 영업이익 YoY |
+
+계산 규칙 (데이터 부족 시 NULL):
+| 지표 | 정의 | NULL 조건 |
+|---|---|---|
+| return_1w~1y | 최신 종가 / (기준일 − 기간 이전 가장 가까운 거래일 종가) − 1 | 해당 날짜 이전 데이터 없음 |
+| volatility_1y | 최근 252개 일수익률 `STDDEV_SAMP × √252` | 일수익률 252개 미만 |
+| max_drawdown_1y | 최근 252거래일 `MIN(close / 누적 MAX(close) − 1)` | 252거래일 미만 |
+| ma20/60/120 | 최근 N거래일 종가 평균 | N거래일 미만 |
+| ma120_gap | 종가 / ma120 − 1 | ma120 NULL |
+| high/low_52w, position_52w | 최근 1년 일중 고가 최대·저가 최소, (종가 − 저가)/(고가 − 저가) | 1년 전 데이터 없음, 고가=저가 |
+| volume_ratio_20d | 최신 거래량 / 직전 20거래일(최신일 제외) 평균 | 21거래일 미만, 평균 0 |
+| market_cap_krw | 시총 × (USD면 최신 환율, KRW면 1) | 밸류에이션 없음 |
+| operating_margin | 영업이익 / 매출 | 매출 0·NULL |
+| roe | 순이익 / 자본 | 자본 ≤ 0·NULL |
+| debt_ratio | 부채총계 / 자본 | 자본 0·NULL |
+| revenue_yoy, operating_income_yoy | (당기 − 전기) / \|전기\| | 전기 0·NULL, 직전 FY 결산일이 330~400일 전이 아님 |
+
+### 9-5. 검증
+| 검증 | 결과 |
+|---|---|
+| 원본 대비 schema·ORM·import 계약 | `python team/tools/check_contract.py 4` 통과 (차이는 `team/contracts/stage4.toml`에 적힌 것만) |
+| ORM ↔ DDL 일치, Stage 1~4 외 테이블 없음 | `test_orm_matches_schema`, `test_tables_are_stage1_to_4_only` 통과 |
+| Stage 4 제약 위반 6건(점수 101, 유효 팩터 6개, 가중치 1 초과, 없는 팩터, 프리셋 code 중복, 종목당 주 그룹 2개) 거부, 종목 삭제 시 지표값·점수 CASCADE, 프리셋 삭제 시 가중치 CASCADE | `test_constraints_reject_bad_rows`, `test_delete_cascades` 통과 |
