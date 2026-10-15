@@ -85,11 +85,14 @@ def load_master(engine: Engine, offline: bool = True) -> None:
 PRICE_HISTORY_DAYS = 730       # 약 2년 → 종목당 약 485~500봉
 
 
-def stock_refs(conn: Connection, tickers: list[str] | None = None) -> list[StockRef]:
-    """수집 대상(활성 종목). tickers를 주면 그 종목만.
+def stock_refs(conn: Connection, tickers: list[str] | None = None, *,
+               stock_ids: list[int] | None = None) -> list[StockRef]:
+    """수집 대상(활성 종목). tickers·stock_ids를 주면 그 종목만(stock_ids는 비활성 종목도 포함).
     yfinance 심볼은 universe.yaml 값을 쓰고, 없으면 시장 규칙(.KS/.KQ)으로 만든다."""
     where, params = "s.is_active", {}
-    if tickers:
+    if stock_ids:
+        where, params = "s.stock_id = ANY(:ids)", {"ids": stock_ids}
+    elif tickers:
         where, params = "s.is_active AND s.ticker = ANY(:tickers)", {"tickers": tickers}
     yf = {(s.market, s.ticker): s.yf_symbol for s in load_universe().stocks}
     rows = conn.execute(text(f"""
@@ -132,12 +135,12 @@ def _no_session(start: date, end: date) -> str | None:
 
 def load_prices(engine: Engine, providers: Providers, *, full: bool = False,
                 tickers: list[str] | None = None, today: date | None = None,
-                history_days: int = PRICE_HISTORY_DAYS) -> dict[str, str]:
+                stock_ids: list[int] | None = None, history_days: int = PRICE_HISTORY_DAYS) -> dict[str, str]:
     """종목 일봉. 기본은 증분(저장된 마지막 날짜 다음 날부터), --full이면 history_days(기본 2년) 전체 재수집."""
     today = today or date.today()
     statuses = {}
     with engine.connect() as conn:
-        refs = stock_refs(conn, tickers)
+        refs = stock_refs(conn, tickers, stock_ids=stock_ids)
         last = dict(conn.execute(text("SELECT stock_id, MAX(trade_date) FROM daily_prices GROUP BY stock_id")).all())
     for ref in refs:
         p = providers.price(ref.country)
