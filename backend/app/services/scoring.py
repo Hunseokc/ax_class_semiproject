@@ -7,7 +7,7 @@
 정의·근거는 docs/09_매력도_점수_정의서.md.
 
 TODO(껍데기): C — 계산 단계. 이름·인자·반환 타입은 원본 그대로이고 본문만 비어 있다.
-  - insert_metric_values·normalize·aggregate·compute_scores: 계산 3단계 (지금은 아무것도 쓰지 않고 0 반환)
+  - normalize·aggregate·compute_scores: 계산 2·3단계 (지금은 아무것도 쓰지 않고 0 반환)
   그동안 화면·API용 점수는 seed-demo가 넣는 시드 행(app/ingest/demo.py)이 대신한다.
 """
 from __future__ import annotations
@@ -22,6 +22,7 @@ import yaml
 from sqlalchemy import Connection, Engine, text
 
 from app.core.config import CONFIG_DIR
+from app.queries import sql
 
 SEOUL = ZoneInfo("Asia/Seoul")
 FACTORS = ("value", "quality", "growth", "safety", "momentum")
@@ -103,7 +104,16 @@ def sync_presets(conn: Connection, cfg: dict | None = None) -> None:
 # ------------------------------------------------------------------ 계산 단계
 def insert_metric_values(conn: Connection, as_of: date) -> dict[int, list[str]]:
     """1단계. 반환: 종목별 메모(대체 계산·고정 사유)."""
-    return {}
+    rows = conn.execute(sql("score_metrics")).mappings().all()
+    if rows:
+        conn.execute(text("""INSERT INTO stock_metric_values (stock_id, as_of, metric, factor, raw_value, z_raw)
+                             VALUES (:stock_id, :as_of, :metric, :factor, :raw_value, :z_fixed)"""),
+                     [{**r, "as_of": as_of} for r in rows])
+    notes: dict[int, list[str]] = {}
+    for r in rows:
+        if r["note"]:
+            notes.setdefault(r["stock_id"], []).append(f"{r['metric']}: {r['note']}")
+    return notes
 
 
 def normalize(conn: Connection, as_of: date, k: float) -> None:
