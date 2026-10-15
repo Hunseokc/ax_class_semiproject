@@ -44,7 +44,7 @@ export function mountSidebar(active) {
     const next = s?.next_refresh_available_at ? new Date(s.next_refresh_available_at) : null;
     btn.title = next && next > new Date() ? `다음 외부 갱신 가능: ${dateTime(s.next_refresh_available_at)} (그 전에는 저장된 데이터를 다시 확인만 합니다)` : "외부 데이터 갱신";
     jobs.replaceChildren(...(s?.jobs ?? []).filter((j) => JOB_STATE[j.status]).map((j) =>
-      h(`<div>${esc(JOB_LABELS[j.job_type] ?? j.job_type)} · ${JOB_STATE[j.status]}</div>`)));
+      h(`<div class="job${j.status === "STALE" ? " job--stale" : ""}">${esc(JOB_LABELS[j.job_type] ?? j.job_type)} · ${JOB_STATE[j.status]}</div>`)));
   };
   getRefreshStatus().then(show).catch(() => { label.textContent = "상태 확인 실패"; });
 
