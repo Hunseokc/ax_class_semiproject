@@ -2,7 +2,7 @@
 import { getCandles, getDisclosures, getFinancials, getStock } from "../api.js";
 import { DASH, changeHtml, date, esc, krw, num, pct, price, usd } from "../format.js";
 import { color, dashedAxis, draw, plainAxis } from "../components/charts.js";
-import { mountSidebar } from "../components/sidebar.js";
+import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
 import { emptyState, errorState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";
 import { icons } from "../components/icons.js";   // [S2-A]
 import { openAddToPortfolio } from "../components/add-to-portfolio.js";   // [S2-A]
@@ -190,3 +190,6 @@ async function init() {
   loadDisclosures();  // [S3-A]
 }
 init();
+
+// ── [S3-A] 사이드바 새로고침이 끝나면 상세 화면을 새 값으로 다시 불러온다 ──
+document.addEventListener(REFRESHED_EVENT, init);
