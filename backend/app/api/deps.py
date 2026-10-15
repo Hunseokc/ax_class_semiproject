@@ -1,11 +1,8 @@
-"""FastAPI 의존성. 테스트는 get_engine_dep를 override해 테스트 DB를 주입한다.
-
-이후 단계에서 추가: get_providers·서비스 팩토리(Stage 2~3)
-"""
+"""FastAPI 의존성. 테스트는 get_engine_dep·get_providers를 override해 테스트 DB·fake provider를 주입한다."""
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import date
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends, Path
@@ -15,10 +12,11 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.db import get_engine, session_factory
 from app.core.errors import NotFound
-from app.providers.base import FxPoint, ProviderError
+from app.providers.factory import Providers, default_providers
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN
 from app.services.fx import FxService
 from app.services.portfolio import PortfolioService
+from app.services.refresh import RefreshService
 
 
 def get_engine_dep() -> Engine:
@@ -60,25 +58,27 @@ def get_current_user_id() -> int:
 IdPath = Annotated[int, Path(ge=1, le=INT_MAX, description="1 이상 PostgreSQL INT 범위")]
 
 
+# ── [S3-D] 외부 소스 provider ──
+@lru_cache
+def _providers() -> Providers:
+    return default_providers()
+
+
+def get_providers() -> Providers:
+    return _providers()
+
+
 # ── [S2-C] 환율·포트폴리오 서비스 ──
-class _UnavailableFxProvider:
-    """항상 실패하는 환율 provider. Stage 2에는 실제 환율 소스 연결이 없어 FxService가 저장된 마지막 값(+stale)으로 동작한다.
-
-    TODO(Stage 3): get_providers().fx 주입으로 교체하고 이 클래스를 제거한다.
-    """
-    source = "INTERNAL"
-
-    def get_daily_rates(self, start: date, end: date) -> list[FxPoint]:
-        raise ProviderError("환율 provider가 아직 연결되지 않았습니다 (Stage 3)")
-
-    def get_current_rate(self) -> FxPoint:
-        raise ProviderError("환율 provider가 아직 연결되지 않았습니다 (Stage 3)")
-
-
-def get_fx_service(engine: Engine = Depends(get_engine_dep)) -> FxService:
-    return FxService(engine, _UnavailableFxProvider(), get_settings().refresh_ttl_hours)
+def get_fx_service(engine: Engine = Depends(get_engine_dep), providers: Providers = Depends(get_providers)) -> FxService:
+    return FxService(engine, providers.fx, get_settings().refresh_ttl_hours)
 
 
 def get_portfolio_service(db: Session = Depends(get_db), fx: FxService = Depends(get_fx_service),
                           user_id: int = Depends(get_current_user_id)) -> PortfolioService:
     return PortfolioService(db, fx, user_id)
+
+
+# ── [S3-D] 갱신 서비스 ──
+def get_refresh_service(engine: Engine = Depends(get_engine_dep), providers: Providers = Depends(get_providers),
+                        fx: FxService = Depends(get_fx_service)) -> RefreshService:
+    return RefreshService(engine, providers, fx, get_settings().refresh_ttl_hours)

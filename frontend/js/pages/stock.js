@@ -1,9 +1,9 @@
 // 종목 상세: 헤더(이름·가격·등락) · 가격 차트(종가 선 + 거래량 막대) · 핵심 정보(시총·PER·PBR)
-import { getCandles, getStock } from "../api.js";
-import { DASH, changeHtml, date, esc, krw, num, price, usd } from "../format.js";
+import { getCandles, getDisclosures, getFinancials, getStock } from "../api.js";
+import { DASH, changeHtml, date, esc, krw, num, pct, price, usd } from "../format.js";
 import { color, dashedAxis, draw, plainAxis } from "../components/charts.js";
-import { mountSidebar } from "../components/sidebar.js";
-import { emptyState, errorState, h, load, marketBadge, segmented } from "../components/ui.js";
+import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
+import { emptyState, errorState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";
 import { icons } from "../components/icons.js";   // [S2-A]
 import { openAddToPortfolio } from "../components/add-to-portfolio.js";   // [S2-A]
 import { starButton } from "../components/watch.js";   // [S2-A]
@@ -95,6 +95,81 @@ function renderKeyMetrics(s) {
     </div>`));
 }
 
+// ── [S3-A] 재무 추이 ──
+// stock.html은 A의 담당 파일 목록에 없어서, 이 파일이 '재무 추이' 칸을 핵심 정보 바로 아래에 만들어 붙인다
+const finSection = h(`<section class="section card detail-section" aria-labelledby="h-fin">
+    <h2 id="h-fin">재무 추이</h2><div id="financials"></div></section>`);
+$("#key-metrics").closest("section").after(finSection);
+
+const FIN_COLORS = () => [color("--ice"), color("--lavender"), "#aba2fc"];   // 매출·영업이익·순이익 (세 번째는 구분색, 등락 의미 없음)
+function loadFinancials() {
+  return load($("#financials"), {
+    skeleton: h('<div class="skeleton" style="height:220px"></div>'),
+    fetch: () => getFinancials(MARKET, TICKER),
+    isEmpty: (d) => !d.items.length,
+    empty: emptyState({ title: "재무 데이터가 없습니다" }),
+    render: (d) => {
+      const items = [...d.items].sort((a, b) => a.period_end.localeCompare(b.period_end));   // 오래된 해가 왼쪽
+      const cols = [["매출", "revenue"], ["영업이익", "operating_income"], ["순이익", "net_income"]];
+      const colors = FIN_COLORS();
+      const fy = (x) => `FY${x.period_end.slice(0, 4)}`;
+      const cell = (v) => (v === null || v === undefined ? DASH : money(v, d.currency));      // 없음은 0이 아니라 '–'
+      const el = h(`<div><div class="legend">${cols.map(([label], i) => `<span><i style="background:${colors[i]}"></i>${label}</span>`).join("")}</div>
+        <div class="chart-box chart-box--sm"><canvas role="img" aria-label="연간 매출·영업이익·순이익 막대"></canvas></div>
+        <div class="table-wrap"><table class="table">
+          <caption class="sr-only">연도별 매출, 영업이익, 순이익, 영업이익률 (단위 ${esc(d.currency)})</caption>
+          <thead><tr><th scope="col">항목</th>${items.map((x) => `<th scope="col">${fy(x)}</th>`).join("")}</tr></thead>
+          <tbody>${cols.map(([label, key]) => `<tr><th scope="row">${label}</th>${items.map((x) => `<td class="num">${cell(x[key])}</td>`).join("")}</tr>`).join("")}
+            <tr><th scope="row">영업이익률</th>${items.map((x) => `<td class="num">${x.operating_margin === null ? DASH : pct(x.operating_margin)}</td>`).join("")}</tr></tbody>
+        </table></div>
+        <p class="subtle">FY(연간) 기준 · ${esc(items.at(-1).accounting_std || "")} · 출처 ${[...new Set(items.map((x) => x.data_source))].join(", ")} · 단위 ${esc(d.currency)}</p></div>`);
+      queueMicrotask(() => draw(el.querySelector("canvas"), {
+        type: "bar",
+        data: {
+          labels: items.map(fy),
+          datasets: cols.map(([label, key], i) => ({ label, data: items.map((x) => x[key]), backgroundColor: colors[i], borderRadius: 10, maxBarThickness: 36 })),
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: { x: plainAxis, y: { ...dashedAxis, ticks: { callback: (v) => money(v, d.currency) } } },
+          plugins: { tooltip: { callbacks: {
+            label: (ctx) => `${ctx.dataset.label} ${ctx.raw === null ? "없음" : money(ctx.raw, d.currency)}`,
+            afterBody: (tips) => { const r = items[tips[0].dataIndex]; return r.operating_margin !== null ? `영업이익률 ${pct(r.operating_margin)}` : ""; },
+          } } },
+        },
+      }));
+      return el;
+    },
+  });
+}
+
+// ── [S3-A] 최근 공시 ──
+const discSection = h(`<section class="section detail-section" aria-labelledby="h-disc">
+    <h2 id="h-disc">최근 공시</h2><div id="disclosures"></div></section>`);
+finSection.after(discSection);
+
+function loadDisclosures() {
+  return load($("#disclosures"), {
+    skeleton: skeleton("row", 5),
+    fetch: () => getDisclosures(MARKET, TICKER),
+    isEmpty: (d) => !d.items.length,
+    empty: emptyState({ title: "최근 공시가 없습니다" }),
+    render: (d) => {
+      const ul = h('<ul class="list card card--flush"></ul>');
+      ul.append(...d.items.map((x) => {
+        const inner = `<span class="avatar" aria-hidden="true">${x.data_source === "DART" ? "D" : "S"}</span>
+          <span class="row__main"><span class="row__title">${esc(x.title)}</span>
+            <span class="row__sub">${esc(x.report_type || "")} · ${esc(x.data_source)}${x.url ? ' <span class="sr-only">(새 창)</span>' : ""}</span></span>
+          <span class="row__value subtle num">${date(x.filed_at)}</span>`;
+        return h(`<li>${x.url   // 원문 링크가 없으면 글자만 보여 준다
+          ? `<a class="row" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+          : `<div class="row">${inner}</div>`}</li>`);
+      }));
+      return ul;
+    },
+  });
+}
+
 // ---------------------------------------------------------------- 시작
 async function init() {
   $("#head").replaceChildren(h('<div class="skeleton" style="height:120px"></div>'));
@@ -111,5 +186,10 @@ async function init() {
   renderHeader(stock);
   renderKeyMetrics(stock);
   loadCandles();
+  loadFinancials();   // [S3-A]
+  loadDisclosures();  // [S3-A]
 }
 init();
+
+// ── [S3-A] 사이드바 새로고침이 끝나면 상세 화면을 새 값으로 다시 불러온다 ──
+document.addEventListener(REFRESHED_EVENT, init);

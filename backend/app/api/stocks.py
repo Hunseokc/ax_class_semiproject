@@ -1,4 +1,4 @@
-"""종목 조회 API: 리스트, 상세, 캔들, 경쟁 그룹 목록. (재무·공시·검색은 이후 단계)"""
+"""종목 조회 API: 리스트, 상세, 캔들, 재무, 공시, 경쟁 그룹 목록. (검색은 이후 단계)"""
 from __future__ import annotations
 
 from typing import Literal
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, resolve_stock
 from app.core.errors import NotFound, Unprocessable
 from app.queries import raw, sql
-from app.schemas.api import CandlesOut, StockDetailOut, StockListOut
+from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, StockDetailOut, StockListOut
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -63,6 +63,23 @@ def candles(market: MarketPath, ticker: TickerPath, range: Literal["1m", "3m", "
     rows = db.execute(sql("candles"), {"stock_id": s["stock_id"], "months": RANGE_MONTHS[range]}).mappings().all()
     return {"market": s["market"], "ticker": s["ticker"], "currency": s["currency"], "range": range,
             "as_of": rows[-1]["date"] if rows else None, "candles": rows}
+
+
+# ── [S3-B] 재무·공시 ──
+@router.get("/{market}/{ticker}/financials", response_model=FinancialsOut, summary="FY 재무 추이")
+def financials(market: MarketPath, ticker: TickerPath, limit: int = Query(5, ge=1, le=10), db: Session = Depends(get_db)):
+    s = resolve_stock(db, market, ticker)
+    rows = db.execute(sql("financials"), {"stock_id": s["stock_id"], "limit": limit}).mappings().all()
+    return {"market": s["market"], "ticker": s["ticker"], "currency": s["currency"],
+            "as_of": rows[-1]["period_end"] if rows else None, "items": rows}
+
+
+@router.get("/{market}/{ticker}/disclosures", response_model=DisclosuresOut, summary="최근 공시")
+def disclosures(market: MarketPath, ticker: TickerPath, limit: int = Query(5, ge=1, le=50), db: Session = Depends(get_db)):
+    s = resolve_stock(db, market, ticker)
+    rows = db.execute(sql("disclosures"), {"stock_id": s["stock_id"], "limit": limit}).mappings().all()
+    return {"market": s["market"], "ticker": s["ticker"],
+            "as_of": rows[0]["filed_at"] if rows else None, "items": rows}
 
 
 groups_router = APIRouter(prefix="/peer-groups", tags=["stocks"])

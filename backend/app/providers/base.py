@@ -1,20 +1,23 @@
 """외부 데이터 소스 인터페이스.
 
-수집 로직은 이 인터페이스에만 의존하고, 구현(pykrx·yfinance)은 factory에서 고른다.
+수집 로직은 이 인터페이스에만 의존하고, 구현(pykrx·yfinance·DART·SEC)은 factory에서 고른다.
 테스트는 fake 구현을 주입한다. 반환값은 전처리 전 원본에 가까운 레코드이며 금액은 Decimal이다.
 
-Stage 1은 일봉·지수·환율만 둔다. 밸류에이션·재무·공시·대량 조회 인터페이스는 Stage 3에서 추가한다.
+Stage 1은 일봉·지수·환율만 둔다. 밸류에이션·재무·공시·대량 조회 인터페이스는 Stage 3에서 추가했다.
 Bar·FxPoint는 Stage 2에서 preprocess.py로부터 이곳으로 옮겼다(서비스·provider가 전처리 모듈에 기대지 않도록).
+이후 단계: 배당(Valuation.dps, Stage 5+), 업종 분류·상장 목록·미국 기초값(Classification·Listing·ValuationBase와
+그 provider, Stage 4~5).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol
 
-__all__ = ["Bar", "FxPoint", "StockRef", "IndexRef", "PriceProvider", "IndexProvider", "FxProvider",
-           "ProviderError"]
+__all__ = ["Bar", "FxPoint", "Valuation", "Financial", "Disclosure", "StockRef", "IndexRef",
+           "PriceProvider", "IndexProvider", "FxProvider", "ValuationProvider", "FinancialProvider",
+           "DisclosureProvider", "MarketBulkProvider", "BatchPriceProvider", "ProviderError"]
 
 
 # ------------------------------------------------------------------ 레코드
@@ -26,12 +29,49 @@ class Bar:
     low: Decimal | None
     close: Decimal | None
     volume: int | None = None
+    change_rate: Decimal | None = None   # 날짜별 전 종목 조회의 거래소 등락률(%, 기준가 대비) — 수정주가 이벤트 감지용
 
 
 @dataclass
 class FxPoint:
     rate_at: datetime                # tz-aware
     usd_krw: Decimal | None
+
+
+# ── [S3-D] 밸류에이션·재무·공시 레코드 ──
+@dataclass
+class Valuation:
+    as_of: date
+    per: Decimal | None = None
+    pbr: Decimal | None = None
+    eps: Decimal | None = None
+    bps: Decimal | None = None
+    market_cap: Decimal | None = None
+    shares_outstanding: int | None = None
+
+
+@dataclass
+class Financial:
+    period_end: date
+    period_type: str                 # FY
+    revenue: Decimal | None = None
+    operating_income: Decimal | None = None
+    net_income: Decimal | None = None
+    total_assets: Decimal | None = None
+    total_equity: Decimal | None = None
+    total_debt: Decimal | None = None
+    data_source: str = ""
+    accounting_std: str | None = None
+    notes: list[str] = field(default_factory=list)   # 대체 계정 사용 등 추적 정보
+
+
+@dataclass
+class Disclosure:
+    rcept_no: str
+    title: str
+    report_type: str | None
+    filed_at: datetime
+    url: str | None
 
 
 @dataclass(frozen=True)
@@ -72,6 +112,35 @@ class FxProvider(Protocol):
     source: str
     def get_daily_rates(self, start: date, end: date) -> list[FxPoint]: ...
     def get_current_rate(self) -> FxPoint: ...
+
+
+# ── [S3-D] 밸류에이션·재무·공시·대량 조회 인터페이스 ──
+class ValuationProvider(Protocol):
+    source: str
+    def get_valuations(self, stock: StockRef, start: date, end: date) -> list[Valuation]: ...
+
+
+class FinancialProvider(Protocol):
+    source: str
+    def get_annual_financials(self, stock: StockRef, years: int) -> list[Financial]: ...
+
+
+class DisclosureProvider(Protocol):
+    source: str
+    def get_disclosures(self, stock: StockRef, start: date, end: date) -> list[Disclosure]: ...
+
+
+class MarketBulkProvider(Protocol):
+    """국내: 날짜 하나에 전 종목 (호출 1회). 수정주가가 아니므로 증분에만 쓰고 이벤트는 등락률로 감지한다."""
+    source: str
+    def get_bars_by_date(self, day: date) -> dict[str, Bar]: ...
+    def get_valuations_by_date(self, day: date) -> dict[str, Valuation]: ...
+
+
+class BatchPriceProvider(Protocol):
+    """미국: 여러 종목 일봉을 한 번에(묶음 다운로드)."""
+    source: str
+    def get_daily_prices_batch(self, stocks: list[StockRef], start: date, end: date) -> dict[str, list[Bar]]: ...
 
 
 class ProviderError(Exception):

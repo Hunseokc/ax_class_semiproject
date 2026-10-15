@@ -1,4 +1,4 @@
-"""시장 API: 지수, 환율. DB에 저장된 최신 값만 돌려준다(외부 호출 없음). 갱신·TTL 외부 호출은 Stage 2 이후."""
+"""시장·갱신 API: 지수, 환율, 갱신. 지수·환율 조회는 DB 값(+FxService TTL)만, 외부 수집은 갱신(refresh)에서만."""
 from __future__ import annotations
 
 from zoneinfo import ZoneInfo
@@ -6,10 +6,12 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_fx_service
+from app.api.deps import get_db, get_fx_service, get_refresh_service
+from app.core.config import get_settings
 from app.queries import sql
-from app.schemas.api import FxOut, IndicesOut
+from app.schemas.api import FxOut, IndicesOut, RefreshJobOut, RefreshOut
 from app.services.fx import FxService
+from app.services.refresh import RefreshResult, RefreshService
 
 router = APIRouter(prefix="/market", tags=["market"])
 SEOUL = ZoneInfo("Asia/Seoul")
@@ -38,3 +40,22 @@ def fx(db: Session = Depends(get_db), fx_service: FxService = Depends(get_fx_ser
         "change_rate": round(change / prev, 6) if change is not None and prev else None,
         "history": history, "as_of": quote.rate_at,
     }
+
+
+# ── [S3-D] 갱신 ──
+def _refresh_out(r: RefreshResult) -> RefreshOut:
+    return RefreshOut(refreshed_at=r.refreshed_at, next_refresh_available_at=r.next_refresh_available_at,
+                      ttl_hours=get_settings().refresh_ttl_hours,
+                      jobs=[RefreshJobOut(**j.__dict__) for j in r.jobs])
+
+
+@router.post("/refresh", response_model=RefreshOut,
+             summary="환율·지수·증분 일봉·밸류에이션 갱신 (작업별 TTL 이내면 SKIPPED)")
+def refresh(service: RefreshService = Depends(get_refresh_service)):
+    return _refresh_out(service.refresh())
+
+
+@router.get("/refresh/status", response_model=RefreshOut,
+            summary="갱신 상태 조회 — 외부 호출 없음 (사이드바 '마지막 갱신 시각' 표시용)")
+def refresh_status(service: RefreshService = Depends(get_refresh_service)):
+    return _refresh_out(service.status())

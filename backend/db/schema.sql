@@ -3,9 +3,9 @@
 -- 실행 순서: schema.sql → indexes.sql → views.sql
 -- 금액·가격은 모두 NUMERIC (float 사용 안 함)
 --
--- Stage 1 테이블 10개 + Stage 2 테이블 4개. 이후 단계 테이블·컬럼은 D가 단계 시작 시 추가해 "계약"으로 배포한다.
+-- Stage 1 테이블 10개 + Stage 2 테이블 4개 + Stage 3 테이블 2개. 이후 단계 테이블·컬럼은 D가 단계 시작 시 추가해 "계약"으로 배포한다.
 --   Stage 2: users, watchlist_items(memo·target_price는 Stage 5), portfolios, portfolio_items (+ updated_at 트리거)
---   Stage 3: financial_statements, disclosures
+--   Stage 3: financial_statements, disclosures (+ ingestion_logs.job_type에 FINANCIALS·DISCLOSURES)
 --   Stage 4+: 매력도·비교군·섹터 관련 테이블/컬럼
 -- =====================================================================
 
@@ -119,11 +119,12 @@ CREATE TABLE fx_rates (
 -- ---------------------------------------------------------------------
 
 -- 수집·갱신 작업 로그. 갱신 TTL 판단(작업별 마지막 성공 시각)에도 사용
--- job_type은 Stage 1 작업만 허용한다. 이후 단계에서 FINANCIALS·DISCLOSURES·SCORES 등을 추가한다.
+-- job_type은 Stage 3까지의 작업만 허용한다. 이후 단계에서 SCORES·BENCHMARK 등을 추가한다.
 CREATE TABLE ingestion_logs (
   log_id      SERIAL PRIMARY KEY,
   source      VARCHAR(20) NOT NULL,                              -- PYKRX / YFINANCE / DART / SEC / INTERNAL
-  job_type    VARCHAR(30) NOT NULL CHECK (job_type IN ('PRICES','INDICES','FX','VALUATION','MASTER')),
+  job_type    VARCHAR(30) NOT NULL CHECK (job_type IN
+                ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','MASTER')),
   stock_id    INT         REFERENCES stocks ON DELETE SET NULL,  -- 종목 단위 작업일 때만
   status      VARCHAR(10) NOT NULL CHECK (status IN ('SUCCESS','FAILED','SKIPPED')),
   rows_loaded INT         NOT NULL DEFAULT 0 CHECK (rows_loaded >= 0),
@@ -198,3 +199,40 @@ CREATE TABLE portfolio_items (
 -- "원가 합계 ≤ 시드"는 행 간 제약이라 CHECK로 걸 수 없다 → 서비스에서 트랜잭션 + 포트폴리오 행 잠금(SELECT ... FOR UPDATE)으로 보장한다.
 CREATE TRIGGER trg_portfolio_items_updated_at BEFORE UPDATE ON portfolio_items
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- =====================================================================
+-- Stage 3 — 재무·공시 (D가 단계 시작 시 배포한 계약)
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 6. 재무·공시 (Stock 1─N)
+-- ---------------------------------------------------------------------
+
+-- 재무제표: 연간(FY) 필수, 분기는 선택. 금액은 종목 통화 기준
+CREATE TABLE financial_statements (
+  fin_id           SERIAL PRIMARY KEY,
+  stock_id         INT           NOT NULL REFERENCES stocks ON DELETE CASCADE,
+  period_end       DATE          NOT NULL,                       -- 결산일
+  period_type      VARCHAR(4)    NOT NULL CHECK (period_type IN ('FY','Q1','Q2','Q3','Q4')),
+  revenue          NUMERIC(24,2),
+  operating_income NUMERIC(24,2),
+  net_income       NUMERIC(24,2),                                -- 지배기업 소유주 귀속 우선
+  total_assets     NUMERIC(24,2),
+  total_equity     NUMERIC(24,2),                                -- 지배기업 소유주 귀속 우선
+  total_debt       NUMERIC(24,2),                                -- 부채총계 (KR Liabilities / US Liabilities)
+  data_source      VARCHAR(20)   NOT NULL CHECK (data_source IN ('DART','SEC','YFINANCE')),
+  accounting_std   VARCHAR(20),                                  -- K-IFRS / US-GAAP
+  UNIQUE (stock_id, period_end, period_type)
+);
+
+-- 공시: DART 접수번호 / SEC accession number
+CREATE TABLE disclosures (
+  disclosure_id SERIAL PRIMARY KEY,
+  stock_id      INT          NOT NULL REFERENCES stocks ON DELETE CASCADE,
+  rcept_no      VARCHAR(64)  NOT NULL UNIQUE,
+  title         TEXT         NOT NULL,
+  report_type   VARCHAR(100),
+  filed_at      TIMESTAMPTZ  NOT NULL,
+  url           TEXT,
+  data_source   VARCHAR(20)  NOT NULL CHECK (data_source IN ('DART','SEC'))
+);

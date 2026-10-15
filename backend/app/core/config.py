@@ -33,7 +33,13 @@ class Settings(BaseSettings):
     # ── [S2-D] 사용자·갱신 TTL ──
     default_user_id: int = Field(default=1, ge=1)   # 인증 없는 단일 사용자(demo) 모드: get_current_user_id가 돌려주는 값
     refresh_ttl_hours: float = Field(default=4, ge=3, le=4)   # 같은 종류 외부 호출은 이 시간에 최대 1회 (FxService TTL)
-    # 이후 단계 설정(API 키·스케줄러)은 해당 단계 담당자가 이 클래스에 추가한다
+    # ── [S3-D] 재무·공시 소스 ── (비어 있으면 factory가 DART·SEC provider를 만들지 않는다)
+    dart_api_key: str = ""
+    sec_user_agent: str = ""                         # 연락처(이메일)가 들어간 User-Agent — SEC EDGAR 필수
+    # ── [S3-D] 스케줄러 ──
+    scheduler_enabled: bool = True                       # 앱 안 스케줄러(4시간 갱신)
+    scheduler_check_minutes: int = Field(default=5, ge=1)
+    # 이후 단계 설정은 해당 단계 담당자가 이 클래스에 추가한다
 
 
 @lru_cache

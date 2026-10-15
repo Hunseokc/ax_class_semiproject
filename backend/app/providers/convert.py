@@ -27,3 +27,7 @@ def to_dec(v: Any, places: int | None = None) -> Decimal | None:
 def to_int(v: Any) -> int | None:
     d = to_dec(v)
     return int(d) if d is not None else None
+
+
+def positive_or_none(d: Decimal | None) -> Decimal | None:
+    return d if d is not None and d > 0 else None

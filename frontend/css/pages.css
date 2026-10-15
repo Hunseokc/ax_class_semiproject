@@ -137,3 +137,16 @@
 .wl-card__price { font-size: var(--fs-xl); font-weight: var(--fw-extra); letter-spacing: -0.02em; line-height: 1.15; margin-top: var(--sp-2); }
 .wl-card__chg { font-weight: var(--fw-semibold); }
 .wl-card__move { display: flex; gap: var(--sp-1); justify-content: flex-end; padding: 0 var(--sp-3) var(--sp-3); }
+
+/* ── [S3-A] 사이드바 갱신 상태 ── */
+.sidebar__foot [data-jobs] { display: flex; flex-direction: column; gap: var(--sp-1); }
+.sidebar__foot .job { display: flex; align-items: center; gap: var(--sp-2); }
+.sidebar__foot .job::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--line); flex: none; }
+.sidebar__foot .job--stale { color: var(--text-2); font-weight: var(--fw-semibold); }
+.sidebar__foot .job--stale::before { background: var(--lavender-strong); }
+/* 새로고침 중에는 버튼을 흐리게 하고 아이콘을 돌린다 */
+.sidebar__foot [data-refresh][aria-busy="true"] { opacity: .6; }
+.sidebar__foot [data-refresh][aria-busy="true"] svg { animation: sb-spin 1s linear infinite; }
+@keyframes sb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sidebar__foot [data-refresh][aria-busy="true"] svg { animation: none; } }
+@media (max-width: 767px) { .sidebar__foot [data-jobs] { display: none; } }

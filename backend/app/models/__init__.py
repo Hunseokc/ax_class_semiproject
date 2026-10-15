@@ -1,6 +1,7 @@
 """SQLAlchemy ORM 모델 — db/schema.sql과 1:1 매핑 (DDL의 원본은 schema.sql).
 
-Stage 1 테이블 10개 + Stage 2 테이블 4개(users·watchlist_items·portfolios·portfolio_items). 이후 단계 테이블은 D가 단계 시작 시 schema.sql과 함께 추가한다.
+Stage 1 테이블 10개 + Stage 2 테이블 4개(users·watchlist_items·portfolios·portfolio_items)
++ Stage 3 테이블 2개(financial_statements·disclosures). 이후 단계 테이블은 D가 단계 시작 시 schema.sql과 함께 추가한다.
 """
 from __future__ import annotations
 
@@ -176,3 +177,33 @@ class PortfolioItem(Base):
     stock: Mapped[Stock] = relationship(lazy="joined")
     __table_args__ = (UniqueConstraint("portfolio_id", "stock_id"), CheckConstraint("quantity > 0"),
                       CheckConstraint("ref_price > 0"), CheckConstraint("ref_fx_rate > 0"))
+
+
+# ── [S3-D] 재무·공시 ──
+class FinancialStatement(Base):
+    __tablename__ = "financial_statements"
+    fin_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"))
+    period_end: Mapped[date] = mapped_column(Date)
+    period_type: Mapped[str] = mapped_column(String(4))
+    revenue: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    operating_income: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    net_income: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    total_assets: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    total_equity: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    total_debt: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    data_source: Mapped[str] = mapped_column(String(20))
+    accounting_std: Mapped[str | None] = mapped_column(String(20))
+    __table_args__ = (UniqueConstraint("stock_id", "period_end", "period_type"),)
+
+
+class Disclosure(Base):
+    __tablename__ = "disclosures"
+    disclosure_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"))
+    rcept_no: Mapped[str] = mapped_column(String(64), unique=True)
+    title: Mapped[str] = mapped_column(Text)
+    report_type: Mapped[str | None] = mapped_column(String(100))
+    filed_at: Mapped[datetime] = mapped_column()
+    url: Mapped[str | None] = mapped_column(Text)
+    data_source: Mapped[str] = mapped_column(String(20))

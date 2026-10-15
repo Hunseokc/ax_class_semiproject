@@ -350,6 +350,62 @@ class SummaryOut(Schema):
 
 
 # ── [S3-B] financials·disclosures ─────────────────────────────────
+# (응답 모양은 D가 껍데기와 함께 원본 그대로 넣었다 — B는 이 클래스를 그대로 쓴다)
+class FinancialOut(Schema):
+    period_end: date
+    period_type: str
+    revenue: Num | None
+    operating_income: Num | None
+    net_income: Num | None
+    total_assets: Num | None
+    total_equity: Num | None
+    total_debt: Num | None
+    operating_margin: Num | None
+    roe: Num | None
+    data_source: str
+    accounting_std: str | None
+
+
+class FinancialsOut(Schema):
+    market: str
+    ticker: str
+    currency: str
+    as_of: date | None
+    items: list[FinancialOut]
+
+
+class DisclosureOut(Schema):
+    rcept_no: str
+    title: str
+    report_type: str | None
+    filed_at: datetime
+    url: str | None
+    data_source: str
+
+
+class DisclosuresOut(Schema):
+    market: str
+    ticker: str
+    as_of: datetime | None
+    items: list[DisclosureOut]
+
+
+# ── [S3-D] market refresh ─────────────────────────────────────────
+class RefreshJobOut(Schema):
+    job_type: str
+    status: str
+    detail: str | None = None
+    last_success_at: datetime | None = None
+    counts: dict[str, int] = {}
+
+
+class RefreshOut(Schema):
+    refreshed_at: datetime | None
+    next_refresh_available_at: datetime
+    ttl_hours: float
+    jobs: list[RefreshJobOut]
+    basis: str = "일봉 기준"
+
 
 # ── [S4-A] 매력도·프리셋 ──────────────────────────────────────────
 
