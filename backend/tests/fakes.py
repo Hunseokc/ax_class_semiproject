@@ -9,7 +9,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from app.providers.base import Bar, FxPoint, IndexRef, StockRef
+from app.providers.base import Bar, FxPoint, IndexRef, StockRef, Valuation
 from app.providers.factory import Providers
 
 SAFE_LAG = timedelta(days=2)    # 어느 시장 기준으로도 '오늘(미확정 봉)'이 되지 않도록 이틀 전까지만 돌려준다
@@ -74,8 +74,17 @@ class FakeFx:
         return [FxPoint(datetime.combine(d, datetime.min.time(), timezone.utc), self.rate) for d in _days(start, end)]
 
 
+class FakeValuation(CallLog):
+    source = "YFINANCE"          # valuation_snapshots.source CHECK 허용값
+
+    def get_valuations(self, stock: StockRef, start: date, end: date) -> list[Valuation]:
+        self.record(stock.ticker, start, end)
+        return [Valuation(as_of=min(end, date.today() - SAFE_LAG), per=Decimal(10), pbr=Decimal(1), market_cap=Decimal(10**12),
+                          shares_outstanding=10**9)]
+
+
 def make_providers(fx: FakeFx | None = None) -> Providers:
-    price, index = FakePrice(), FakeIndex()
+    price, index, val = FakePrice(), FakeIndex(), FakeValuation()
     return Providers(kr_price=price, us_price=price, kr_index=index, us_index=index, fx=fx or FakeFx(),
-                     kr_valuation=None, us_valuation=None, kr_financial=None, us_financial=None,
+                     kr_valuation=val, us_valuation=val, kr_financial=None, us_financial=None,
                      us_financial_supplement=None, kr_disclosure=None, us_disclosure=None)
