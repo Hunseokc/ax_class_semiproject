@@ -43,10 +43,8 @@ def init_db(engine: Engine, reset: bool = False) -> None:
 def load_master(engine: Engine, offline: bool = True) -> None:
     """universe.yaml → markets·stocks·indices·peer_groups·peer_group_members + 기본 사용자 demo (재실행해도 행 수 불변).
 
-    Stage 1은 오프라인 경로만 있다. DART corp_code·SEC CIK 매핑(온라인)은 Stage 3에서 추가한다.
+    offline이 아니면 이어서 DART corp_code·SEC CIK를 매핑한다(재무·공시 수집에 필요).
     """
-    if not offline:
-        raise NotImplementedError("온라인 마스터 적재(DART·SEC)는 Stage 3에서 추가한다. --offline을 사용하세요.")
     u = load_universe()
     # peer_groups.members는 티커만 적는다 → 같은 티커가 두 시장에 있으면 어느 종목인지 정할 수 없으므로 적재 전에 막는다
     market_of: dict[str, str] = {}
@@ -79,6 +77,40 @@ def load_master(engine: Engine, offline: bool = True) -> None:
                 for g in u.peer_groups for t in g.members], ["group_id", "stock_id"])
             # ── [S2-D] 기본 사용자(demo) — get_current_user_id가 돌려주는 DEFAULT_USER_ID(=1)의 행 ──
             conn.execute(text("INSERT INTO users (nickname) VALUES ('demo') ON CONFLICT (nickname) DO NOTHING"))
+    if offline:
+        return
+
+    # ── [S3-B] DART corp_code·SEC CIK 매핑 ──
+    with engine.connect() as conn:
+        refs = stock_refs(conn)
+    kr = [r for r in refs if r.country == "KR"]
+    us = [r for r in refs if r.country == "US"]
+    with job_log(engine, source="DART", job_type="MASTER", label="corp_code") as res:
+        from app.providers.dart import DartClient
+        dart = DartClient()
+        codes = dart.corp_codes({r.ticker for r in kr})
+        rows = []
+        for r in kr:
+            if r.ticker not in codes:
+                res.notes.append(f"{r.ticker} corp_code 없음")
+                continue
+            info = dart.company(codes[r.ticker])
+            rows.append({"stock_id": r.stock_id, "corp_code": codes[r.ticker], "name_en": info.get("corp_name_eng")})
+            if info.get("acc_mt") != "12":
+                res.notes.append(f"{r.ticker} 결산월 {info.get('acc_mt')}")
+        if rows:
+            with engine.begin() as conn:
+                conn.execute(text("UPDATE stocks SET corp_code = :corp_code, name_en = :name_en WHERE stock_id = :stock_id"), rows)
+        res.rows = len(rows)
+    with job_log(engine, source="SEC", job_type="MASTER", label="cik") as res:
+        from app.providers.sec import SecClient
+        ciks = SecClient().ciks({r.ticker for r in us})
+        rows = [{"stock_id": r.stock_id, "cik": ciks[r.ticker]} for r in us if r.ticker in ciks]
+        res.notes += [f"{r.ticker} CIK 없음" for r in us if r.ticker not in ciks]
+        if rows:
+            with engine.begin() as conn:
+                conn.execute(text("UPDATE stocks SET cik = :cik WHERE stock_id = :stock_id"), rows)
+        res.rows = len(rows)
 
 
 # ── [S1-D] 시세 수집 ──
