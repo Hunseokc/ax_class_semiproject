@@ -6,7 +6,9 @@
     python -m app.ingest prices [--full] [--tickers 005930 AAPL]   # 종목 일봉 (국내 pykrx, 미국 yfinance)
     python -m app.ingest indices [--full]
     python -m app.ingest fx [--full]         # USD/KRW DAILY
-    python -m app.ingest seed-demo           # demo 관심종목 8건 + 모의 포트폴리오 2개
+    python -m app.ingest valuation [--full] [--tickers 005930 AAPL]   # 국내 pykrx 일별, 미국 yfinance 스냅샷
+    python -m app.ingest all                 # master → prices → indices → fx → (financials) → valuation → (disclosures)
+    python -m app.ingest seed-demo          # demo 관심종목 8건 + 모의 포트폴리오 2개
     python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용)
 """
 from __future__ import annotations
@@ -38,6 +40,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("seed-demo")
     # ── [S3-D] 갱신 ──
     sub.add_parser("refresh")
+    # ── [S3-C] 밸류에이션·전체 적재 ──
+    p = sub.add_parser("valuation")
+    p.add_argument("--full", action="store_true")
+    p.add_argument("--tickers", nargs="*")
+    sub.add_parser("all")
     args = ap.parse_args(argv)
 
     setup_logging(get_settings().log_level)
@@ -78,6 +85,18 @@ def main(argv: list[str] | None = None) -> int:
         for j in result.jobs:
             print(f"{j.job_type:<10} {j.status:<8} {j.detail or ''}")
         print("next_refresh_available_at:", result.next_refresh_available_at.isoformat())
+    # ── [S3-C] 밸류에이션·전체 적재 ──
+    elif args.cmd == "valuation":
+        jobs.load_valuations(engine, providers(), full=args.full, tickers=args.tickers)
+    elif args.cmd == "all":
+        pv = providers()
+        jobs.load_master(engine)
+        jobs.load_prices(engine, pv)
+        jobs.load_indices(engine, pv)
+        jobs.load_fx_daily(engine, pv)
+        # ── [S3-B] 재무 ── (B가 추가: DERIVED 밸류에이션 대체 시 재무가 먼저 필요)
+        jobs.load_valuations(engine, pv)
+        # ── [S3-B] 공시 ── (B가 추가)
     print(f"[{args.cmd}] 완료 {time.monotonic() - t0:.1f}s")
     return 0
 
