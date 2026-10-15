@@ -1,6 +1,6 @@
 // 종목 상세: 헤더(이름·가격·등락) · 가격 차트(종가 선 + 거래량 막대) · 핵심 정보(시총·PER·PBR)
-import { PRESET_EVENT, getAnalysis, getCandles, getDisclosures, getFinancials, getPreset, getStock } from "../api.js";   // [S4-A] PRESET_EVENT·getAnalysis·getPreset
-import { DASH, changeHtml, date, esc, krw, num, pct, price, usd } from "../format.js";
+import { PRESET_EVENT, getAnalysis, getCandles, getDisclosures, getFinancials, getPeers, getPeersChart, getPreset, getStock } from "../api.js";   // [S4-A] PRESET_EVENT·getAnalysis·getPreset
+import { DASH, changeHtml, date, esc, krw, num, pct, price, stockUrl, usd } from "../format.js";   // [S4-A] stockUrl
 import { color, dashedAxis, draw, plainAxis, scoreBand } from "../components/charts.js";   // [S4-A] scoreBand
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
 import { emptyState, errorState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";
@@ -433,6 +433,130 @@ fold("metrics", () => {
   else $("#detail-metrics").replaceChildren(emptyState({ title: "지표를 아직 불러오지 못했습니다" }));
 });
 
+// ── [S4-A] 경쟁 종목 비교 ──
+// stock.html을 못 고쳐서 이 파일이 접이식 칸을 만들어 재무 추이 아래(공시 위)에 붙인다
+const foldPeers = h(`<details class="section card detail-section fold" id="fold-peers">
+    <summary><h2>경쟁 종목 비교</h2><span class="subtle">같은 그룹의 가격 추이·지표 순위</span></summary>
+    <div class="fold__body" id="peers"></div></details>`);
+finSection.after(foldPeers);
+
+const PEER_COLS = [
+  { key: "return_1m", label: "1개월", fmt: (v) => pct(v, { sign: true, digits: 1 }) },
+  { key: "return_3m", label: "3개월", fmt: (v) => pct(v, { sign: true, digits: 1 }) },
+  { key: "return_1y", label: "1년", fmt: (v) => pct(v, { sign: true, digits: 1 }) },
+  { key: "per", label: "PER", fmt: (v) => (v === null ? DASH : `${num(v, 1)}배`) },
+  { key: "pbr", label: "PBR", fmt: (v) => (v === null ? DASH : `${num(v, 2)}배`) },
+  { key: "roe", label: "ROE", fmt: (v) => pct(v, { digits: 1 }) },
+  { key: "operating_margin", label: "영업이익률", fmt: (v) => pct(v, { digits: 1 }) },
+  { key: "revenue_yoy", label: "매출 YoY", fmt: (v) => pct(v, { sign: true, digits: 1 }) },
+  { key: "market_cap_krw", label: "시총(원화)", fmt: (v) => krw(v, { compact: true }) },
+  { key: "score", label: "매력도(균형)", fmt: (v) => (v === null ? DASH : num(v, 0)) },
+];
+// 경쟁 비교 선 색: 대상 종목은 라벤더 굵은 선, 나머지는 등락 의미가 없는 구분색
+const TARGET_COLOR = "#e6ddf2";
+const PEER_COLORS = ["#5ea8ff", "#f5c26b", "#4fd1c5", "#f0a6ca", "#9ccc65", "#b39ddb"];
+let peers = null, groupId = null, peerRange = "3m", peerMetric = "return_3m";
+
+function peerTable(g) {
+  const rows = g.members.map((m) => `<tr class="${m.is_target ? "is-target" : ""}">
+      <td><a href="${stockUrl(m.market, m.ticker)}"><strong>${esc(m.name)}</strong></a> <span class="subtle">${esc(m.ticker)}</span></td>
+      ${PEER_COLS.map((c) => `<td class="num">${c.fmt(m.values[c.key])}${m.ranks[c.key] ? `<span class="rk">${m.ranks[c.key]}위</span>` : ""}</td>`).join("")}</tr>`).join("");
+  return `<div class="table-wrap"><table class="table">
+      <caption class="sr-only">${esc(g.name)} 그룹 지표 비교 (순위는 그룹 내)</caption>
+      <thead><tr><th scope="col">종목</th>${PEER_COLS.map((c) => `<th scope="col">${c.label}</th>`).join("")}</tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td>그룹 평균</td>${PEER_COLS.map((c) => `<td class="num">${c.fmt(g.averages[c.key])}</td>`).join("")}</tr></tfoot>
+    </table></div>`;
+}
+
+function drawPeerBars(canvas, g) {
+  const col = PEER_COLS.find((c) => c.key === peerMetric);
+  const isRatio = !["per", "pbr", "market_cap_krw", "score"].includes(peerMetric);
+  const val = (m) => { const v = m.values[peerMetric]; return v === null ? null : isRatio ? v * 100 : v; };
+  draw(canvas, {
+    type: "bar",
+    data: { labels: g.members.map((m) => m.name), datasets: [{
+      data: g.members.map(val),
+      backgroundColor: g.members.map((m) => (m.is_target ? color("--lavender") : color("--ice"))), borderRadius: 10, maxBarThickness: 40 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { x: plainAxis, y: { ...dashedAxis, ticks: { callback: (v) => (peerMetric === "market_cap_krw" ? krw(v, { compact: true, unit: false }) : isRatio ? `${v}%` : v) } } },
+      plugins: { tooltip: { callbacks: { label: (ctx) => `${col.label} ${col.fmt(g.members[ctx.dataIndex].values[peerMetric])}` } } },
+    },
+  });
+}
+
+async function drawPeerChart(box) {
+  box.replaceChildren(h('<div class="skeleton" style="height:240px"></div>'));
+  try {
+    const d = await getPeersChart(MARKET, TICKER, peerRange, groupId);
+    let k = 0;
+    const lineColor = d.series.map((s) => (s.is_target ? TARGET_COLOR : PEER_COLORS[k++ % PEER_COLORS.length]));
+    const el = h(`<div><div class="legend">${d.series.map((s, i) => `<span><i style="background:${lineColor[i]}"></i>${esc(s.name)}${s.is_target ? " (현재)" : ""}</span>`).join("")}</div>
+      <div class="chart-box chart-box--sm"><canvas role="img" aria-label="기준일 100 환산 가격 추이"></canvas></div><p class="subtle">${esc(d.note)}</p></div>`);
+    box.replaceChildren(el);
+    draw(el.querySelector("canvas"), {
+      type: "line",
+      // 휴장일 null은 선을 끊는다 (spanGaps: false — 원본은 이어 그림)
+      data: { labels: d.dates, datasets: d.series.map((s, i) => ({
+        label: s.name, data: s.values, borderColor: lineColor[i],
+        borderWidth: s.is_target ? 3 : 1.5, pointRadius: 0, tension: 0.2, spanGaps: false })) },
+      options: {
+        responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+        scales: { x: { ...plainAxis, ticks: { maxTicksLimit: 6, maxRotation: 0 } }, y: dashedAxis },
+        plugins: { tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label} ${ctx.raw === null ? "휴장" : num(ctx.raw, 1)}` } } },
+      },
+    });
+  } catch (e) {
+    box.replaceChildren(errorState(e, () => drawPeerChart(box)));
+  }
+}
+
+function renderPeers() {
+  const g = peers.groups.find((x) => x.group_id === groupId);
+  const wrap = h('<div class="section"></div>');
+  if (peers.groups.length > 1) {
+    wrap.append(segmented(peers.groups.map((x) => ({ value: x.group_id, label: x.name })), groupId,
+      (v) => { groupId = v; $("#peers").replaceChildren(renderPeers()); }, { label: "경쟁 그룹" }));
+  }
+  if (!g.has_peers) {
+    wrap.append(emptyState({ title: g.message, body: `${esc(g.name)} 그룹에는 이 종목만 있습니다.` }));
+    return wrap;
+  }
+  const chartBox = h("<div></div>");
+  const rangeTabs = segmented(["1m", "3m", "6m", "1y"].map((v) => ({ value: v, label: v.toUpperCase() })), peerRange,
+    (v) => { peerRange = v; drawPeerChart(chartBox); }, { label: "비교 차트 기간", variant: "segmented--card" });
+  const metricSel = h(`<label class="metric-select"><span class="sr-only">비교 지표</span><select class="select">
+      ${PEER_COLS.map((c) => `<option value="${c.key}" ${c.key === peerMetric ? "selected" : ""}>${c.label}</option>`).join("")}</select></label>`);
+  const barBox = h('<div class="chart-box chart-box--sm"><canvas role="img" aria-label="선택 지표 막대 비교"></canvas></div>');
+  const barCanvas = barBox.querySelector("canvas");
+  metricSel.querySelector("select").addEventListener("change", (e) => { peerMetric = e.target.value; drawPeerBars(barCanvas, g); });
+  wrap.append(
+    h(`<div class="section__head"><h3>기준일 = 100 가격 추이</h3></div>`), rangeTabs, chartBox,
+    h(`<div class="section__head"><h3>지표 비교 <span class="subtle">(그룹 내 순위 · 평균)</span></h3></div>`), h(peerTable(g)),
+    h(`<div class="section__head"><h3>지표별 막대 비교</h3></div>`), metricSel, barBox,
+    h(`<p class="notice">${esc(peers.accounting_note)} ${esc(peers.rank_rule)}</p>`),
+  );
+  queueMicrotask(() => { drawPeerChart(chartBox); drawPeerBars(barCanvas, g); });
+  return wrap;
+}
+
+function loadPeers() {
+  return load($("#peers"), {
+    skeleton: skeleton("row", 3),
+    fetch: () => getPeers(MARKET, TICKER),
+    isEmpty: (d) => !d.groups.length,
+    empty: emptyState({ title: "속한 경쟁 그룹이 없습니다" }),
+    render: (d) => {
+      peers = d;
+      groupId = d.groups.find((g) => g.has_peers)?.group_id ?? d.groups[0].group_id;
+      return renderPeers();
+    },
+  });
+}
+
+fold("peers", loadPeers);
+
 // ---------------------------------------------------------------- 시작
 async function init() {
   $("#head").replaceChildren(h('<div class="skeleton" style="height:120px"></div>'));
@@ -453,6 +577,7 @@ async function init() {
   loadDisclosures();  // [S3-A]
   mountPresetControl();   // [S4-A] 성향 메뉴(한 번만)
   loadAnalysis();         // [S4-A] 매력도
+  reloadFold("peers");    // [S4-A] 경쟁 비교(펼쳐져 있으면 다시, 접혀 있으면 다음에 펼칠 때)
 }
 init();
 
