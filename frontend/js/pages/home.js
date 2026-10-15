@@ -1,9 +1,10 @@
 // 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
-import { getFx, getIndices, getWatchlist, reorderWatchlist } from "../api.js";
+import { PRESET_EVENT, getFx, getIndices, getPreset, getWatchlist, reorderWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset
 import { changeHtml, date, dateTime, esc, num, price, shortDate, stockUrl, usd } from "../format.js";
-import { color, destroyCharts, sparkline } from "../components/charts.js";
+import { color, destroyCharts, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
 import { emptyState, h, load, segmented, skeleton, toast } from "../components/ui.js";
+import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";   // [S4-A]
 
 mountSidebar("home");
 const $ = (sel) => document.querySelector(sel);
@@ -118,7 +119,8 @@ let watchItems = [];
 function watchCard(w, i) {
   const us = w.currency === "USD";
   const el = h(`<li class="wl-card">
-      <a class="wl-card__link card--link" href="${stockUrl(w.market, w.ticker)}" aria-label="${esc(w.name)} 상세 보기">
+      <a class="wl-card__link card--link" href="${stockUrl(w.market, w.ticker)}?preset=${encodeURIComponent(getPreset())}" aria-label="${esc(w.name)} 상세 보기">
+        <div class="wl-card__gauge">${scoreGauge(w.score)}</div>
         <div class="wl-card__head"><strong>${esc(w.name)}</strong>
           <span class="badge ${us ? "badge--us" : "badge--kr"}">${esc(w.market)}</span></div>
         <div class="subtle">${esc(w.ticker)} · ${shortDate(w.as_of)} 종가</div>
@@ -136,7 +138,8 @@ function watchCard(w, i) {
 
 function renderWatch(items) {
   watchItems = items;
-  $("#watch-count").textContent = `${items.length}개 종목`;
+  watchCount = items.length;   // [S4-A]
+  paintWatchCount();
   const ul = h('<ul class="wl-grid" aria-label="내 관심종목"></ul>');
   ul.append(...items.map(watchCard));
   return ul;
@@ -156,7 +159,8 @@ async function moveWatch(i, dir) {
       { market: a.market, ticker: a.ticker, sort_order: b.sort_order },
       { market: b.market, ticker: b.ticker, sort_order: a.sort_order },
     ]);
-    $("#watchlist").replaceChildren(renderWatch(res.items));
+    const scoreOf = new Map(before.map((x) => [`${x.market}/${x.ticker}`, x.score]));   // [S4-A] 순서 응답에 점수가 없어도 유지
+    $("#watchlist").replaceChildren(renderWatch(res.items.map((x) => ({ ...x, score: x.score ?? scoreOf.get(`${x.market}/${x.ticker}`) }))));
   } catch (e) {
     toast(e.message, "error");
     $("#watchlist").replaceChildren(renderWatch(before));
@@ -177,3 +181,19 @@ loadWatchlist();
 
 // ── [S3-A] 사이드바 새로고침이 끝나면 지수·환율·관심종목을 새 값으로 다시 불러온다 ──
 document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); });
+
+// ── [S4-A] 투자 성향: 관심종목 카드의 매력도 게이지가 따르는 값 ──
+// index.html은 A의 담당 파일 목록에 없어서, 이 파일이 성향 메뉴 자리를 '내 관심종목' 제목줄에 만들어 붙인다
+let watchCount = 0, presetNames = {};
+function paintWatchCount() {
+  const name = presetNames[getPreset()];
+  $("#watch-count").textContent = `${watchCount}개 종목${name ? ` · 매력도 ${name} 기준` : ""}`;
+}
+const presetBox = h('<div id="preset-menu"></div>');
+$("#watch-count").before(presetBox);
+loadPresets().then(({ presets }) => {
+  presetNames = Object.fromEntries(presets.map((p) => [p.code, p.name]));
+  paintWatchCount();
+});
+mountPresetMenu(presetBox);
+document.addEventListener(PRESET_EVENT, loadWatchlist);   // 지수·환율은 성향과 무관해서 관심종목만 다시 조회

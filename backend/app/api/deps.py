@@ -5,19 +5,20 @@ from collections.abc import Iterator
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends, Path, Request
+from fastapi import Depends, Path, Query, Request
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import get_engine, session_factory
-from app.core.errors import NotFound
+from app.core.errors import NotFound, Unprocessable
 from app.providers.factory import Providers, default_providers
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN
 from app.services.fx import FxService
 from app.services.guest import create_guest, user_exists
 from app.services.portfolio import PortfolioService
 from app.services.refresh import RefreshService
+from app.services.scoring import default_preset
 
 
 def get_engine_dep() -> Engine:
@@ -101,3 +102,15 @@ def get_portfolio_service(db: Session = Depends(get_db), fx: FxService = Depends
 def get_refresh_service(engine: Engine = Depends(get_engine_dep), providers: Providers = Depends(get_providers),
                         fx: FxService = Depends(get_fx_service)) -> RefreshService:
     return RefreshService(engine, providers, fx, get_settings().refresh_ttl_hours)
+
+
+# ── [S4-B] 투자 성향 프리셋 ──
+def get_preset(preset: str | None = Query(None, max_length=20, description="투자 성향 프리셋 코드(aggressive·growth·balanced·value). 비우면 balanced, 그 외 값은 422"),
+               db: Session = Depends(get_db)) -> dict:
+    code = preset or default_preset()
+    row = db.execute(text("SELECT preset_id, code, name, description FROM scoring_presets WHERE code = :c"),
+                     {"c": code}).mappings().first()
+    if row is None:
+        codes = list(db.execute(text("SELECT code FROM scoring_presets ORDER BY sort_order")).scalars())
+        raise Unprocessable(f"알 수 없는 매력도 프리셋입니다: {code}", detail={"presets": codes}, code="UNKNOWN_PRESET")
+    return dict(row)

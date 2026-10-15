@@ -1,22 +1,25 @@
 """분석 API: 종목 수치 분석·매력도, 경쟁 그룹 비교·기준일=100 차트, DB 통계.
 
-TODO(껍데기): B — 엔드포인트 본문을 원본대로 교체(queries/analysis·peers·peers_chart·stock_groups·stats_*.sql,
-  deps.get_preset, services.scoring의 FACTORS·METRICS·default_preset). 주소·인자·응답 모델은 원본 그대로다.
-  지금은 없는 종목만 404로 막고, 나머지는 docs/06 3-3·3-6 예시 값을 돌려준다(DB의 점수를 읽지 않음 → 프리셋을 바꿔도 점수가 같다).
+TODO(껍데기): B — 엔드포인트 본문을 원본대로 교체(queries/stats_*.sql). 주소·인자·응답 모델은 원본 그대로다.
+  /analysis·/scoring/presets·/peers·/peers/chart는 교체했다. 남은 /statistics/*는 docs/06 예시 값을 돌려준다.
   이번 단계에서 뺀 것: 응답의 reference·reference_note(listed 참고 점수), metrics의 dps·dividend_yield,
   통계 monthly·ranking·data-quality(Stage 5).
 """
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.deps import MarketPath, TickerPath, get_db
-from app.api.stocks import resolve_stock
+from app.api.deps import MarketPath, TickerPath, get_db, get_preset
+from app.api.stocks import RANGE_MONTHS, resolve_stock
+from app.core.errors import NotFound
+from app.queries import sql
 from app.schemas.common import INT_MAX, Num, Schema
-from app.services.scoring import FACTORS, METRICS, load_config
+from app.services.scoring import FACTORS, METRICS, default_preset
 
 router = APIRouter(prefix="/stocks", tags=["analysis"])
 stats_router = APIRouter(prefix="/statistics", tags=["statistics"])
@@ -169,74 +172,88 @@ class PeersChartOut(Schema):
     note: str
 
 
-# ------------------------------------------------------------------ 껍데기 예시 값 (docs/06 3-3·3-6, 삼성전자 기준)
-_EXAMPLE_METRICS = {"return_1w": -0.007273, "return_1m": 0.068493, "return_3m": -0.141509}
-_EXAMPLE_FACTORS = {
-    "value":    {"score": -0.0134, "weight": 0.1, "effective_weight": 0.1, "contribution": -0.0013, "available": True},
-    "quality":  {"score": 0.0025, "weight": 0.2, "effective_weight": 0.2, "contribution": 0.0005, "available": True},
-    "growth":   {"score": -0.1287, "weight": 0.4, "effective_weight": 0.4, "contribution": -0.0515, "available": True},
-    "safety":   {"score": 0.2022, "weight": 0.05, "effective_weight": 0.05, "contribution": 0.0101, "available": True},
-    "momentum": {"score": 2.1149, "weight": 0.25, "effective_weight": 0.25, "contribution": 0.5287, "available": True},
-}
-_EXAMPLE_METRIC_VALUES = {"earnings_yield": (0.024194139194139194, -0.0649, 0.1315),
-                          "book_yield": (0.23442124542124543, -0.3197, -0.1582)}
-_EXAMPLE_PEER_MEMBERS = [
-    {"stock_id": 21, "ticker": "NVDA", "name": "NVIDIA", "market": "NASDAQ", "country": "US", "currency": "USD",
-     "is_target": False, "accounting_std": "US-GAAP",
-     "values": {"return_1m": 0.038233, "return_3m": 0.227569, "return_1y": 0.276369, "per": 30.2023, "pbr": 25.1924,
-                "roe": 0.763333, "operating_margin": 0.603817, "revenue_yoy": 0.654735,
-                "market_cap_krw": 7724774625367818, "score": 68.44},
-     "ranks": {"return_1m": 4, "return_3m": 1, "return_1y": 4, "per": 2, "pbr": 5, "roe": 1, "operating_margin": 1,
-               "revenue_yoy": 1, "market_cap_krw": 1, "score": 1}},
-    {"stock_id": 24, "ticker": "AVGO", "name": "Broadcom", "market": "NASDAQ", "country": "US", "currency": "USD",
-     "is_target": False, "accounting_std": "US-GAAP",
-     "values": {"return_1m": 0.014725, "return_3m": 0.007547, "return_1y": 0.079308, "per": 46.2976, "pbr": 17.3599,
-                "roe": 0.284481, "operating_margin": 0.398892, "revenue_yoy": 0.238744,
-                "market_cap_krw": 2317262804153795, "score": 44.38},
-     "ranks": {"return_1m": 5, "return_3m": 3, "return_1y": 5, "per": 4, "pbr": 4, "roe": 3, "operating_margin": 3,
-               "revenue_yoy": 4, "market_cap_krw": 2, "score": 5}},
-]
-_EXAMPLE_PEER_AVERAGES = {"return_1m": 0.105495, "return_3m": 0.015009, "return_1y": 1.75406, "per": 61.4841,
-                          "pbr": 14.4919, "roe": 0.315413, "operating_margin": 0.345195, "revenue_yoy": 0.362657,
-                          "market_cap_krw": 2861680590488512, "score": 56.39}
-
-
-def _preset_ref(code: str | None) -> dict:
-    """요청한 프리셋의 이름표만 맞춘다(점수는 예시 그대로). 없는 code는 기본 프리셋 — 422는 B의 get_preset."""
-    presets = {p["code"]: p for p in load_config()["presets"]}
-    p = presets.get(code or "") or presets[load_config()["default_preset"]]
-    return {k: p[k] for k in ("code", "name", "description")}
-
-
 # ------------------------------------------------------------------ 종목 분석
+def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row) -> dict:
+    out = {"preset": {k: preset[k] for k in ("code", "name", "description")}}
+    if row["score_as_of"] is None:
+        return out
+    weights = dict(db.execute(text("SELECT factor, weight FROM scoring_weights WHERE preset_id = :p"),
+                              {"p": preset["preset_id"]}).all())
+    scores = {f: row[f"{f}_score"] for f in FACTORS}
+    valid_w = sum((weights[f] for f in FACTORS if scores[f] is not None), Decimal(0))
+    use = row["composite"] is not None and valid_w > 0
+    factors = {}
+    for f in FACTORS:
+        ew = (weights[f] / valid_w).quantize(Decimal("0.0001")) if use and scores[f] is not None else None
+        factors[f] = {"score": scores[f], "weight": weights[f], "effective_weight": ew,
+                      "contribution": (weights[f] / valid_w * scores[f]).quantize(Decimal("0.0001")) if ew is not None else None,
+                      "available": scores[f] is not None}
+    mv = db.execute(text("SELECT metric, raw_value, z_raw, z_adj FROM stock_metric_values WHERE stock_id = :s AND as_of = :d"),
+                    {"s": stock_id, "d": row["score_as_of"]}).mappings().all()
+    by_metric = {m["metric"]: m for m in mv}
+    metrics = [{"metric": k, "label": d.label, "factor": d.factor, "direction": d.direction,
+                **{c: by_metric[k][c] if k in by_metric else None for c in ("raw_value", "z_raw", "z_adj")}}
+               for k, d in METRICS.items()]
+    rank = ({"country": country, "position": row["rank_position"], "total": row["rank_total"],
+             "percentile": row["percentile"]} if row["rank_position"] is not None else None)
+    return {**out, "as_of": row["score_as_of"], "score": row["score"], "composite": row["composite"],
+            "factor_coverage": row["factor_coverage"], "rank": rank, "factors": factors, "metrics": metrics,
+            "data_quality": row["data_quality"] or {},
+            "peer_average": _peer_average(db, stock_id, country, preset["preset_id"], row["score_as_of"])}
+
+
+def _peer_average(db: Session, stock_id: int, country: str, preset_id: int, as_of) -> dict | None:
+    """주 그룹(같은 국가) 구성원의 팩터 점수 평균 — 섹터 중립화와 같은 범위. 구성원이 자기 자신뿐이면 None."""
+    r = db.execute(text("""
+        SELECT g.name AS group_name, COUNT(*) AS size,
+               AVG(st.value_score) AS value, AVG(st.quality_score) AS quality, AVG(st.growth_score) AS growth,
+               AVG(st.safety_score) AS safety, AVG(st.momentum_score) AS momentum
+        FROM peer_group_members me
+        JOIN peer_groups g         ON g.group_id = me.group_id
+        JOIN peer_group_members gm ON gm.group_id = me.group_id
+        JOIN stocks s              ON s.stock_id = gm.stock_id
+        JOIN markets mk            ON mk.market_id = s.market_id AND mk.country = :c
+        JOIN stock_scores st       ON st.stock_id = gm.stock_id AND st.as_of = :d AND st.preset_id = :p
+        WHERE me.stock_id = :s AND me.is_primary
+        GROUP BY g.name"""), {"s": stock_id, "c": country, "p": preset_id, "d": as_of}).mappings().first()
+    if r is None or r["size"] < 2:
+        return None
+    return {"group_name": r["group_name"], "size": r["size"],
+            "factors": {f: None if r[f] is None else Decimal(r[f]).quantize(Decimal("0.0001")) for f in FACTORS}}
+
+
 @router.get("/{market}/{ticker}/analysis", response_model=AnalysisOut,
             summary="수치 분석(v_stock_metrics) + 매력도(프리셋별 점수·팩터 기여도·지표 원값/Z·국가 내 순위)")
-def analysis(market: MarketPath, ticker: TickerPath,
-             preset: str | None = Query(None, description="aggressive·growth·balanced·value, 비우면 기본 프리셋"),
-             db: Session = Depends(get_db)):
+def analysis(market: MarketPath, ticker: TickerPath, preset: dict = Depends(get_preset), db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
-    metrics = [{"metric": k, "label": d.label, "factor": d.factor, "direction": d.direction,
-                **dict(zip(("raw_value", "z_raw", "z_adj"), _EXAMPLE_METRIC_VALUES.get(k, (None, None, None))))}
-               for k, d in METRICS.items()]
+    row = db.execute(sql("analysis"), {"stock_id": s["stock_id"], "preset_id": preset["preset_id"]}).mappings().first()
+    if row is None:
+        raise NotFound("시세가 없어 분석할 수 없습니다", code="NO_PRICE")
+    score = _attractiveness(db, s["stock_id"], s["country"], preset, row)
     return {
-        "market": s["market"], "ticker": s["ticker"], "currency": s["currency"], "as_of": "2026-10-06",
-        "valuation_as_of": "2026-10-07", "fin_period_end": "2025-12-31", "accounting_std": "K-IFRS",
-        "fx_usd_krw": 1339.83, "fx_rate_at": "2026-10-07T02:18:55.125990Z",
-        "metrics": {k: _EXAMPLE_METRICS.get(k) for k in METRIC_FIELDS},
-        "attractiveness": {"as_of": "2026-10-07", "preset": _preset_ref(preset), "score": 73.13, "composite": 0.4865,
-                           "factor_coverage": 5, "rank": {"country": "KR", "position": 5, "total": 16, "percentile": 73.3},
-                           "factors": _EXAMPLE_FACTORS, "metrics": metrics, "data_quality": {"partition": "KR"}},
+        "market": s["market"], "ticker": s["ticker"], "currency": s["currency"], "as_of": row["as_of"],
+        "valuation_as_of": row["valuation_as_of"], "fin_period_end": row["fin_period_end"],
+        "accounting_std": row["accounting_std"], "fx_usd_krw": row["fx_usd_krw"], "fx_rate_at": row["fx_rate_at"],
+        "metrics": {k: row[k] for k in METRIC_FIELDS},
+        "attractiveness": score,
         "disclaimer": SCORE_DISCLAIMER,
     }
 
 
 @scoring_router.get("/presets", response_model=PresetsOut, summary="투자 성향 프리셋(sort_order 순)과 팩터별 가중치")
-def presets():
-    cfg = load_config()
-    return {"note": PRESET_NOTE, "presets": [
-        {**{k: p[k] for k in ("code", "name", "description", "sort_order")},
-         "is_default": p["code"] == cfg["default_preset"], "weights": {f: p["weights"][f] for f in FACTORS}}
-        for p in sorted(cfg["presets"], key=lambda p: p["sort_order"])]}
+def presets(db: Session = Depends(get_db)):
+    rows = db.execute(text("""SELECT p.preset_id, p.code, p.name, p.description, p.sort_order, w.factor, w.weight
+                              FROM scoring_presets p JOIN scoring_weights w ON w.preset_id = p.preset_id
+                              ORDER BY p.sort_order, p.preset_id""")).mappings().all()
+    out: dict[int, dict] = {}
+    for r in rows:
+        p = out.setdefault(r["preset_id"], {"code": r["code"], "name": r["name"], "description": r["description"],
+                                            "sort_order": r["sort_order"],
+                                            "is_default": r["code"] == default_preset(), "weights": {}})
+        p["weights"][r["factor"]] = r["weight"]
+    for p in out.values():
+        p["weights"] = {f: p["weights"][f] for f in FACTORS}
+    return {"note": PRESET_NOTE, "presets": list(out.values())}
 
 
 # ------------------------------------------------------------------ 경쟁 비교
@@ -244,10 +261,22 @@ def presets():
             summary="경쟁 그룹별 비교 표 (그룹 내 RANK·AVG, 구성원 1명 그룹은 비교 대상 없음)")
 def peers(market: MarketPath, ticker: TickerPath, db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
+    rows = db.execute(sql("peers"), {"stock_id": s["stock_id"], "preset": default_preset()}).mappings().all()
+    groups: dict[int, dict] = {}
+    for r in rows:
+        g = groups.setdefault(r["group_id"], {
+            "group_id": r["group_id"], "name": r["group_name"], "size": r["group_size"],
+            "has_peers": r["group_size"] > 1,
+            "message": None if r["group_size"] > 1 else "이 그룹에는 비교할 경쟁 종목이 없습니다",
+            "averages": {m: r[f"{m}_avg"] for m in PEER_METRICS}, "members": []})
+        g["members"].append({
+            **{k: r[k] for k in ("stock_id", "ticker", "name", "market", "country", "currency", "is_target",
+                                 "accounting_std")},
+            "values": {m: r[m] for m in PEER_METRICS},
+            "ranks": {m: r[f"{m}_rank"] for m in PEER_METRICS}})
     return {"market": s["market"], "ticker": s["ticker"], "accounting_note": ACCOUNTING_NOTE,
             "rank_rule": "값이 있는 구성원끼리 RANK. PER·PBR은 낮을수록(양수만), 나머지는 높을수록 1위",
-            "groups": [{"group_id": 1, "name": "반도체", "size": 5, "has_peers": True, "message": None,
-                        "averages": _EXAMPLE_PEER_AVERAGES, "members": _EXAMPLE_PEER_MEMBERS}]}
+            "groups": list(groups.values())}
 
 
 @router.get("/{market}/{ticker}/peers/chart", response_model=PeersChartOut,
@@ -256,17 +285,25 @@ def peers_chart(market: MarketPath, ticker: TickerPath, range: Literal["1m", "3m
                 group_id: int | None = Query(None, ge=1, le=INT_MAX, description="비우면 종목의 첫 번째 그룹"),
                 db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
-    return {"market": s["market"], "ticker": s["ticker"], "group_id": 1, "group_name": "반도체",
-            "groups": [{"group_id": 1, "name": "반도체", "size": 5}], "range": range,
-            "dates": ["2026-09-07", "2026-09-08", "2026-09-09"],
-            "series": [
-                {"stock_id": 1, "ticker": "005930", "name": "삼성전자", "market": "KOSPI", "is_target": True,
-                 "values": [100, 99.8148, 99.8148]},
-                {"stock_id": 2, "ticker": "000660", "name": "SK하이닉스", "market": "KOSPI", "is_target": False,
-                 "values": [100, 100.5609, 104.0942]},
-                {"stock_id": 25, "ticker": "AMD", "name": "AMD", "market": "NASDAQ", "is_target": False,
-                 "values": [None, 100, 103.0371]},
-            ],
+    my_groups = [dict(r) for r in db.execute(sql("stock_groups"), {"stock_id": s["stock_id"]}).mappings()]
+    if not my_groups:
+        raise NotFound("이 종목은 경쟁 그룹에 속해 있지 않습니다", code="NO_PEER_GROUP")
+    target = next((g for g in my_groups if g["group_id"] == group_id), None) if group_id else my_groups[0]
+    if target is None:
+        raise NotFound(f"이 종목은 그룹(ID {group_id})에 속해 있지 않습니다", code="GROUP_NOT_FOUND")
+    rows = db.execute(sql("peers_chart"), {"group_id": target["group_id"], "stock_id": s["stock_id"],
+                                           "months": RANGE_MONTHS[range]}).mappings().all()
+    dates = sorted({r["trade_date"] for r in rows})
+    pos = {d: i for i, d in enumerate(dates)}
+    series: dict[int, dict] = {}
+    for r in rows:
+        sr = series.setdefault(r["stock_id"], {"stock_id": r["stock_id"], "ticker": r["ticker"], "name": r["name"],
+                                               "market": r["market"], "is_target": r["stock_id"] == s["stock_id"],
+                                               "values": [None] * len(dates)})
+        sr["values"][pos[r["trade_date"]]] = r["indexed"]
+    return {"market": s["market"], "ticker": s["ticker"], "group_id": target["group_id"],
+            "group_name": target["name"], "groups": my_groups, "range": range, "dates": dates,
+            "series": sorted(series.values(), key=lambda x: (not x["is_target"], x["ticker"])),
             "note": "각 종목의 구간 첫 거래일 종가 = 100. 시장별 휴장일이 달라 해당 날짜 값은 null(선 연결 표시)."}
 
 
