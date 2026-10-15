@@ -80,6 +80,15 @@ export const updatePortfolioItem = (id, itemId, body) => api.put(`/portfolios/${
 export const deletePortfolioItem = (id, itemId) => api.del(`/portfolios/${id}/items/${itemId}`);
 
 // ── [S3-A] 갱신 상태 ──
+// 재무(FY)·공시 — 상세 화면의 재무 추이·최근 공시
+export const getFinancials = (market, ticker, limit = 5) =>
+  api.get(`/stocks/${market}/${ticker}/financials`, { limit });
+export const getDisclosures = (market, ticker, limit = 5) =>
+  api.get(`/stocks/${market}/${ticker}/disclosures`, { limit });
+
+// 사이드바의 마지막 갱신 시각·갱신 버튼
+export const getRefreshStatus = () => api.get("/market/refresh/status");
+export const postRefresh = () => api.post("/market/refresh");
 
 // ── [S4-A] 매력도 프리셋 · 분석 ──
 
