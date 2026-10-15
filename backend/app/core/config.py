@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     krx_pw: str = ""
     # ── [S2-D] 사용자·갱신 TTL ──
     default_user_id: int = Field(default=1, ge=1)   # 인증 없는 단일 사용자(demo) 모드: get_current_user_id가 돌려주는 값
+    # 게스트 세션(배포용): 켜면 브라우저마다 쿠키로 게스트 사용자를 나눈다. 쿠키가 없을 때 조회는 default_user_id를 보여 준다
+    guest_session_enabled: bool = False
+    session_secret: str = ""                         # 세션 쿠키 서명 키. guest_session_enabled=true면 필수 (인스턴스끼리 같아야 함)
     refresh_ttl_hours: float = Field(default=4, ge=3, le=4)   # 같은 종류 외부 호출은 이 시간에 최대 1회 (FxService TTL)
     # ── [S3-D] 재무·공시 소스 ── (비어 있으면 factory가 DART·SEC provider를 만들지 않는다)
     dart_api_key: str = ""
