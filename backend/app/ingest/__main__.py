@@ -7,6 +7,7 @@
     python -m app.ingest indices [--full]
     python -m app.ingest fx [--full]         # USD/KRW DAILY
     python -m app.ingest seed-demo           # demo 관심종목 8건 + 모의 포트폴리오 2개
+    python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용)
 """
 from __future__ import annotations
 
@@ -35,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_parser(name).add_argument("--full", action="store_true")
     # ── [S2-D] 데모 데이터 ──
     sub.add_parser("seed-demo")
+    # ── [S3-D] 갱신 ──
+    sub.add_parser("refresh")
     args = ap.parse_args(argv)
 
     setup_logging(get_settings().log_level)
@@ -64,6 +67,17 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "seed-demo":
         from app.ingest.demo import seed_demo
         print(seed_demo(engine, providers()))
+    # ── [S3-D] 갱신 ──
+    elif args.cmd == "refresh":
+        # 갱신 정책은 API(POST /market/refresh)와 같다: 작업별 TTL 이내면 SKIPPED
+        from app.services.fx import FxService
+        from app.services.refresh import RefreshService
+        pv = providers()
+        ttl = get_settings().refresh_ttl_hours
+        result = RefreshService(engine, pv, FxService(engine, pv.fx, ttl), ttl).refresh()
+        for j in result.jobs:
+            print(f"{j.job_type:<10} {j.status:<8} {j.detail or ''}")
+        print("next_refresh_available_at:", result.next_refresh_available_at.isoformat())
     print(f"[{args.cmd}] 완료 {time.monotonic() - t0:.1f}s")
     return 0
 

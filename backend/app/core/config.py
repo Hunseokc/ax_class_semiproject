@@ -36,7 +36,10 @@ class Settings(BaseSettings):
     # ── [S3-D] 재무·공시 소스 ── (비어 있으면 factory가 DART·SEC provider를 만들지 않는다)
     dart_api_key: str = ""
     sec_user_agent: str = ""                         # 연락처(이메일)가 들어간 User-Agent — SEC EDGAR 필수
-    # 이후 단계 설정(스케줄러 등)은 해당 단계 담당자가 이 클래스에 추가한다
+    # ── [S3-D] 스케줄러 ──
+    scheduler_enabled: bool = True                       # 앱 안 스케줄러(4시간 갱신)
+    scheduler_check_minutes: int = Field(default=5, ge=1)
+    # 이후 단계 설정은 해당 단계 담당자가 이 클래스에 추가한다
 
 
 @lru_cache

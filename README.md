@@ -97,6 +97,24 @@ docker compose run --rm api python -m app.ingest fx --full       # USD/KRW 일�
 
 대상 종목·지수 목록은 [`backend/config/universe.yaml`](backend/config/universe.yaml)에서 정합니다.
 
+#### 환경변수 (Stage 3)
+| 변수 | 필수/선택 | 설명 |
+|---|---|---|
+| `KRX_ID`, `KRX_PW` | **필수**(국내 소스 pykrx 사용 시) | pykrx 1.2.x의 시총·PER/PBR·지수 조회에 필요한 KRX 정보데이터시스템 계정. 없으면 시총·펀더멘털·지수가 빈 결과([troubleshooting 1](docs/troubleshooting.md)) |
+| `DART_API_KEY` | **필수**(국내 재무·공시) | OpenDART 인증키 |
+| `SEC_USER_AGENT` | **필수**(미국 재무·공시) | 연락처(이메일)가 들어간 User-Agent |
+| `REFRESH_TTL_HOURS` | 선택 | 같은 종류 외부 호출 최소 간격(시간, 3~4, 기본 4) |
+| `SCHEDULER_ENABLED` | 선택 | 앱 안 스케줄러 사용 여부 (기본 true — 4시간 갱신) |
+| `SCHEDULER_CHECK_MINUTES` | 선택 | 스케줄러가 할 일을 확인하는 간격(분, 기본 5) |
+| `EXTRA_CA_DIR` | 선택 (compose) | 추가 CA 인증서 폴더(아래 TLS 검사 환경) |
+
+- **TLS 검사(백신·사내 프록시) 환경**: 호스트에서 HTTPS가 가로채져 인증서 오류가 나면, 그 루트 인증서(`*.pem`·`*.crt`)를 `certs/`에 두거나 `.env`에 `EXTRA_CA_DIR=<폴더>`를 지정합니다. entrypoint가 시스템 CA 번들에 합쳐 requests·curl_cffi(yfinance)·ssl 모두에 적용합니다. 예) Norton: `C:/ProgramData/Norton/Antivirus/wscert.pem`
+
+#### 자동 갱신
+- **앱 안 스케줄러**(`SCHEDULER_ENABLED=true`, 기본): 서버가 떠 있는 동안 5분마다 확인해 환율·지수·일봉·밸류에이션을 4시간 TTL로 갱신합니다. 일부 종목만 실패한 작업은 30분 뒤 실패한 종목만 다시 받고, 여러 프로세스가 동시에 돌려도 DB 잠금으로 한 번만 실행됩니다.
+- 화면의 갱신 버튼은 `POST /api/v1/market/refresh`, 사이드바의 마지막 갱신 시각은 `GET /api/v1/market/refresh/status`(외부 호출 없음)입니다.
+- 서버를 띄우지 않을 때는 `SCHEDULER_ENABLED=false`로 두고 `python -m app.ingest refresh`를 직접(cron 등) 실행합니다.
+
 ### 테스트
 
 ```bash
