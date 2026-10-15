@@ -77,12 +77,16 @@ def yf_symbol(market: str, ticker: str) -> str:
     return {"KOSPI": f"{ticker}.KS", "KOSDAQ": f"{ticker}.KQ"}.get(market, ticker)
 
 
-def stock_refs(conn: Connection, tickers: list[str] | None = None) -> list[StockRef]:
-    """수집 대상(활성 종목). tickers를 주면 그 종목만.
+def stock_refs(conn: Connection, tickers: list[str] | None = None, *,
+               stock_ids: list[int] | None = None) -> list[StockRef]:
+    """수집 대상(활성 종목). tickers·stock_ids를 주면 그 종목만(stock_ids는 비활성 종목도 포함).
     yfinance 심볼은 universe.yaml 값을 쓰고, 없으면 시장 규칙(.KS/.KQ)으로 만든다."""
-    where, params = "s.is_active", {}
-    if tickers:
+    if stock_ids:
+        where, params = "s.stock_id = ANY(:ids)", {"ids": stock_ids}
+    elif tickers:
         where, params = "s.is_active AND s.ticker = ANY(:tickers)", {"tickers": tickers}
+    else:
+        where, params = "s.is_active", {}
     yf = {(s.market, s.ticker): s.yf_symbol for s in load_universe().stocks}
     rows = conn.execute(text(f"""
         SELECT s.stock_id, m.code, m.country, s.ticker, m.timezone, s.corp_code, s.cik
