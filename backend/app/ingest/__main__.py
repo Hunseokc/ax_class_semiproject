@@ -11,8 +11,10 @@
     python -m app.ingest financials [--years 5] [--tickers 005930 AAPL]   # FY 재무 (국내 DART, 미국 SEC)
     python -m app.ingest disclosures [--days 365] [--tickers 005930]      # 최근 공시
     python -m app.ingest all                 # master → prices → indices → fx → financials → valuation → disclosures
+    python -m app.ingest scores              # 매력도 점수 재생성 (오늘 as_of, DELETE 후 INSERT)
+    python -m app.ingest explain             # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
     python -m app.ingest seed-demo           # demo 관심종목 8건 + 모의 포트폴리오 2개
-    python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용)
+    python -m app.ingest refresh            # POST /market/refresh와 같은 TTL 갱신 (cron용)
 """
 from __future__ import annotations
 
@@ -56,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tickers", nargs="*")
     sub.add_parser("all")
     # ── [S4-C] 매력도 ──
+    for name in ("scores", "explain"):
+        sub.add_parser(name)
     args = ap.parse_args(argv)
 
     setup_logging(get_settings().log_level)
@@ -116,6 +120,13 @@ def main(argv: list[str] | None = None) -> int:
         jobs.load_valuations(engine, pv)
         jobs.load_disclosures(engine, pv)
     # ── [S4-C] 매력도 ──
+    elif args.cmd == "scores":
+        from app.services.scoring import compute_scores
+        print("stock_scores rows:", compute_scores(engine))
+    elif args.cmd == "explain":
+        from app.ingest import explain
+        print(explain.run(engine))
+        print("→ docs/explain_result.md")
     print(f"[{args.cmd}] 완료 {time.monotonic() - t0:.1f}s")
     return 0
 
