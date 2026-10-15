@@ -6,10 +6,7 @@
   3) 프리셋별 팩터 점수·종합·100·Φ 변환 → stock_scores
 정의·근거는 docs/09_매력도_점수_정의서.md.
 
-TODO(껍데기): C — 이 파일 전체. 이름·인자·반환 타입과 FACTORS·METRICS는 원본 그대로이고 본문만 비어 있다.
-  - load_config: config/scoring.yaml을 읽고 validate_presets로 검증 (지금은 아래 _SHELL_CONFIG를 돌려줌)
-  - validate_presets: 가중치 합 = 1 등 검증 (지금은 검사하지 않음)
-  - sync_presets: 설정에서 빠진 프리셋 삭제까지 원본대로 (지금은 _SHELL_CONFIG 4종을 upsert만 — init-db·migrate가 호출)
+TODO(껍데기): C — 계산 단계. 이름·인자·반환 타입은 원본 그대로이고 본문만 비어 있다.
   - insert_metric_values·normalize·aggregate·compute_scores: 계산 3단계 (지금은 아무것도 쓰지 않고 0 반환)
   그동안 화면·API용 점수는 seed-demo가 넣는 시드 행(app/ingest/demo.py)이 대신한다.
 """
@@ -17,10 +14,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
+import yaml
 from sqlalchemy import Connection, Engine, text
+
+from app.core.config import CONFIG_DIR
 
 SEOUL = ZoneInfo("Asia/Seoul")
 FACTORS = ("value", "quality", "growth", "safety", "momentum")
@@ -48,26 +49,12 @@ METRICS: dict[str, Metric] = {
 }
 NEGATIVE_METRICS = [k for k, m in METRICS.items() if m.direction < 0]
 
-# 껍데기 전용: 원본 config/scoring.yaml(= migration 002_presets)과 같은 값. C가 scoring.yaml을 만들면 지운다
-_SHELL_CONFIG = {
-    "shrinkage_k": 5,
-    "default_preset": "balanced",
-    "presets": [
-        {"code": "aggressive", "name": "위험", "description": "모멘텀·성장 중심", "sort_order": 1,
-         "weights": {"value": 0.05, "quality": 0.10, "growth": 0.35, "safety": 0.10, "momentum": 0.40}},
-        {"code": "growth", "name": "성장", "description": "성장성 중심", "sort_order": 2,
-         "weights": {"value": 0.10, "quality": 0.20, "growth": 0.40, "safety": 0.05, "momentum": 0.25}},
-        {"code": "balanced", "name": "균형", "description": "5개 팩터 균등", "sort_order": 3,
-         "weights": {"value": 0.20, "quality": 0.20, "growth": 0.20, "safety": 0.20, "momentum": 0.20}},
-        {"code": "value", "name": "가치", "description": "저평가·안정성 중심", "sort_order": 4,
-         "weights": {"value": 0.40, "quality": 0.20, "growth": 0.10, "safety": 0.20, "momentum": 0.10}},
-    ],
-}
-
-
 # ------------------------------------------------------------------ 설정·프리셋
 def load_config() -> dict:
-    return _SHELL_CONFIG
+    with open(CONFIG_DIR / "scoring.yaml", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    validate_presets(cfg["presets"])
+    return cfg
 
 
 @lru_cache
@@ -77,21 +64,40 @@ def default_preset() -> str:
 
 def validate_presets(presets: list[dict]) -> None:
     """프리셋별 가중치 합 = 1 (행 간 제약이라 DB CHECK 대신 적재 시 검증)."""
+    if not presets:
+        raise ValueError("scoring.yaml에 프리셋이 없습니다")
+    orders = [p.get("sort_order") for p in presets]
+    if not all(isinstance(o, int) for o in orders) or len(set(orders)) != len(orders):
+        raise ValueError("프리셋마다 서로 다른 정수 sort_order가 필요합니다")
+    for p in presets:
+        w = {k: Decimal(str(v)) for k, v in p["weights"].items()}
+        if set(w) != set(FACTORS):
+            raise ValueError(f"프리셋 {p['code']}: 팩터 5개({', '.join(FACTORS)})의 가중치가 모두 필요합니다")
+        if any(v < 0 or v > 1 or v != v.quantize(Decimal("0.001")) for v in w.values()):
+            raise ValueError(f"프리셋 {p['code']}: 가중치는 0~1, 소수점 셋째 자리까지입니다")
+        if sum(w.values()) != 1:
+            raise ValueError(f"프리셋 {p['code']}: 가중치 합이 1이 아닙니다 ({sum(w.values())})")
 
 
 def sync_presets(conn: Connection, cfg: dict | None = None) -> None:
-    """scoring.yaml 프리셋을 scoring_presets·scoring_weights에 맞춘다(재실행 안전)."""
+    """scoring.yaml 프리셋을 scoring_presets·scoring_weights에 맞춘다(재실행 안전).
+    설정에서 빠진 프리셋은 그 점수 행과 함께 삭제한다."""
     cfg = cfg or load_config()
+    codes = [p["code"] for p in cfg["presets"]]
+    removed = "SELECT preset_id FROM scoring_presets WHERE NOT (code = ANY(CAST(:codes AS text[])))"
+    conn.execute(text(f"DELETE FROM stock_scores WHERE preset_id IN ({removed})"), {"codes": codes})
+    conn.execute(text(f"DELETE FROM scoring_presets WHERE preset_id IN ({removed})"), {"codes": codes})
     for p in cfg["presets"]:
         pid = conn.execute(text("""
             INSERT INTO scoring_presets (code, name, description, sort_order) VALUES (:code, :name, :description, :sort_order)
             ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description,
                                              sort_order = EXCLUDED.sort_order
-            RETURNING preset_id"""), {k: p[k] for k in ("code", "name", "description", "sort_order")}).scalar_one()
+            RETURNING preset_id"""), {"code": p["code"], "name": p["name"], "description": p.get("description"),
+                                      "sort_order": p["sort_order"]}).scalar_one()
         conn.execute(text("""
             INSERT INTO scoring_weights (preset_id, factor, weight) VALUES (:pid, :factor, :weight)
             ON CONFLICT (preset_id, factor) DO UPDATE SET weight = EXCLUDED.weight"""),
-            [{"pid": pid, "factor": k, "weight": v} for k, v in p["weights"].items()])
+            [{"pid": pid, "factor": k, "weight": Decimal(str(v))} for k, v in p["weights"].items()])
 
 
 # ------------------------------------------------------------------ 계산 단계
