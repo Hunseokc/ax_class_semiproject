@@ -6,6 +6,7 @@ Stage 1은 일봉·지수·환율만 있다. 밸류에이션·재무·공시·�
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 
 from app.core.config import get_settings
 from app.providers import base
@@ -49,20 +50,36 @@ class Providers:
         return self.kr_disclosure if country == "KR" else self.us_disclosure
 
 
+class _Lazy:
+    """API 키가 없으면 생성 시점에 실패하므로 처음 쓸 때 만든다."""
+
+    @cached_property
+    def dart(self):
+        from app.providers.dart import DartClient
+        return DartClient()
+
+    @cached_property
+    def sec(self):
+        from app.providers.sec import SecClient
+        return SecClient()
+
+
 def default_providers() -> Providers:
     from app.providers.krx import KrxProvider
     from app.providers.yahoo import YahooProvider
 
     s = get_settings()
-    yahoo = YahooProvider()
+    yahoo, lazy = YahooProvider(), _Lazy()
     # PRICE_SOURCE_KR=yfinance면 국내도 yfinance(.KS/.KQ 심볼)로 받는다 — pykrx가 막혔을 때의 대체 경로
     kr = KrxProvider() if s.price_source_kr == "pykrx" else yahoo
+    dart = lazy.dart if s.dart_api_key else None
+    sec = lazy.sec if "@" in s.sec_user_agent else None
     return Providers(
         kr_price=kr, us_price=yahoo, kr_index=kr, us_index=yahoo, fx=yahoo,
         # TODO(껍데기): C — kr_valuation·us_valuation·kr_bulk·us_batch_price 연결 (지금은 None → 해당 작업 건너뜀)
         # ── [S3-C] 밸류에이션·대량 조회 ──
         kr_valuation=None, us_valuation=None, kr_bulk=None, us_batch_price=None,
-        # TODO(껍데기): B — dart·sec 연결 (원본 _Lazy: API 키가 없으면 None)
         # ── [S3-B] 재무·공시 ──
-        kr_financial=None, us_financial=None, us_financial_supplement=None, kr_disclosure=None, us_disclosure=None,
+        # us_financial_supplement(원본: yahoo)는 stage3 yahoo.py에 get_annual_financials가 없어 None — 보충 없이 SEC 값만 쓴다
+        kr_financial=dart, us_financial=sec, us_financial_supplement=None, kr_disclosure=dart, us_disclosure=sec,
     )
