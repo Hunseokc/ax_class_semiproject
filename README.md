@@ -107,6 +107,8 @@ docker compose run --rm api python -m app.ingest fx --full       # USD/KRW 일�
 | `SCHEDULER_ENABLED` | 선택 | 앱 안 스케줄러 사용 여부 (기본 true — 4시간 갱신) |
 | `SCHEDULER_CHECK_MINUTES` | 선택 | 스케줄러가 할 일을 확인하는 간격(분, 기본 5) |
 | `EXTRA_CA_DIR` | 선택 (compose) | 추가 CA 인증서 폴더(아래 TLS 검사 환경) |
+| `GUEST_SESSION_ENABLED` | 선택 (배포) | 브라우저별 게스트 세션 사용 여부 (기본 false = 단일 데모 사용자). 쿠키가 HTTPS 전용이라 로컬 http에서는 false |
+| `SESSION_SECRET` | **필수**(`GUEST_SESSION_ENABLED=true`일 때) | 세션 쿠키 서명 키 — 인스턴스끼리 같아야 하므로 Cloud Run에서는 Secret Manager로 주입. 생성: `python -c "import secrets; print(secrets.token_hex(32))"` |
 
 - **TLS 검사(백신·사내 프록시) 환경**: 호스트에서 HTTPS가 가로채져 인증서 오류가 나면, 그 루트 인증서(`*.pem`·`*.crt`)를 `certs/`에 두거나 `.env`에 `EXTRA_CA_DIR=<폴더>`를 지정합니다. entrypoint가 시스템 CA 번들에 합쳐 requests·curl_cffi(yfinance)·ssl 모두에 적용합니다. 예) Norton: `C:/ProgramData/Norton/Antivirus/wscert.pem`
 
