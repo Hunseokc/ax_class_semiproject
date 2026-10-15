@@ -1,16 +1,15 @@
-"""pykrx 기반 국내 시세·지수.
+"""pykrx 기반 국내 시세·지수·밸류에이션.
 
-pykrx 1.2.x는 지수 등 일부 조회에 KRX 로그인이 필요하다(ASSUMPTIONS A-01).
+pykrx 1.2.x는 시총·펀더멘털·지수 조회에 KRX 로그인이 필요하다(ASSUMPTIONS A-01).
 로그인 정보는 import 전에 환경변수로 내보내야 하므로 모듈 import를 지연한다.
-밸류에이션·날짜별 전 종목 조회·업종 분류·상장 목록은 Stage 3에서 추가한다.
 """
 from __future__ import annotations
 
 from datetime import date
 
 from app.core.config import export_krx_credentials
-from app.providers.base import Bar, IndexRef, StockRef
-from app.providers.convert import to_dec, to_int
+from app.providers.base import Bar, IndexRef, StockRef, Valuation
+from app.providers.convert import positive_or_none, to_dec, to_int
 from app.providers.http import Throttle, call_with_retry
 
 _throttle = Throttle(0.7)
@@ -39,7 +38,7 @@ def _bars(df, has_volume: bool) -> list[Bar]:
 
 
 class KrxProvider:
-    """PriceProvider + IndexProvider (KR)."""
+    """PriceProvider + IndexProvider + ValuationProvider (KR)."""
     source = "PYKRX"
 
     def get_daily_prices(self, stock: StockRef, start: date, end: date) -> list[Bar]:
@@ -55,3 +54,61 @@ class KrxProvider:
             lambda: s.get_index_ohlcv(_ymd(start), _ymd(end), index.pykrx_code),
             throttle=_throttle, what=f"pykrx index {index.code}")
         return _bars(df, has_volume=False)
+
+    # ------------------------------------------------------------ 날짜별 전 종목 (호출 1회)
+    def get_bars_by_date(self, day: date) -> dict[str, Bar]:
+        """그날 전 종목 일봉(수정 전 가격) + 등락률. 휴장일은 빈 dict. 거래정지(시가 0·거래량 0)는 빼고 돌려준다."""
+        s = _stock()
+        df = call_with_retry(lambda: s.get_market_ohlcv(_ymd(day), market="ALL"),
+                             throttle=_throttle, what=f"pykrx ohlcv all {day}")
+        out = {}
+        for t, r in df.iterrows():
+            if not to_dec(r.get("시가")) or not to_int(r.get("거래량")):
+                continue
+            out[str(t)] = Bar(trade_date=day, open=to_dec(r.get("시가")), high=to_dec(r.get("고가")),
+                              low=to_dec(r.get("저가")), close=to_dec(r.get("종가")), volume=to_int(r.get("거래량")),
+                              change_rate=to_dec(r.get("등락률")))
+        return out
+
+    def get_valuations_by_date(self, day: date) -> dict[str, Valuation]:
+        s = _stock()
+        fund = call_with_retry(lambda: s.get_market_fundamental(_ymd(day), market="ALL"),
+                               throttle=_throttle, what=f"pykrx fundamental all {day}")
+        cap = call_with_retry(lambda: s.get_market_cap(_ymd(day), market="ALL"),
+                              throttle=_throttle, what=f"pykrx market_cap all {day}")
+        caps = {str(t): r for t, r in cap.iterrows()}
+        out = {}
+        for t, r in fund.iterrows():
+            c = caps.get(str(t))
+            eps, bps = to_dec(r.get("EPS")), to_dec(r.get("BPS"))
+            out[str(t)] = Valuation(
+                as_of=day, per=positive_or_none(to_dec(r.get("PER"))), pbr=positive_or_none(to_dec(r.get("PBR"))),
+                eps=eps if eps not in (None, 0) else None, bps=bps if bps not in (None, 0) else None,
+                market_cap=to_dec(c.get("시가총액")) if c is not None else None,
+                shares_outstanding=to_int(c.get("상장주식수")) if c is not None else None)
+        return out
+
+    def get_valuations(self, stock: StockRef, start: date, end: date) -> list[Valuation]:
+        s = _stock()
+        fund = call_with_retry(
+            lambda: s.get_market_fundamental(_ymd(start), _ymd(end), stock.ticker),
+            throttle=_throttle, what=f"pykrx fundamental {stock.ticker}")
+        cap = call_with_retry(
+            lambda: s.get_market_cap(_ymd(start), _ymd(end), stock.ticker),
+            throttle=_throttle, what=f"pykrx market_cap {stock.ticker}")
+        caps = {ts.date(): r for ts, r in cap.iterrows()}
+        out = []
+        for ts, r in fund.iterrows():
+            c = caps.get(ts.date())
+            eps, bps = to_dec(r.get("EPS")), to_dec(r.get("BPS"))
+            out.append(Valuation(
+                as_of=ts.date(),
+                # KRX는 산출 불가(적자 등)를 0으로 표기 → NULL
+                per=positive_or_none(to_dec(r.get("PER"))),
+                pbr=positive_or_none(to_dec(r.get("PBR"))),
+                eps=eps if eps not in (None, 0) else None,
+                bps=bps if bps not in (None, 0) else None,
+                market_cap=to_dec(c.get("시가총액")) if c is not None else None,
+                shares_outstanding=to_int(c.get("상장주식수")) if c is not None else None,
+            ))
+        return out
