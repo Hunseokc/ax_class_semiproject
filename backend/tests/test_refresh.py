@@ -15,9 +15,8 @@ def service(engine, providers):
 
 
 def call_counts(p) -> dict:
-    # TODO(연결): C의 fakes.py 밸류에이션 fake·load_valuations — 연결 시 "valuation": p.kr_valuation.count 추가
     return {"fx_current": p.fx.current.count, "fx_daily": p.fx.daily.count, "indices": p.kr_index.count,
-            "prices": p.kr_price.count}
+            "prices": p.kr_price.count, "valuation": p.kr_valuation.count}
 
 
 def expire_all(engine) -> None:
@@ -27,8 +26,7 @@ def expire_all(engine) -> None:
         conn.execute(text("UPDATE fx_rates SET rate_at = rate_at - interval '5 hours' WHERE granularity = 'SNAPSHOT'"))
 
 
-# TODO(연결): C의 load_valuations — 연결 시 "valuation": 4 추가
-EXPECTED_ONE_RUN = {"fx_current": 1, "fx_daily": 1, "indices": 1, "prices": 4}  # 지수 1개, 종목 4개
+EXPECTED_ONE_RUN = {"fx_current": 1, "fx_daily": 1, "indices": 1, "prices": 4, "valuation": 4}  # 지수 1개, 종목 4개
 
 
 def test_first_refresh_runs_every_job_once(engine):
