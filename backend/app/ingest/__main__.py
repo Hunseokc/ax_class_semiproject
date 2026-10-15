@@ -6,6 +6,8 @@
     python -m app.ingest prices [--full] [--tickers 005930 AAPL]   # 종목 일봉 (국내 pykrx, 미국 yfinance)
     python -m app.ingest indices [--full]
     python -m app.ingest fx [--full]         # USD/KRW DAILY
+    python -m app.ingest financials [--years 5] [--tickers 005930 AAPL]   # FY 재무 (국내 DART, 미국 SEC)
+    python -m app.ingest disclosures [--days 365] [--tickers 005930]      # 최근 공시
     python -m app.ingest seed-demo           # demo 관심종목 8건 + 모의 포트폴리오 2개
     python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용)
 """
@@ -36,6 +38,13 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_parser(name).add_argument("--full", action="store_true")
     # ── [S2-D] 데모 데이터 ──
     sub.add_parser("seed-demo")
+    # ── [S3-B] 재무·공시 ──
+    p = sub.add_parser("financials")
+    p.add_argument("--years", type=int, default=jobs.FIN_YEARS)
+    p.add_argument("--tickers", nargs="*")
+    p = sub.add_parser("disclosures")
+    p.add_argument("--days", type=int, default=jobs.DISCLOSURE_DAYS)
+    p.add_argument("--tickers", nargs="*")
     # ── [S3-D] 갱신 ──
     sub.add_parser("refresh")
     args = ap.parse_args(argv)
@@ -67,6 +76,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "seed-demo":
         from app.ingest.demo import seed_demo
         print(seed_demo(engine, providers()))
+    # ── [S3-B] 재무·공시 ──
+    elif args.cmd == "financials":
+        jobs.load_financials(engine, providers(), years=args.years, tickers=args.tickers)
+    elif args.cmd == "disclosures":
+        jobs.load_disclosures(engine, providers(), days=args.days, tickers=args.tickers)
     # ── [S3-D] 갱신 ──
     elif args.cmd == "refresh":
         # 갱신 정책은 API(POST /market/refresh)와 같다: 작업별 TTL 이내면 SKIPPED
