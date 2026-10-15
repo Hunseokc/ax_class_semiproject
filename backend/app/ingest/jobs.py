@@ -5,17 +5,18 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Connection, Engine, text
+from sqlalchemy import Engine, text
 
 from app.core.config import ROOT_DIR
-from app.ingest.preprocess import clean_bars, clean_fx
+from app.ingest.preprocess import Quarantined, clean_bars, clean_fx
 from app.ingest.store import job_log, upsert
-from app.ingest.universe import load_universe, yf_symbol
-from app.providers.base import IndexRef, StockRef
+from app.ingest.universe import index_refs, load_universe, stock_refs
+from app.providers.base import ProviderError
 from app.providers.factory import Providers
 
 log = logging.getLogger(__name__)
@@ -81,33 +82,8 @@ def load_master(engine: Engine, offline: bool = True) -> None:
 
 
 # ── [S1-D] 시세 수집 ──
-# 원본의 대량 경로(load_prices_bulk)·밸류에이션·재무·공시, 갱신 범위(scope) 구분은 Stage 3에서 추가한다.
+# 수집 대상(stock_refs·index_refs)은 universe.py에 있다. 갱신 범위(scope) 구분은 Stage 4에서 추가한다.
 PRICE_HISTORY_DAYS = 730       # 약 2년 → 종목당 약 485~500봉
-
-
-def stock_refs(conn: Connection, tickers: list[str] | None = None) -> list[StockRef]:
-    """수집 대상(활성 종목). tickers를 주면 그 종목만.
-    yfinance 심볼은 universe.yaml 값을 쓰고, 없으면 시장 규칙(.KS/.KQ)으로 만든다."""
-    where, params = "s.is_active", {}
-    if tickers:
-        where, params = "s.is_active AND s.ticker = ANY(:tickers)", {"tickers": tickers}
-    yf = {(s.market, s.ticker): s.yf_symbol for s in load_universe().stocks}
-    rows = conn.execute(text(f"""
-        SELECT s.stock_id, m.code, m.country, s.ticker, m.timezone, s.corp_code, s.cik
-        FROM stocks s JOIN markets m ON m.market_id = s.market_id
-        WHERE {where} ORDER BY s.stock_id"""), params).all()
-    return [StockRef(stock_id=r[0], market=r[1], country=r[2], ticker=r[3],
-                     yf_symbol=yf.get((r[1], r[3])) or yf_symbol(r[1], r[3]),
-                     timezone=r[4], corp_code=r[5], cik=r[6]) for r in rows]
-
-
-def index_refs(conn: Connection) -> list[IndexRef]:
-    meta = {i.code: i for i in load_universe().indices}
-    rows = conn.execute(text("""
-        SELECT i.index_id, i.code, m.country, m.timezone
-        FROM indices i JOIN markets m ON m.market_id = i.market_id ORDER BY i.display_order""")).all()
-    return [IndexRef(index_id=r[0], code=r[1], country=r[2], timezone=r[3],
-                     pykrx_code=meta[r[1]].pykrx, yf_symbol=meta[r[1]].yf_symbol) for r in rows]
 
 
 def _start_date(last: date | None, full: bool, history_days: int, today: date) -> date:
@@ -132,12 +108,12 @@ def _no_session(start: date, end: date) -> str | None:
 
 def load_prices(engine: Engine, providers: Providers, *, full: bool = False,
                 tickers: list[str] | None = None, today: date | None = None,
-                history_days: int = PRICE_HISTORY_DAYS) -> dict[str, str]:
+                stock_ids: list[int] | None = None, history_days: int = PRICE_HISTORY_DAYS) -> dict[str, str]:
     """종목 일봉. 기본은 증분(저장된 마지막 날짜 다음 날부터), --full이면 history_days(기본 2년) 전체 재수집."""
     today = today or date.today()
     statuses = {}
     with engine.connect() as conn:
-        refs = stock_refs(conn, tickers)
+        refs = stock_refs(conn, tickers, stock_ids=stock_ids)
         last = dict(conn.execute(text("SELECT stock_id, MAX(trade_date) FROM daily_prices GROUP BY stock_id")).all())
     for ref in refs:
         p = providers.price(ref.country)
@@ -211,21 +187,251 @@ def load_fx_daily(engine: Engine, providers: Providers, *, full: bool = False, t
 # ── [S3-C] 대량 일봉·밸류에이션 ──
 # D의 RefreshService가 load_prices_bulk·load_valuations를 부른다. 반환은 {대상: 상태}
 VALUATION_HISTORY_DAYS = 365   # KR 일별 밸류에이션 1년
+DATA_CUTOFF = {"KR": (ZoneInfo("Asia/Seoul"), time(18, 0)), "US": (ZoneInfo("America/New_York"), time(17, 0))}
+MAX_BULK_GAP_DAYS = 20         # 마지막 일봉이 이보다 오래된 종목은 날짜별 전 종목 조회 대신 종목별로 받는다
+ADJ_TOLERANCE = Decimal("0.005")   # 저장된 전일 종가로 계산한 값과 0.5% 넘게 다르면 수정주가 이벤트(분할·증자·배당)로 본다
 
 
-# TODO(껍데기): C — 원본 load_prices_bulk로 교체 (지금은 아무것도 받지 않고 빈 결과)
+def last_closed_day(country: str, now: datetime | None = None) -> date:
+    """데이터가 확정된 가장 최근 평일. 휴장일은 조회 결과가 비어 건너뛴다(장 마감 전 값 미적재, A-07)."""
+    tz, cutoff = DATA_CUTOFF[country]
+    local = (now or datetime.now(timezone.utc)).astimezone(tz)
+    d = local.date() if local.time() >= cutoff else local.date() - timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def _last_prices(engine: Engine, stock_ids: list[int]) -> dict[int, tuple[date, Decimal]]:
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT DISTINCT ON (stock_id) stock_id, trade_date, close FROM daily_prices
+            WHERE stock_id = ANY(:ids) ORDER BY stock_id, trade_date DESC"""), {"ids": stock_ids}).all()
+    return {r.stock_id: (r.trade_date, r.close) for r in rows}
+
+
+def _bar_row(stock_id: int, b) -> dict:
+    return {"stock_id": stock_id, "trade_date": b.trade_date, "open": b.open, "high": b.high, "low": b.low,
+            "close": b.close, "volume": b.volume}
+
+
 def load_prices_bulk(engine: Engine, providers: Providers, stock_ids: list[int], *, history_days: int,
                      today: date | None = None, end: dict[str, date] | None = None) -> dict[str, str]:
-    """종목이 많을 때의 일봉 증분 — 국내 날짜별 전 종목 조회, 미국 묶음 다운로드."""
-    return {}
+    """비교군처럼 종목이 많을 때의 일봉 증분.
+    국내: 날짜마다 전 종목 1회 조회(수정 전 가격). 거래소 등락률로 계산한 값이 저장된 전일 종가와 맞지 않으면
+          분할·증자 등으로 과거 가격이 바뀐 것이라 그 종목만 수정주가로 전체를 다시 받는다(A-06).
+    미국: 묶음 다운로드(수정주가). 마지막 저장일을 겹쳐 받아 값이 달라졌으면 그 종목 전체를 다시 받는다.
+    이력이 없거나 오래 비어 있는 종목, 대량 provider가 없는 경우는 종목별 수집(load_prices)으로 넘긴다."""
+    today = today or date.today()
+    with engine.connect() as conn:
+        refs = stock_refs(conn, stock_ids=stock_ids)
+    last = _last_prices(engine, [r.stock_id for r in refs])
+    statuses: dict[str, str] = {}
+    per_ticker: list[int] = []
+    refetch: list[int] = []
+
+    kr = [r for r in refs if r.country == "KR"]
+    if kr and providers.kr_bulk is not None:
+        end_kr = (end or {}).get("KR") or last_closed_day("KR")
+        cut = end_kr - timedelta(days=MAX_BULK_GAP_DAYS)
+        bulk = [r for r in kr if r.stock_id in last and last[r.stock_id][0] >= cut]
+        per_ticker += [r.stock_id for r in kr if r not in bulk]
+        statuses.update({r.ticker: "SUCCESS" for r in bulk})
+        todo = [r for r in bulk if last[r.stock_id][0] < end_kr]
+        prev = {r.stock_id: last[r.stock_id] for r in todo}
+        d = min((prev[r.stock_id][0] for r in todo), default=end_kr) + timedelta(days=1)
+        adjusted: set[int] = set()
+        while todo and d <= end_kr:
+            if d.weekday() < 5:
+                with job_log(engine, source=providers.kr_bulk.source, job_type="PRICES", label=f"전 종목 {d}") as res:
+                    bars = providers.kr_bulk.get_bars_by_date(d)
+                    rows = []
+                    if not bars:
+                        res.notes.append("휴장")
+                    for r in todo:
+                        b = bars.get(r.ticker)
+                        if b is None or r.stock_id in adjusted or prev[r.stock_id][0] >= d:
+                            continue
+                        p0 = prev[r.stock_id][1]
+                        if b.change_rate is not None and p0:
+                            expected = p0 * (1 + b.change_rate / 100)
+                            if expected and abs(b.close / expected - 1) > ADJ_TOLERANCE:
+                                adjusted.add(r.stock_id)
+                                continue
+                        ok, bad = clean_bars([b], r.timezone, require_volume=True)
+                        res.quarantined += [Quarantined({**q.row, "ticker": r.ticker}, q.reason) for q in bad]
+                        rows += [_bar_row(r.stock_id, x) for x in ok]
+                        if ok:
+                            prev[r.stock_id] = (d, ok[0].close)
+                    with engine.begin() as conn:
+                        res.rows = upsert(conn, "daily_prices", rows, ["stock_id", "trade_date"])
+                    if adjusted:
+                        res.notes.append(f"수정주가 이벤트 {len(adjusted)}종목 → 다시 받음")
+                if res.status != "SUCCESS":
+                    statuses.update({r.ticker: "FAILED" for r in todo})
+            d += timedelta(days=1)
+        refetch += list(adjusted)
+    else:
+        per_ticker += [r.stock_id for r in kr]
+
+    us = [r for r in refs if r.country == "US"]
+    if us and providers.us_batch_price is not None:
+        end_us = (end or {}).get("US") or last_closed_day("US")
+        p = providers.us_batch_price
+        new = [r for r in us if r.stock_id not in last]
+        inc = [r for r in us if r.stock_id in last and last[r.stock_id][0] < end_us]
+        statuses.update({r.ticker: "SUCCESS" for r in us if r not in new and r not in inc})
+        for group, start in ((new, end_us - timedelta(days=history_days)),
+                             (inc, min((last[r.stock_id][0] for r in inc), default=end_us))):
+            if not group:
+                continue
+            with job_log(engine, source=p.source, job_type="PRICES", label=f"묶음 {len(group)}종목") as res:
+                fetched = p.get_daily_prices_batch(group, start, end_us)
+                rows = []
+                for r in group:
+                    bars = fetched.get(r.ticker)
+                    if not bars:
+                        statuses[r.ticker] = "FAILED"
+                        continue
+                    if r.stock_id in last:
+                        d0, c0 = last[r.stock_id]
+                        overlap = next((b for b in bars if b.trade_date == d0), None)
+                        if overlap and overlap.close and abs(overlap.close / c0 - 1) > ADJ_TOLERANCE:
+                            refetch.append(r.stock_id)
+                            continue
+                        bars = [b for b in bars if b.trade_date > d0]
+                    ok, bad = clean_bars(bars, r.timezone, require_volume=True)
+                    res.quarantined += [Quarantined({**q.row, "ticker": r.ticker}, q.reason) for q in bad]
+                    rows += [_bar_row(r.stock_id, x) for x in ok]
+                    statuses[r.ticker] = "SUCCESS"
+                with engine.begin() as conn:
+                    res.rows = upsert(conn, "daily_prices", rows, ["stock_id", "trade_date"])
+                missing = [r.ticker for r in group if statuses.get(r.ticker) == "FAILED"]
+                if missing:
+                    res.notes.append(f"받지 못함: {', '.join(missing[:20])}")
+            if res.status != "SUCCESS":
+                statuses.update({r.ticker: "FAILED" for r in group})
+    else:
+        per_ticker += [r.stock_id for r in us]
+
+    if per_ticker:
+        statuses.update(load_prices(engine, providers, stock_ids=per_ticker, history_days=history_days, today=today))
+    if refetch:
+        statuses.update(load_prices(engine, providers, stock_ids=refetch, history_days=history_days, full=True, today=today))
+    return statuses
 
 
-# TODO(껍데기): C — 원본 load_valuations로 교체 (지금은 아무것도 받지 않고 빈 결과)
+# 국내 밸류에이션 대체 경로: 거래일 종가 × (FY 순이익·자본 ÷ 발행주식수) — pykrx가 없거나 실패할 때(A-02)
+DERIVED_SQL = """
+INSERT INTO valuation_snapshots (stock_id, as_of, per, pbr, eps, bps, market_cap, shares_outstanding, source)
+SELECT d.stock_id, d.trade_date,
+       CASE WHEN f.net_income > 0 THEN ROUND(d.close / (f.net_income / :shares), 4) END,
+       CASE WHEN f.total_equity > 0 THEN ROUND(d.close / (f.total_equity / :shares), 4) END,
+       ROUND(f.net_income / :shares, 4),
+       ROUND(f.total_equity / :shares, 4),
+       ROUND(d.close * :shares, 0),
+       :shares,
+       'DERIVED'
+FROM daily_prices d
+CROSS JOIN LATERAL (            -- 거래일 기준 공시 시차 90일을 둔 최신 FY
+    SELECT fs.net_income, fs.total_equity FROM financial_statements fs
+    WHERE fs.stock_id = d.stock_id AND fs.period_type = 'FY' AND fs.period_end <= d.trade_date - 90
+    ORDER BY fs.period_end DESC LIMIT 1) f
+WHERE d.stock_id = :stock_id AND d.trade_date >= :start
+ON CONFLICT (stock_id, as_of) DO UPDATE SET
+  per = EXCLUDED.per, pbr = EXCLUDED.pbr, eps = EXCLUDED.eps, bps = EXCLUDED.bps,
+  market_cap = EXCLUDED.market_cap, shares_outstanding = EXCLUDED.shares_outstanding, source = EXCLUDED.source
+"""
+
+
+def load_valuations_bulk(engine: Engine, providers: Providers, stock_ids: list[int], *,
+                         today: date | None = None, day: date | None = None) -> dict[str, str]:
+    """국내: 확정된 최근 거래일 하루치 전 종목 밸류에이션(호출 2회)에서 대상만 저장.
+    미국: 종목별 수집(yfinance 스냅샷)으로 넘긴다. (기초값 × 종가 계산은 Stage 5 fundamental_bases와 함께)"""
+    with engine.connect() as conn:
+        refs = stock_refs(conn, stock_ids=stock_ids)
+    statuses: dict[str, str] = {}
+    rest: list[int] = []
+    kr = [r for r in refs if r.country == "KR"]
+    if kr and providers.kr_bulk is not None:
+        d = day or last_closed_day("KR")
+        rows: list[dict] = []
+        with job_log(engine, source=providers.kr_bulk.source, job_type="VALUATION", label=f"전 종목 {d}") as res:
+            vals = {}
+            for back in range(7):                       # 휴장일이면 그 전 거래일
+                vals = providers.kr_bulk.get_valuations_by_date(d - timedelta(days=back))
+                if vals:
+                    break
+            rows = [{"stock_id": r.stock_id, "as_of": v.as_of, "per": v.per, "pbr": v.pbr, "eps": v.eps, "bps": v.bps,
+                     "market_cap": v.market_cap, "shares_outstanding": v.shares_outstanding,
+                     "source": providers.kr_bulk.source}
+                    for r in kr if (v := vals.get(r.ticker)) is not None]
+            with engine.begin() as conn:
+                res.rows = upsert(conn, "valuation_snapshots", rows, ["stock_id", "as_of"])
+        got = {row["stock_id"] for row in rows} if res.status == "SUCCESS" else set()
+        statuses.update({r.ticker: "SUCCESS" if r.stock_id in got else "FAILED" for r in kr})
+    else:
+        rest += [r.stock_id for r in kr]
+    rest += [r.stock_id for r in refs if r.country == "US"]
+    if rest:
+        statuses.update(load_valuations(engine, providers, stock_ids=rest, history_days=10, today=today))
+    return statuses
+
+
 def load_valuations(engine: Engine, providers: Providers, *, full: bool = False,
                     tickers: list[str] | None = None, today: date | None = None,
                     stock_ids: list[int] | None = None, history_days: int = VALUATION_HISTORY_DAYS) -> dict[str, str]:
-    """KR: pykrx 일별(증분) / US: yfinance 스냅샷. KR provider가 없거나 실패하면 DART FY 기반 파생값(DERIVED)."""
-    return {}
+    """KR: pykrx 일별(증분) / US: yfinance 스냅샷(as_of = 해당 종목 최신 거래일).
+    KR provider가 없거나 실패하면 DART FY 기반 파생값(DERIVED)으로 대체한다(ASSUMPTIONS A-02)."""
+    today = today or date.today()
+    statuses = {}
+    with engine.connect() as conn:
+        refs = stock_refs(conn, tickers, stock_ids=stock_ids)
+        last = dict(conn.execute(text(
+            "SELECT stock_id, MAX(as_of) FROM valuation_snapshots WHERE source <> 'DERIVED' GROUP BY stock_id")).all())
+        last_trade = dict(conn.execute(text("SELECT stock_id, MAX(trade_date) FROM daily_prices GROUP BY stock_id")).all())
+    kr_end = min(today, last_closed_day("KR"))       # KRX 공표 전 당일 값(0 → 빈 행)을 받지 않는다
+    for ref in refs:
+        p = providers.valuation(ref.country)
+        source = p.source if p else "DERIVED"
+        with job_log(engine, source=source if source != "DERIVED" else "INTERNAL", job_type="VALUATION",
+                     stock_id=ref.stock_id, label=ref.ticker) as res:
+            if ref.country == "US":
+                as_of = last_trade.get(ref.stock_id) or today
+                vals = p.get_valuations(ref, as_of, as_of)
+            elif p is not None:
+                start = _start_date(last.get(ref.stock_id), full, history_days, today)
+                if start > kr_end:
+                    res.notes.append("최신 상태")
+                    vals = []
+                else:
+                    try:
+                        vals = p.get_valuations(ref, start, kr_end)
+                        if not vals and last.get(ref.stock_id) is None:
+                            raise ProviderError("빈 응답")
+                    except ProviderError as e:
+                        res.notes.append(f"pykrx 실패 → DERIVED 대체: {e}")
+                        vals, p = None, None
+            else:
+                vals = None
+            if vals is None:     # DERIVED
+                shares = providers.us_valuation.get_valuations(ref, today, today)[0].shares_outstanding
+                if not shares:
+                    raise ProviderError("발행주식수 없음 — DERIVED 계산 불가")
+                with engine.begin() as conn:
+                    res.rows = conn.execute(text(DERIVED_SQL), {
+                        "stock_id": ref.stock_id, "shares": Decimal(shares),
+                        "start": today - timedelta(days=VALUATION_HISTORY_DAYS)}).rowcount
+                res.notes.append(f"DERIVED shares={shares}")
+            elif vals:
+                with engine.begin() as conn:
+                    res.rows = upsert(conn, "valuation_snapshots", [
+                        {"stock_id": ref.stock_id, "as_of": v.as_of, "per": v.per, "pbr": v.pbr, "eps": v.eps,
+                         "bps": v.bps, "market_cap": v.market_cap, "shares_outstanding": v.shares_outstanding,
+                         "source": p.source} for v in vals if v.as_of <= kr_end or ref.country == "US"],
+                        ["stock_id", "as_of"])
+        statuses[ref.ticker] = res.status
+    return statuses
 
 
 # ── [S3-B] 재무·공시 ──
