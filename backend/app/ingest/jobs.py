@@ -40,7 +40,7 @@ def init_db(engine: Engine, reset: bool = False) -> None:
 
 
 # ---------------------------------------------------------------- 마스터
-def load_master(engine: Engine, offline: bool = True) -> None:
+def load_master(engine: Engine, offline: bool = False) -> None:
     """universe.yaml → markets·stocks·indices·peer_groups·peer_group_members + 기본 사용자 demo (재실행해도 행 수 불변).
 
     offline이 아니면 이어서 DART corp_code·SEC CIK를 매핑한다(재무·공시 수집에 필요).
