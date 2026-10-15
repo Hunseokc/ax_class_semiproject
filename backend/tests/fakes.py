@@ -1,6 +1,7 @@
 """테스트용 fake provider. 외부 호출 대신 고정 데이터를 돌려주고 호출 횟수·인자를 기록한다.
 
-이후 단계: 상장 목록(FakeListing)·미국 참조 데이터(FakeReference)·업종 분류·비교군 시가총액(caps)은 Stage 4~6.
+이후 단계: 비교군 시가총액(caps·get_market_caps)·corp_code·CIK 일괄 매핑은 Stage 4, 상장 목록(FakeListing)·
+업종 분류·미국 기초값(FakeReference)·배당(dps)은 Stage 5~6.
 """
 from __future__ import annotations
 
@@ -84,7 +85,7 @@ class FakeValuation(CallLog):
 
 
 class FakeFinancial(CallLog):
-    """직전 연도·그 전 연도 FY 2개. 고유번호(corp_codes)·CIK(ciks) 매핑도 흉내 낸다."""
+    """직전 연도·그 전 연도 FY 2개."""
 
     def __init__(self, source: str):
         super().__init__()
@@ -96,12 +97,6 @@ class FakeFinancial(CallLog):
         return [Financial(date(yy, 12, 31), "FY", revenue=Decimal(100 + i * 10), operating_income=Decimal(10),
                           net_income=Decimal(8 + i), total_assets=Decimal(300), total_equity=Decimal(100),
                           total_debt=Decimal(50), data_source=self.source) for i, yy in enumerate((y - 1, y))]
-
-    def corp_codes(self, codes: set[str]) -> dict[str, str]:
-        return {c: f"C{c}" for c in codes}
-
-    def ciks(self, tickers: set[str]) -> dict[str, str]:
-        return {t: f"{abs(hash(t)) % 10**10:010d}" for t in tickers}
 
 
 class FakeDisclosure(CallLog):
@@ -139,7 +134,7 @@ class FakeKrBulk(CallLog):
         if day.weekday() >= 5:
             return {}
         return {t: Valuation(as_of=day, per=Decimal(10), pbr=Decimal(1), eps=Decimal(10), bps=Decimal(100),
-                             market_cap=None, shares_outstanding=10**6) for t in self.tickers}
+                             shares_outstanding=10**6) for t in self.tickers}
 
 
 class FakeUsBatch(CallLog):

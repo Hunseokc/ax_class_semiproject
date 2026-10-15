@@ -2,7 +2,7 @@
 import { getFx, getIndices, getWatchlist, reorderWatchlist } from "../api.js";
 import { changeHtml, date, dateTime, esc, num, price, shortDate, stockUrl, usd } from "../format.js";
 import { color, destroyCharts, sparkline } from "../components/charts.js";
-import { mountSidebar } from "../components/sidebar.js";
+import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
 import { emptyState, h, load, segmented, skeleton, toast } from "../components/ui.js";
 
 mountSidebar("home");
@@ -174,3 +174,6 @@ function loadWatchlist() {
 }
 
 loadWatchlist();
+
+// ── [S3-A] 사이드바 새로고침이 끝나면 지수·환율·관심종목을 새 값으로 다시 불러온다 ──
+document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); });

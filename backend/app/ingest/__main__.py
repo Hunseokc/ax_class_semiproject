@@ -1,7 +1,7 @@
-"""수집·적재 CLI (Stage 2).
+"""수집·적재 CLI (Stage 3).
 
     python -m app.ingest init-db [--reset]   # db/schema.sql → indexes.sql → views.sql(있을 때만)
-    python -m app.ingest master --offline    # universe.yaml → markets·stocks·indices·peer_groups
+    python -m app.ingest master [--offline]  # universe.yaml → 마스터, DART corp_code·SEC CIK 매핑, demo 사용자
     python -m app.ingest import-sample       # sample_data/*.csv → 시세·지수·환율·밸류에이션 (수집이 안 될 때 대체)
     python -m app.ingest prices [--full] [--tickers 005930 AAPL]   # 종목 일봉 (국내 pykrx, 미국 yfinance)
     python -m app.ingest indices [--full]
@@ -9,7 +9,7 @@
     python -m app.ingest valuation [--full] [--tickers 005930 AAPL]   # 국내 pykrx 일별, 미국 yfinance 스냅샷
     python -m app.ingest financials [--years 5] [--tickers 005930 AAPL]   # FY 재무 (국내 DART, 미국 SEC)
     python -m app.ingest disclosures [--days 365] [--tickers 005930]      # 최근 공시
-    python -m app.ingest all                 # master → prices → indices → fx → (financials) → valuation → (disclosures)
+    python -m app.ingest all                 # master → prices → indices → fx → financials → valuation → disclosures
     python -m app.ingest seed-demo           # demo 관심종목 8건 + 모의 포트폴리오 2개
     python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용)
 """
@@ -29,8 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m app.ingest")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init-db").add_argument("--reset", action="store_true", help="스키마를 지우고 다시 만든다")
-    # Stage 1에는 온라인(DART·SEC) 경로가 없어 --offline을 필수로 둔다. Stage 3에서 선택 옵션으로 바꾼다
-    sub.add_parser("master").add_argument("--offline", action="store_true", required=True, help="DART/SEC 매핑 생략")
+    sub.add_parser("master").add_argument("--offline", action="store_true", help="DART/SEC 매핑 생략")
     sub.add_parser("import-sample")
     # ── [S1-D] 시세 수집 ──
     p = sub.add_parser("prices")
@@ -108,9 +107,9 @@ def main(argv: list[str] | None = None) -> int:
         jobs.load_prices(engine, pv)
         jobs.load_indices(engine, pv)
         jobs.load_fx_daily(engine, pv)
-        # ── [S3-B] 재무 ── (B가 추가: DERIVED 밸류에이션 대체 시 재무가 먼저 필요)
+        jobs.load_financials(engine, pv)      # DERIVED 밸류에이션 대체 시 재무가 먼저 필요
         jobs.load_valuations(engine, pv)
-        # ── [S3-B] 공시 ── (B가 추가)
+        jobs.load_disclosures(engine, pv)
     print(f"[{args.cmd}] 완료 {time.monotonic() - t0:.1f}s")
     return 0
 
