@@ -1,8 +1,7 @@
 """분석 API: 종목 수치 분석·매력도, 경쟁 그룹 비교·기준일=100 차트, DB 통계.
 
-TODO(껍데기): B — 엔드포인트 본문을 원본대로 교체(queries/peers·peers_chart·stock_groups·stats_*.sql). 주소·인자·응답 모델은 원본 그대로다.
-  /analysis·/scoring/presets는 교체했다. 남은 /peers·/peers/chart·/statistics/*는 없는 종목만 404로 막고
-  docs/06 3-3·3-6 예시 값을 돌려준다.
+TODO(껍데기): B — 엔드포인트 본문을 원본대로 교체(queries/stats_*.sql). 주소·인자·응답 모델은 원본 그대로다.
+  /analysis·/scoring/presets·/peers·/peers/chart는 교체했다. 남은 /statistics/*는 docs/06 예시 값을 돌려준다.
   이번 단계에서 뺀 것: 응답의 reference·reference_note(listed 참고 점수), metrics의 dps·dividend_yield,
   통계 monthly·ranking·data-quality(Stage 5).
 """
@@ -16,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.deps import MarketPath, TickerPath, get_db, get_preset
-from app.api.stocks import resolve_stock
+from app.api.stocks import RANGE_MONTHS, resolve_stock
 from app.core.errors import NotFound
 from app.queries import sql
 from app.schemas.common import INT_MAX, Num, Schema
@@ -286,17 +285,25 @@ def peers_chart(market: MarketPath, ticker: TickerPath, range: Literal["1m", "3m
                 group_id: int | None = Query(None, ge=1, le=INT_MAX, description="비우면 종목의 첫 번째 그룹"),
                 db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
-    return {"market": s["market"], "ticker": s["ticker"], "group_id": 1, "group_name": "반도체",
-            "groups": [{"group_id": 1, "name": "반도체", "size": 5}], "range": range,
-            "dates": ["2026-09-07", "2026-09-08", "2026-09-09"],
-            "series": [
-                {"stock_id": 1, "ticker": "005930", "name": "삼성전자", "market": "KOSPI", "is_target": True,
-                 "values": [100, 99.8148, 99.8148]},
-                {"stock_id": 2, "ticker": "000660", "name": "SK하이닉스", "market": "KOSPI", "is_target": False,
-                 "values": [100, 100.5609, 104.0942]},
-                {"stock_id": 25, "ticker": "AMD", "name": "AMD", "market": "NASDAQ", "is_target": False,
-                 "values": [None, 100, 103.0371]},
-            ],
+    my_groups = [dict(r) for r in db.execute(sql("stock_groups"), {"stock_id": s["stock_id"]}).mappings()]
+    if not my_groups:
+        raise NotFound("이 종목은 경쟁 그룹에 속해 있지 않습니다", code="NO_PEER_GROUP")
+    target = next((g for g in my_groups if g["group_id"] == group_id), None) if group_id else my_groups[0]
+    if target is None:
+        raise NotFound(f"이 종목은 그룹(ID {group_id})에 속해 있지 않습니다", code="GROUP_NOT_FOUND")
+    rows = db.execute(sql("peers_chart"), {"group_id": target["group_id"], "stock_id": s["stock_id"],
+                                           "months": RANGE_MONTHS[range]}).mappings().all()
+    dates = sorted({r["trade_date"] for r in rows})
+    pos = {d: i for i, d in enumerate(dates)}
+    series: dict[int, dict] = {}
+    for r in rows:
+        sr = series.setdefault(r["stock_id"], {"stock_id": r["stock_id"], "ticker": r["ticker"], "name": r["name"],
+                                               "market": r["market"], "is_target": r["stock_id"] == s["stock_id"],
+                                               "values": [None] * len(dates)})
+        sr["values"][pos[r["trade_date"]]] = r["indexed"]
+    return {"market": s["market"], "ticker": s["ticker"], "group_id": target["group_id"],
+            "group_name": target["name"], "groups": my_groups, "range": range, "dates": dates,
+            "series": sorted(series.values(), key=lambda x: (not x["is_target"], x["ticker"])),
             "note": "각 종목의 구간 첫 거래일 종가 = 100. 시장별 휴장일이 달라 해당 날짜 값은 null(선 연결 표시)."}
 
 
