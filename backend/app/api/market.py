@@ -6,11 +6,12 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_fx_service
+from app.api.deps import get_db, get_fx_service, get_refresh_service
 from app.core.config import get_settings
 from app.queries import sql
-from app.schemas.api import FxOut, IndicesOut, RefreshOut
+from app.schemas.api import FxOut, IndicesOut, RefreshJobOut, RefreshOut
 from app.services.fx import FxService
+from app.services.refresh import RefreshResult, RefreshService
 
 router = APIRouter(prefix="/market", tags=["market"])
 SEOUL = ZoneInfo("Asia/Seoul")
@@ -42,29 +43,19 @@ def fx(db: Session = Depends(get_db), fx_service: FxService = Depends(get_fx_ser
 
 
 # ── [S3-D] 갱신 ──
-# TODO(껍데기): D — RefreshService(services/refresh.py)·deps.get_refresh_service로 교체.
-#   지금은 외부 호출도 DB 조회도 하지 않고 docs/06 3-1 예시 값을 돌려준다(Stage 3 작업 4개: FX·INDICES·PRICES·VALUATION)
-_EXAMPLE_LAST_SUCCESS = {"FX": "2026-10-12T13:18:25.035205+09:00", "INDICES": "2026-10-12T13:18:39.418969+09:00",
-                         "PRICES": "2026-10-12T13:18:55.994997+09:00", "VALUATION": "2026-10-12T13:19:22.821645+09:00"}
-
-
-def _example_refresh(status: str, refreshed_at: str) -> dict:
-    return {
-        "refreshed_at": refreshed_at, "next_refresh_available_at": "2026-10-12T17:18:25.035205+09:00",
-        "ttl_hours": get_settings().refresh_ttl_hours,
-        "jobs": [{"job_type": j, "status": status,
-                  "detail": f"TTL 이내 — 마지막 성공 {at}" if status == "SKIPPED" else None,
-                  "last_success_at": at, "counts": {}} for j, at in _EXAMPLE_LAST_SUCCESS.items()],
-    }
+def _refresh_out(r: RefreshResult) -> RefreshOut:
+    return RefreshOut(refreshed_at=r.refreshed_at, next_refresh_available_at=r.next_refresh_available_at,
+                      ttl_hours=get_settings().refresh_ttl_hours,
+                      jobs=[RefreshJobOut(**j.__dict__) for j in r.jobs])
 
 
 @router.post("/refresh", response_model=RefreshOut,
              summary="환율·지수·증분 일봉·밸류에이션 갱신 (작업별 TTL 이내면 SKIPPED)")
-def refresh():
-    return _example_refresh("SKIPPED", "2026-10-12T06:27:31.141007Z")
+def refresh(service: RefreshService = Depends(get_refresh_service)):
+    return _refresh_out(service.refresh())
 
 
 @router.get("/refresh/status", response_model=RefreshOut,
             summary="갱신 상태 조회 — 외부 호출 없음 (사이드바 '마지막 갱신 시각' 표시용)")
-def refresh_status():
-    return _example_refresh("FRESH", "2026-10-12T13:19:22.821645+09:00")
+def refresh_status(service: RefreshService = Depends(get_refresh_service)):
+    return _refresh_out(service.status())
