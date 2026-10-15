@@ -308,7 +308,8 @@ def test_fx_change_uses_previous_daily(client, engine):
                       "change_rate", "history", "as_of"}
 
 
-def test_fx_same_day_daily_is_not_the_comparison(client, engine):
+def test_fx_same_day_daily_is_not_the_comparison(client, engine, fake_fx):
+    fake_fx.fail = True                                              # TTL이 지난 SNAPSHOT을 그대로 쓰게 조회 실패
     with engine.begin() as conn:                                     # 같은 날(D) DAILY 1310과 낮 1시 SNAPSHOT 1320
         conn.execute(text("DELETE FROM fx_rates"))
         for d, v in zip(DAYS, (1290, 1300, 1310)):
@@ -329,9 +330,10 @@ def test_fx_without_previous_daily(client, engine):
     assert b["history"] == []
 
 
-def test_fx_unavailable_503(client, engine):
+def test_fx_unavailable_503(client, engine, fake_fx):
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM fx_rates"))
+    fake_fx.fail = True
     r, b = get(client, "/market/fx")
     assert r.status_code == 503 and code(b) == "FX_UNAVAILABLE"
 
