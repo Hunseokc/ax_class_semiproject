@@ -173,28 +173,6 @@ class PeersChartOut(Schema):
     note: str
 
 
-# ------------------------------------------------------------------ 껍데기 예시 값 (docs/06 3-3·3-6, 삼성전자 기준)
-_EXAMPLE_PEER_MEMBERS = [
-    {"stock_id": 21, "ticker": "NVDA", "name": "NVIDIA", "market": "NASDAQ", "country": "US", "currency": "USD",
-     "is_target": False, "accounting_std": "US-GAAP",
-     "values": {"return_1m": 0.038233, "return_3m": 0.227569, "return_1y": 0.276369, "per": 30.2023, "pbr": 25.1924,
-                "roe": 0.763333, "operating_margin": 0.603817, "revenue_yoy": 0.654735,
-                "market_cap_krw": 7724774625367818, "score": 68.44},
-     "ranks": {"return_1m": 4, "return_3m": 1, "return_1y": 4, "per": 2, "pbr": 5, "roe": 1, "operating_margin": 1,
-               "revenue_yoy": 1, "market_cap_krw": 1, "score": 1}},
-    {"stock_id": 24, "ticker": "AVGO", "name": "Broadcom", "market": "NASDAQ", "country": "US", "currency": "USD",
-     "is_target": False, "accounting_std": "US-GAAP",
-     "values": {"return_1m": 0.014725, "return_3m": 0.007547, "return_1y": 0.079308, "per": 46.2976, "pbr": 17.3599,
-                "roe": 0.284481, "operating_margin": 0.398892, "revenue_yoy": 0.238744,
-                "market_cap_krw": 2317262804153795, "score": 44.38},
-     "ranks": {"return_1m": 5, "return_3m": 3, "return_1y": 5, "per": 4, "pbr": 4, "roe": 3, "operating_margin": 3,
-               "revenue_yoy": 4, "market_cap_krw": 2, "score": 5}},
-]
-_EXAMPLE_PEER_AVERAGES = {"return_1m": 0.105495, "return_3m": 0.015009, "return_1y": 1.75406, "per": 61.4841,
-                          "pbr": 14.4919, "roe": 0.315413, "operating_margin": 0.345195, "revenue_yoy": 0.362657,
-                          "market_cap_krw": 2861680590488512, "score": 56.39}
-
-
 # ------------------------------------------------------------------ 종목 분석
 def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row) -> dict:
     out = {"preset": {k: preset[k] for k in ("code", "name", "description")}}
@@ -284,10 +262,22 @@ def presets(db: Session = Depends(get_db)):
             summary="경쟁 그룹별 비교 표 (그룹 내 RANK·AVG, 구성원 1명 그룹은 비교 대상 없음)")
 def peers(market: MarketPath, ticker: TickerPath, db: Session = Depends(get_db)):
     s = resolve_stock(db, market, ticker)
+    rows = db.execute(sql("peers"), {"stock_id": s["stock_id"], "preset": default_preset()}).mappings().all()
+    groups: dict[int, dict] = {}
+    for r in rows:
+        g = groups.setdefault(r["group_id"], {
+            "group_id": r["group_id"], "name": r["group_name"], "size": r["group_size"],
+            "has_peers": r["group_size"] > 1,
+            "message": None if r["group_size"] > 1 else "이 그룹에는 비교할 경쟁 종목이 없습니다",
+            "averages": {m: r[f"{m}_avg"] for m in PEER_METRICS}, "members": []})
+        g["members"].append({
+            **{k: r[k] for k in ("stock_id", "ticker", "name", "market", "country", "currency", "is_target",
+                                 "accounting_std")},
+            "values": {m: r[m] for m in PEER_METRICS},
+            "ranks": {m: r[f"{m}_rank"] for m in PEER_METRICS}})
     return {"market": s["market"], "ticker": s["ticker"], "accounting_note": ACCOUNTING_NOTE,
             "rank_rule": "값이 있는 구성원끼리 RANK. PER·PBR은 낮을수록(양수만), 나머지는 높을수록 1위",
-            "groups": [{"group_id": 1, "name": "반도체", "size": 5, "has_peers": True, "message": None,
-                        "averages": _EXAMPLE_PEER_AVERAGES, "members": _EXAMPLE_PEER_MEMBERS}]}
+            "groups": list(groups.values())}
 
 
 @router.get("/{market}/{ticker}/peers/chart", response_model=PeersChartOut,
