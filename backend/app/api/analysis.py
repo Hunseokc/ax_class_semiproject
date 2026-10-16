@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import MarketPath, TickerPath, get_db, get_preset
 from app.api.stocks import RANGE_MONTHS, resolve_stock
-from app.core.errors import NotFound
+from app.core.errors import NotFound, Unprocessable
 from app.queries import sql
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN, Num, Schema
 from app.core.config import get_settings
@@ -392,9 +392,6 @@ class RankingOut(Schema):
     items: list[RankingItem]
 
 
-# TODO(껍데기): B — 본문을 원본대로 교체(queries/stats_ranking.sql: RANK() OVER, 지표값 없는 종목 제외,
-#   전체 + volume은 422 VOLUME_SORT_REQUIRES_MARKET). 주소·인자·응답 모델은 원본 그대로다.
-#   지금은 docs/06 3-6 예시 값(1년 수익률 상위 3)을 limit만큼 잘라 돌려준다(metric·country를 바꿔도 같은 종목).
 @stats_router.get("/ranking", response_model=RankingOut,
                   summary="지표별 TOP N 랭킹 (노출 종목, RANK() — 같은 값은 같은 순위, 지표값 없는 종목 제외)")
 def stats_ranking(metric: RankingMetric = Query(description="return_1m·return_3m·return_1y·volume·market_cap_krw"),
@@ -402,15 +399,14 @@ def stats_ranking(metric: RankingMetric = Query(description="return_1m·return_3
                   order: Literal["desc", "asc"] = "desc",
                   limit: int = Query(10, ge=1, le=50),
                   db: Session = Depends(get_db)):
-    rows = [
-        {"rank": 1, "stock_id": 2, "market": "KOSPI", "country": "KR", "currency": "KRW", "ticker": "000660",
-         "name": "SK하이닉스", "value": Decimal("3.336283"), "as_of": date(2026, 10, 7)},
-        {"rank": 2, "stock_id": 25, "market": "NASDAQ", "country": "US", "currency": "USD", "ticker": "AMD",
-         "name": "AMD", "value": Decimal("2.053567"), "as_of": date(2026, 10, 7)},
-        {"rank": 3, "stock_id": 1, "market": "KOSPI", "country": "KR", "currency": "KRW", "ticker": "005930",
-         "name": "삼성전자", "value": Decimal("2.022472"), "as_of": date(2026, 10, 7)},
-    ][:limit]
-    return {"metric": metric, "country": country, "order": order, "limit": limit, "total": 25, "items": rows}
+    if metric == "volume" and country is None:
+        raise Unprocessable("시장마다 거래량 단위가 달라 '전체'에서는 거래량 순위를 낼 수 없습니다. country를 지정하세요",
+                            detail={"allowed_metrics_for_all": ["return_1m", "return_3m", "return_1y", "market_cap_krw"]},
+                            code="VOLUME_SORT_REQUIRES_MARKET")
+    rows = db.execute(sql("stats_ranking"), {"metric": metric, "country": country, "order_dir": order,
+                                             "limit": limit}).mappings().all()
+    return {"metric": metric, "country": country, "order": order, "limit": limit,
+            "total": rows[0]["total"] if rows else 0, "items": [dict(r) for r in rows]}
 
 
 class QualityCounts(Schema):
