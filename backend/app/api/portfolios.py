@@ -86,7 +86,6 @@ def summary(portfolio_id: IdPath, svc: PortfolioService = Depends(get_portfolio_
     return svc.summary(portfolio_id)
 
 
-# TODO(껍데기): C — 주소·인자·응답 모델·본문은 원본 그대로다. 계산(services/portfolio.py preview_equal_weight)을 교체하면 이 주석만 지운다.
 @router.post("/{portfolio_id}/preview/equal-weight", response_model=EqualWeightOut,
              summary="관심종목(또는 지정 종목) 균등 배분 미리보기 — 저장하지 않는 계산 전용. 정수 수량·원화 금액·실제 비중, 살 수 없는 종목과 사유")
 def preview_equal_weight(portfolio_id: IdPath, body: EqualWeightRequest | None = None,

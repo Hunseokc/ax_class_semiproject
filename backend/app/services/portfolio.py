@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import Conflict, NotFound, Unprocessable
-from app.models import Market, Portfolio, PortfolioItem, Stock, User
+from app.models import Market, Portfolio, PortfolioItem, Stock, User, WatchlistItem
 from app.queries import sql
 from app.services.fx import FxQuote, FxService
 
@@ -289,9 +289,6 @@ class PortfolioService:
 
     # ------------------------------------------------------------ 내부
     # ------------------------------------------------------------ 관심종목 균등 배분 미리보기 (저장하지 않음)
-    # TODO(껍데기): C — 본문을 원본대로 교체(잔여 시드·예산 409, 관심종목 비면 422 EMPTY_WATCHLIST, 균등 몫 내림 수량,
-    #   제외 사유 ALREADY_IN_PORTFOLIO·NO_PRICE·PRICE_ABOVE_SHARE). 이름·인자·반환 모양은 원본 그대로다.
-    #   지금은 없는 포트폴리오만 404로 막고, 시드·사용·잔여·예산은 실제 값, 나머지는 docs/06 3-5 예시 값을 돌려준다.
     def preview_equal_weight(self, portfolio_id: int, targets: list[tuple[str, str]] | None,
                              budget: Decimal | None) -> dict:
         """예산을 대상 종목 수로 똑같이 나눈 몫으로 정수 수량을 계산한다(담기 금액 모드와 같은 내림 환산).
@@ -300,29 +297,55 @@ class PortfolioService:
         used = self.used_krw(portfolio_id)
         remaining = pf.seed_krw - used
         budget = remaining if budget is None else budget
-        d = Decimal
-        items = [
-            {"market": "NASDAQ", "ticker": "MSFT", "name": "Microsoft", "currency": "USD", "price": d("529.76"),
-             "price_date": date(2026, 10, 7), "fx_rate": d("1338.08"), "unit_cost_krw": d("708861.26"), "quantity": 1,
-             "cost_krw": d("708861.26"), "weight": d("0.371472")},
-            {"market": "NASDAQ", "ticker": "AMZN", "name": "Amazon", "currency": "USD", "price": d("259.92"),
-             "price_date": date(2026, 10, 7), "fx_rate": d("1338.08"), "unit_cost_krw": d("347793.75"), "quantity": 2,
-             "cost_krw": d("695587.51"), "weight": d("0.364516")},
-            {"market": "NASDAQ", "ticker": "AVGO", "name": "Broadcom", "currency": "USD", "price": d("376.51"),
-             "price_date": date(2026, 10, 7), "fx_rate": d("1338.08"), "unit_cost_krw": d("503800.5"), "quantity": 1,
-             "cost_krw": d("503800.5"), "weight": d("0.264012")},
-        ]
-        skipped = [
-            {"market": "NASDAQ", "ticker": "AAPL", "name": "Apple", "reason": "ALREADY_IN_PORTFOLIO",
-             "message": "이미 담은 종목입니다(수량 변경은 담은 종목 수정)"},
-            {"market": "NASDAQ", "ticker": "META", "name": "Meta Platforms", "reason": "PRICE_ABOVE_SHARE",
-             "message": "1주 원가가 균등 몫보다 큽니다", "unit_cost_krw": d("965170.48"), "share_krw": d("750000")},
-        ]
+        if budget <= 0 or budget > remaining:
+            raise Conflict("잔여 시드가 없습니다" if budget <= 0 else "예산이 잔여 시드를 넘습니다",
+                           detail={"seed_krw": pf.seed_krw, "used_krw": used, "remaining_krw": remaining,
+                                   "budget_krw": budget}, code="SEED_EXCEEDED")
+        if targets is None:
+            stocks = list(self.db.execute(
+                select(Stock).join(WatchlistItem, WatchlistItem.stock_id == Stock.stock_id)
+                .where(WatchlistItem.user_id == self.user_id)
+                .order_by(WatchlistItem.sort_order, WatchlistItem.added_at)).scalars())
+            if not stocks:
+                raise Unprocessable("관심종목이 없습니다. 종목을 지정하거나 관심종목을 추가하세요", code="EMPTY_WATCHLIST")
+        else:
+            stocks = [self.find_stock(m, t) for m, t in targets]
+        held = set(self.db.execute(select(PortfolioItem.stock_id)
+                                   .where(PortfolioItem.portfolio_id == portfolio_id)).scalars())
+
+        def skip(s: Stock, reason: str, message: str, **extra) -> dict:
+            return {"market": s.market.code, "ticker": s.ticker, "name": s.name, "reason": reason, "message": message, **extra}
+
+        skipped, quotes = [], []
+        for s in stocks:
+            if s.stock_id in held:
+                skipped.append(skip(s, "ALREADY_IN_PORTFOLIO", "이미 담은 종목입니다(수량 변경은 담은 종목 수정)"))
+                continue
+            try:
+                quotes.append(self.ref_quote(s))
+            except Unprocessable:
+                skipped.append(skip(s, "NO_PRICE", "시세가 없습니다"))
+        share = budget / len(quotes) if quotes else Decimal(0)        # 균등 몫(원)
+        items, fx = [], None
+        for qt in quotes:
+            unit = qt.unit_cost_krw
+            qty = quantity_for("amount", share, pf.seed_krw, unit)
+            if qty <= 0:
+                skipped.append(skip(qt.stock, "PRICE_ABOVE_SHARE", "1주 원가가 균등 몫보다 큽니다",
+                                    unit_cost_krw=q(unit), share_krw=q(share)))
+                continue
+            fx = fx or qt.fx
+            items.append({"market": qt.stock.market.code, "ticker": qt.stock.ticker, "name": qt.stock.name,
+                          "currency": qt.stock.market.currency, "price": qt.price, "price_date": qt.price_date,
+                          "fx_rate": qt.fx_rate, "unit_cost_krw": q(unit), "quantity": qty,
+                          "cost_krw": q(qty * qt.price * qt.fx_rate)})
         total = sum((i["cost_krw"] for i in items), Decimal(0))
+        for i in items:
+            i["weight"] = q(i["cost_krw"] / total, Decimal("0.000001")) if total else None
         return {"portfolio_id": portfolio_id, "seed_krw": pf.seed_krw, "used_krw": used, "remaining_krw": remaining,
-                "budget_krw": budget, "target_count": 4, "share_krw": d("750000"), "items": items,
+                "budget_krw": budget, "target_count": len(quotes), "share_krw": q(share), "items": items,
                 "total_cost_krw": total, "leftover_krw": budget - total, "skipped": skipped,
-                "fx_rate": d("1338.08"), "fx_rate_at": None, "saved": False}
+                "fx_rate": fx.usd_krw if fx else None, "fx_rate_at": fx.rate_at if fx else None, "saved": False}
 
     def _commit_unique(self, message: str, code: str) -> None:
         try:
