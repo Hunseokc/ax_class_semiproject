@@ -8,6 +8,7 @@ import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";   /
 import { FX_CODE, DEFAULT_METRICS, metricPicker, storedMetrics } from "../components/metric-picker.js";   // [S5-A]
 import { openWatchNote } from "../components/watch-note.js";   // [S5-A]
 import { icons } from "../components/icons.js";   // [S5-A]
+import { mountSearch } from "../components/search.js";   // [S6-A]
 
 mountSidebar("home");
 const $ = (sel) => document.querySelector(sel);
@@ -119,10 +120,8 @@ $("#spark-range").append(segmented(SPARK_RANGES, sparkRange,
   (v) => { sparkRange = v; if (market.indices || market.fx) renderMarketRow(); }, { label: "스파크라인 기간" }));
 
 // ── [S5-A] 표시 지표 선택 ──
-// index.html은 A의 담당 파일이 아니라서, 이 파일이 버튼과 상자 자리를 만들어 붙인다
-const editBtn = h('<button id="market-edit" class="btn btn--sm" type="button" aria-expanded="false" aria-controls="market-picker" disabled>표시 지표</button>');
-$("#spark-range").before(editBtn);
-$("#market").before(h('<div id="market-picker-slot"></div>'));
+// 버튼(#market-edit)과 상자 자리(#market-picker-slot)는 index.html에 있다 [S6-A]
+const editBtn = $("#market-edit");
 editBtn.addEventListener("click", () => togglePicker(editBtn.getAttribute("aria-expanded") !== "true"));
 
 const availableMetrics = () => [...(market.indices || []).map((i) => i.code), FX_CODE];
@@ -241,23 +240,26 @@ loadWatchlist();
 document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); loadRanking(); });   // [S5-A] loadRanking
 
 // ── [S4-A] 투자 성향: 관심종목 카드의 매력도 게이지가 따르는 값 ──
-// index.html은 A의 담당 파일 목록에 없어서, 이 파일이 성향 메뉴 자리를 '내 관심종목' 제목줄에 만들어 붙인다
+// 성향 메뉴(#preset-menu)는 index.html에 자리가 있고, 아래에서 맨 위 검색바 줄로 옮긴다 [S6-A]
 let watchCount = 0, presetNames = {};
 function paintWatchCount() {
   const name = presetNames[getPreset()];
   $("#watch-count").textContent = `${watchCount}개 종목${name ? ` · 매력도 ${name} 기준` : ""}`;
 }
-const presetBox = h('<div id="preset-menu"></div>');
-$("#watch-count").before(presetBox);
+const presetBox = $("#preset-menu");
 loadPresets().then(({ presets }) => {
   presetNames = Object.fromEntries(presets.map((p) => [p.code, p.name]));
   paintWatchCount();
 });
+// ── [S6-A] 맨 위 한 줄: 상단 검색바 + 투자 성향 ──
+mountSearch();   // .main__inner 맨 앞에 .topbar(검색바)를 붙인다
+const topbar = $(".topbar");
+if (topbar) { topbar.classList.add("topbar--home"); topbar.append(presetBox); }
 mountPresetMenu(presetBox);
 document.addEventListener(PRESET_EVENT, loadWatchlist);   // 지수·환율은 성향과 무관해서 관심종목만 다시 조회
 
 // ── [S5-A] 순위 상위 5 (GET /statistics/ranking) ──
-// index.html은 A의 담당 파일이 아니라서, 이 파일이 관심종목 아래에 칸을 만들어 붙인다.
+// 2열 칸막이(.home-split) 아래에 칸을 만들어 붙인다(파트 3에서 index.html의 '시장 주목 종목' 구역으로 대체).
 // 행 = 순위 · 종목명(티커·시장 배지) · 그 탭의 순위 근거 값 하나. 거래량은 시장을 정해야 해서 국내/미국 탭이 항상 하나 선택돼 있다
 const RANK_METRICS = [
   { value: "volume", label: "거래량" },
@@ -271,7 +273,7 @@ const rankSection = h(`<section class="section" aria-labelledby="h-rank">
     <div class="section__head"><h2 id="h-rank">순위 상위 5 <span class="section__meta">일봉 기준</span></h2>
       <div class="section__tools"><div id="rank-metric"></div><div id="rank-country"></div></div></div>
     <div id="rank-list"></div></section>`);
-$("#watchlist").closest("section").after(rankSection);
+$(".home-split").after(rankSection);   // [S6-A]
 
 function rankValue(i) {
   const text = rankMetric === "volume" ? volume(i.value) : pct(i.value, { sign: true, digits: 1 });
