@@ -37,8 +37,8 @@ class HealthDbOut(Schema):
 
 # ── [S1-B] stocks·market ──────────────────────────────────────────
 # (시장 지수·환율, 종목 목록·상세·candles·peer-groups 응답)
-# Stage 1에서 뺀 칸: 지수·환율의 52주 범위·장 상태, 리스트·상세의 매력도(score·preset)·비교군(coverage·detail_status)·업종(sector·industry)
-# Stage 2에서 넣은 칸: 리스트·상세의 관심(is_watched)
+# Stage 1에서 뺀 칸: 지수·환율의 52주 범위·장 상태, 리스트·상세의 비교군(coverage·detail_status)·업종(sector·industry)
+# Stage 2에서 넣은 칸: 리스트·상세의 관심(is_watched) / Stage 4: 리스트·상세의 매력도(score·preset), 상세의 score_as_of
 
 # ------------------------------------------------------------------ 시장
 class SparkPoint(Schema):
@@ -100,6 +100,7 @@ class StockRow(Schema):
     volume: int | None
     market_cap: Num | None
     market_cap_krw: Num | None
+    score: Num | None
     is_watched: bool
 
 
@@ -109,6 +110,7 @@ class StockListOut(Schema):
     offset: int
     sort: str
     order: str
+    preset: str
     fx_rate_at: datetime | None
     items: list[StockRow]
 
@@ -147,6 +149,9 @@ class StockDetailOut(Schema):
     market_cap: Num | None
     market_cap_krw: Num | None
     shares_outstanding: int | None
+    score: Num | None
+    score_as_of: date | None
+    preset: str
     groups: list[GroupRef]                   # 소속 경쟁 그룹(없으면 빈 목록)
     is_watched: bool
 
@@ -170,7 +175,7 @@ class CandlesOut(Schema):
 
 # ── [S2-B] watchlist ──────────────────────────────────────────────
 # (관심종목 추가·순서 변경 요청, 카드·목록 응답. 요청에는 user_id를 받지 않는다 — 사용자는 get_current_user_id가 정한다)
-# Stage 2에서 뺀 칸: 카드의 매력도(score)·메모·목표가·괴리율(target_gap)·updated_at, 목록의 preset, 메모·목표가 수정 요청(PUT)
+# Stage 2에서 뺀 칸: 카드의 메모·목표가·괴리율(target_gap)·updated_at, 메모·목표가 수정 요청(PUT) / Stage 4: 카드의 매력도(score), 목록의 preset
 
 # ------------------------------------------------------------------ 관심종목
 class WatchlistCreate(Schema):
@@ -201,10 +206,12 @@ class WatchlistCard(Schema):
     close: Num | None
     change: Num | None
     change_rate: Num | None
+    score: Num | None
 
 
 class WatchlistOut(Schema):
     user_id: int
+    preset: str
     count: int
     items: list[WatchlistCard]
 
