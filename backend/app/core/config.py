@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     dart_api_key: str = ""
     sec_user_agent: str = ""                         # 연락처(이메일)가 들어간 User-Agent — SEC EDGAR 필수
     # ── [S3-D] 스케줄러 ──
-    scheduler_enabled: bool = True                       # 앱 안 스케줄러(4시간 갱신)
+    scheduler_enabled: bool = True                       # 앱 안 스케줄러(4시간 갱신·비교군 1일 갱신)
     scheduler_check_minutes: int = Field(default=5, ge=1)
     # 이후 단계 설정은 해당 단계 담당자가 이 클래스에 추가한다
 
