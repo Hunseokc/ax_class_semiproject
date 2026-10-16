@@ -152,3 +152,11 @@ export const getMonthly = (market, ticker, months = 12) => api.get("/statistics/
 export const getRanking = (metric, country, limit = 5) => api.get("/statistics/ranking", { metric, country, limit });
 // 저장하지 않는 계산 전용 — 담기는 기존 addPortfolioItem 으로 한다
 export const previewEqualWeight = (id, body) => api.post(`/portfolios/${id}/preview/equal-weight`, body);
+
+// ── [S6-A] 홈 위젯 · 상단 검색 ──
+// 이어 입력하면 앞 요청을 취소해야 해서 signal 을 넘길 수 있는 request 를 직접 쓴다
+export const searchStocks = (q, signal) => request("GET", "/stocks/search", { params: { q, limit: 8 }, signal });
+// 시장 주목 종목 — kind: volume_surge(거래량 급증) · attractiveness(매력도 순위)
+export const getHomeRanking = (kind, country, limit = 5) => api.get("/home/ranking", { kind, country, limit, preset: getPreset() });
+export const getSectors = (country) => api.get("/home/sectors", { country });
+export const getSentiment = (country) => api.get("/home/sentiment", { country });
