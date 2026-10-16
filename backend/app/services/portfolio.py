@@ -288,6 +288,42 @@ class PortfolioService:
         }
 
     # ------------------------------------------------------------ 내부
+    # ------------------------------------------------------------ 관심종목 균등 배분 미리보기 (저장하지 않음)
+    # TODO(껍데기): C — 본문을 원본대로 교체(잔여 시드·예산 409, 관심종목 비면 422 EMPTY_WATCHLIST, 균등 몫 내림 수량,
+    #   제외 사유 ALREADY_IN_PORTFOLIO·NO_PRICE·PRICE_ABOVE_SHARE). 이름·인자·반환 모양은 원본 그대로다.
+    #   지금은 없는 포트폴리오만 404로 막고, 시드·사용·잔여·예산은 실제 값, 나머지는 docs/06 3-5 예시 값을 돌려준다.
+    def preview_equal_weight(self, portfolio_id: int, targets: list[tuple[str, str]] | None,
+                             budget: Decimal | None) -> dict:
+        """예산을 대상 종목 수로 똑같이 나눈 몫으로 정수 수량을 계산한다(담기 금액 모드와 같은 내림 환산).
+        이미 담은 종목·시세 없는 종목·1주가 몫보다 비싼 종목은 사유와 함께 skipped. DB에는 쓰지 않는다."""
+        pf = self.get(portfolio_id)
+        used = self.used_krw(portfolio_id)
+        remaining = pf.seed_krw - used
+        budget = remaining if budget is None else budget
+        d = Decimal
+        items = [
+            {"market": "NASDAQ", "ticker": "MSFT", "name": "Microsoft", "currency": "USD", "price": d("529.76"),
+             "price_date": date(2026, 10, 7), "fx_rate": d("1338.08"), "unit_cost_krw": d("708861.26"), "quantity": 1,
+             "cost_krw": d("708861.26"), "weight": d("0.371472")},
+            {"market": "NASDAQ", "ticker": "AMZN", "name": "Amazon", "currency": "USD", "price": d("259.92"),
+             "price_date": date(2026, 10, 7), "fx_rate": d("1338.08"), "unit_cost_krw": d("347793.75"), "quantity": 2,
+             "cost_krw": d("695587.51"), "weight": d("0.364516")},
+            {"market": "NASDAQ", "ticker": "AVGO", "name": "Broadcom", "currency": "USD", "price": d("376.51"),
+             "price_date": date(2026, 10, 7), "fx_rate": d("1338.08"), "unit_cost_krw": d("503800.5"), "quantity": 1,
+             "cost_krw": d("503800.5"), "weight": d("0.264012")},
+        ]
+        skipped = [
+            {"market": "NASDAQ", "ticker": "AAPL", "name": "Apple", "reason": "ALREADY_IN_PORTFOLIO",
+             "message": "이미 담은 종목입니다(수량 변경은 담은 종목 수정)"},
+            {"market": "NASDAQ", "ticker": "META", "name": "Meta Platforms", "reason": "PRICE_ABOVE_SHARE",
+             "message": "1주 원가가 균등 몫보다 큽니다", "unit_cost_krw": d("965170.48"), "share_krw": d("750000")},
+        ]
+        total = sum((i["cost_krw"] for i in items), Decimal(0))
+        return {"portfolio_id": portfolio_id, "seed_krw": pf.seed_krw, "used_krw": used, "remaining_krw": remaining,
+                "budget_krw": budget, "target_count": 4, "share_krw": d("750000"), "items": items,
+                "total_cost_krw": total, "leftover_krw": budget - total, "skipped": skipped,
+                "fx_rate": d("1338.08"), "fx_rate_at": None, "saved": False}
+
     def _commit_unique(self, message: str, code: str) -> None:
         try:
             self.db.commit()

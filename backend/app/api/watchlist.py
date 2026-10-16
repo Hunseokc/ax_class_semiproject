@@ -1,4 +1,4 @@
-"""관심종목 CRUD. (메모·목표가 수정 PUT, 매력도, 비교군 상세 수집 예약은 이후 단계)
+"""관심종목 CRUD. (매력도, 비교군 상세 수집 예약은 이후 단계)
 
 사용자는 요청 본문·경로로 받지 않고 항상 get_current_user_id로 정한다.
 """
@@ -13,7 +13,7 @@ from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, re
 from app.core.errors import Conflict, NotFound
 from app.models import User, WatchlistItem
 from app.queries import sql
-from app.schemas.api import WatchlistCard, WatchlistCreate, WatchlistOrder, WatchlistOut
+from app.schemas.api import WatchlistCard, WatchlistCreate, WatchlistOrder, WatchlistOut, WatchlistUpdate
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 
@@ -76,3 +76,19 @@ def delete_watchlist(market: MarketPath, ticker: TickerPath, user_id: int = Depe
     db.delete(w)
     db.commit()
     return Response(status_code=204)
+
+
+# TODO(껍데기): B — 본문을 원본대로 교체(보낸 필드만 w.memo·w.target_price에 저장 → commit → _cards에서 그 카드).
+#   주소·인자·응답 모델(WatchlistCard)·404 두 가지는 원본 그대로다. 지금은 저장하지 않고, 지금 카드에 보낸 값만 얹어 돌려준다
+#   (target_gap은 null — GET /watchlist의 memo·target_price·target_gap은 B가 watchlist.sql에 추가).
+@router.put("/{market}/{ticker}", response_model=WatchlistCard,
+            summary="관심종목 메모·목표가 수정 (보낸 필드만 변경, null이면 지움). 응답에 목표가 대비 괴리율 target_gap")
+def update_watchlist(market: MarketPath, ticker: TickerPath, body: WatchlistUpdate,
+                     user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    _require_user(db, user_id)
+    s = resolve_stock(db, market, ticker)
+    w = db.get(WatchlistItem, (user_id, s["stock_id"]))          # 다른 사용자 것이면 없는 것과 같은 404
+    if w is None:
+        raise NotFound(f"관심종목에 {market}/{ticker}이(가) 없습니다", code="WATCHLIST_ITEM_NOT_FOUND")
+    card = next(c for c in _cards(db, user_id) if c["stock_id"] == s["stock_id"])
+    return {**card, **body.model_dump(exclude_unset=True), "target_gap": None}

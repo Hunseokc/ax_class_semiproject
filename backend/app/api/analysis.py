@@ -1,12 +1,13 @@
 """분석 API: 종목 수치 분석·매력도, 경쟁 그룹 비교·기준일=100 차트, DB 통계.
 
-Stage 4에서 뺀 것: 응답의 reference·reference_note(listed 참고 점수), metrics의 dps·dividend_yield,
-통계 monthly·ranking·data-quality(Stage 5).
+Stage 5까지 뺀 것: 응답의 reference·reference_note(listed 참고 점수), metrics의 dps·dividend_yield.
 """
 from __future__ import annotations
 
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
@@ -16,7 +17,9 @@ from app.api.deps import MarketPath, TickerPath, get_db, get_preset
 from app.api.stocks import RANGE_MONTHS, resolve_stock
 from app.core.errors import NotFound
 from app.queries import sql
-from app.schemas.common import INT_MAX, Num, Schema
+from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN, Num, Schema
+from app.core.config import get_settings
+from app.services.data_quality import data_quality
 from app.services.scoring import FACTORS, METRICS, default_preset
 
 router = APIRouter(prefix="/stocks", tags=["analysis"])
@@ -323,6 +326,148 @@ def stats_market_valuation(min_samples: int = Query(3, ge=1, le=25), db: Session
 @stats_router.get("/peer-group-valuation", summary="경쟁 그룹별 평균·최고·최저 지표")
 def stats_peer_group_valuation(db: Session = Depends(get_db)):
     return {"groups": [dict(r) for r in db.execute(sql("stats_peer_group_valuation")).mappings()]}
+
+
+class MonthlyItem(Schema):
+    month: str                       # YYYY-MM
+    trading_days: int
+    first_date: date
+    last_date: date
+    avg_close: Num
+    max_high: Num
+    min_low: Num
+    first_close: Num
+    last_close: Num
+    monthly_return: Num | None       # 월초(첫 거래일) 종가 대비 월말(마지막 거래일) 종가
+    total_volume: int
+    avg_volume: int
+    is_partial: bool                 # 아직 끝나지 않은 달
+
+
+class MonthlyOut(Schema):
+    market: str
+    ticker: str
+    name: str
+    currency: str
+    months: int
+    today: date                      # 시장 현지 날짜(이 달이 is_partial)
+    items: list[MonthlyItem]
+
+
+# TODO(껍데기): B — 본문을 원본대로 교체(queries/stats_monthly.sql: date_trunc + GROUP BY, FIRST_VALUE/LAST_VALUE, is_partial).
+#   주소·인자·응답 모델은 원본 그대로다. 지금은 없는 종목만 404로 막고, items는 docs/06 3-6 예시 값(2개월)을 돌려준다.
+@stats_router.get("/monthly", response_model=MonthlyOut,
+                  summary="종목 월별 집계: 거래일 수·평균 종가·최고/최저·월초 대비 월말 수익률·거래량 (진행 중인 달은 is_partial)")
+def stats_monthly(market: str = Query(pattern=MARKET_PATTERN, examples=["KOSPI"]),
+                  ticker: str = Query(pattern=TICKER_PATTERN, examples=["005930"]),
+                  months: int = Query(12, ge=1, le=24, description="이번 달 포함 최근 N개월"),
+                  db: Session = Depends(get_db)):
+    s = resolve_stock(db, market, ticker)
+    tz = db.execute(text("SELECT timezone FROM markets WHERE code = :m"), {"m": s["market"]}).scalar_one()
+    today = datetime.now(ZoneInfo(tz)).date()
+    items = [
+        {"month": "2026-09", "trading_days": 20, "first_date": date(2026, 9, 1), "last_date": date(2026, 9, 30),
+         "avg_close": 263825, "max_high": 286500, "min_low": 243000, "first_close": 261000, "last_close": 269500,
+         "monthly_return": Decimal("0.032567"), "total_volume": 337498673, "avg_volume": 16874934, "is_partial": False},
+        {"month": "2026-10", "trading_days": 4, "first_date": date(2026, 10, 1), "last_date": date(2026, 10, 7),
+         "avg_close": 273125, "max_high": 279500, "min_low": 264500, "first_close": 274500, "last_close": 269000,
+         "monthly_return": Decimal("-0.020036"), "total_volume": 54551646, "avg_volume": 13637912, "is_partial": True},
+    ]
+    return {"market": s["market"], "ticker": s["ticker"], "name": s["name"], "currency": s["currency"],
+            "months": months, "today": today, "items": items}
+
+
+RankingMetric = Literal["return_1m", "return_3m", "return_1y", "volume", "market_cap_krw"]
+
+
+class RankingItem(Schema):
+    rank: int
+    stock_id: int
+    market: str
+    country: str
+    currency: str
+    ticker: str
+    name: str
+    value: Num                       # 수익률은 소수(0.05 = 5%), 거래량은 주, 시총은 원화 환산
+    as_of: date
+
+
+class RankingOut(Schema):
+    metric: str
+    country: str | None
+    order: str
+    limit: int
+    total: int                       # 지표값이 있는 종목 수(순위 대상)
+    items: list[RankingItem]
+
+
+# TODO(껍데기): B — 본문을 원본대로 교체(queries/stats_ranking.sql: RANK() OVER, 지표값 없는 종목 제외,
+#   전체 + volume은 422 VOLUME_SORT_REQUIRES_MARKET). 주소·인자·응답 모델은 원본 그대로다.
+#   지금은 docs/06 3-6 예시 값(1년 수익률 상위 3)을 limit만큼 잘라 돌려준다(metric·country를 바꿔도 같은 종목).
+@stats_router.get("/ranking", response_model=RankingOut,
+                  summary="지표별 TOP N 랭킹 (노출 종목, RANK() — 같은 값은 같은 순위, 지표값 없는 종목 제외)")
+def stats_ranking(metric: RankingMetric = Query(description="return_1m·return_3m·return_1y·volume·market_cap_krw"),
+                  country: Literal["KR", "US"] | None = Query(None, description="비우면 전체 (volume은 시장 지정 필수)"),
+                  order: Literal["desc", "asc"] = "desc",
+                  limit: int = Query(10, ge=1, le=50),
+                  db: Session = Depends(get_db)):
+    rows = [
+        {"rank": 1, "stock_id": 2, "market": "KOSPI", "country": "KR", "currency": "KRW", "ticker": "000660",
+         "name": "SK하이닉스", "value": Decimal("3.336283"), "as_of": date(2026, 10, 7)},
+        {"rank": 2, "stock_id": 25, "market": "NASDAQ", "country": "US", "currency": "USD", "ticker": "AMD",
+         "name": "AMD", "value": Decimal("2.053567"), "as_of": date(2026, 10, 7)},
+        {"rank": 3, "stock_id": 1, "market": "KOSPI", "country": "KR", "currency": "KRW", "ticker": "005930",
+         "name": "삼성전자", "value": Decimal("2.022472"), "as_of": date(2026, 10, 7)},
+    ][:limit]
+    return {"metric": metric, "country": country, "order": order, "limit": limit, "total": 25, "items": rows}
+
+
+class QualityCounts(Schema):
+    success: int                     # 대상(종목·지수 등) 단위 성공 행
+    failed: int                      # 대상 단위 실패 행
+    partial: int                     # 일부 대상만 실패한 갱신 실행 수(작업 단위)
+    skipped: int                     # TTL 이내 등으로 건너뛴 실행
+
+
+class QualityJob(Schema):
+    job_type: str
+    last_success_at: datetime | None
+    last_failure_at: datetime | None
+    last_failure_reason: str | None
+    last_failure_target: str | None  # 실패한 종목 티커(종목 단위 작업일 때)
+    quarantined_rows: int
+    counts: QualityCounts
+    stale: bool | None               # 4시간 갱신 작업만 판단, 그 밖에는 null
+
+
+class QualityTotals(QualityCounts):
+    quarantined_rows: int
+
+
+class StaleJob(Schema):
+    job_type: str
+    last_success_at: datetime | None
+    hours_since_success: float | None
+
+
+class DataQualityOut(Schema):
+    days: int
+    since: datetime
+    generated_at: datetime
+    ttl_hours: float
+    stale_after_hours: float
+    totals: QualityTotals
+    jobs: list[QualityJob]
+    stale_jobs: list[StaleJob]
+
+
+# TODO(껍데기): B — 주소·인자·응답 모델·본문은 원본 그대로다(C의 data_quality 서비스 호출, 지금은 C의 껍데기라 예시 값).
+#   B는 queries/stats_data_quality.sql을 만들고 이 주석을 지운다.
+@stats_router.get("/data-quality", response_model=DataQualityOut,
+                  summary="데이터 품질 현황: 작업 종류별 마지막 성공·실패(사유), 최근 N일 상태별 건수·격리 행 수, 오래된 갱신 작업(TTL×2 초과)")
+def stats_data_quality(days: int = Query(7, ge=1, le=90, description="건수를 셀 최근 일수"),
+                       db: Session = Depends(get_db)):
+    return data_quality(db.connection(), days=days, ttl_hours=get_settings().refresh_ttl_hours)
 
 
 @stats_router.get("/disclosure-frequency", summary="기간별 공시 빈도 (월·분기·주)")
