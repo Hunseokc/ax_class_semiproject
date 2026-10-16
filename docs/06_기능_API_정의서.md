@@ -1,10 +1,10 @@
-# 06. 기능·API 정의서 (Stage 2 범위)
+# 06. 기능·API 정의서 (Stage 3 범위)
 
-> **상태: Stage 2 확정.** Stage 1·2 범위의 공통 규칙·엔드포인트 계약·화면·에러 코드를 담았다. 3절 실제 호출 예시는 Stage 1 엔드포인트이고, 응답 JSON은 원본 최종본의 3-1·3-2 예시에서 **매력도(`score`·`preset`)·`coverage`·`detail_status`·`sector`·`industry`·52주 범위·`session_status` 필드를 뺀 모양**이다. Stage 2에서 리스트·상세에 `is_watched`가 들어왔다.
-> 관심종목·모의 포트폴리오의 요청·응답 모양은 원본 최종본 3-4·3-5 예시에서 메모·목표가·매력도(`score`·`weighted_score`)·균등 배분 미리보기를 뺀 모양이다(Swagger로 확인). 이후 단계(재무·공시·매력도·분석·통계·홈 위젯)는 해당 단계에서 이 문서에 추가한다.
+> **상태: Stage 3 확정 (v3.0).** Stage 1~3 범위의 공통 규칙·엔드포인트 계약·화면·에러 코드를 담았다. 3절 실제 호출 예시는 Stage 1·3 엔드포인트이고, 응답 JSON은 원본 최종본의 3-1·3-2 예시에서 **매력도(`score`·`preset`)·`coverage`·`detail_status`·`sector`·`industry`·52주 범위·`session_status` 필드를 뺀 모양**이다. Stage 2에서 리스트·상세에 `is_watched`가 들어왔고, Stage 3에서 밸류에이션(`per`·`pbr`·`market_cap` 등)이 실제 값으로 채워졌다.
+> 관심종목·모의 포트폴리오의 요청·응답 모양은 원본 최종본 3-4·3-5 예시에서 메모·목표가·매력도(`score`·`weighted_score`)·균등 배분 미리보기를 뺀 모양이다(Swagger로 확인). 이후 단계(매력도·분석·통계·홈 위젯)는 해당 단계에서 이 문서에 추가한다.
 
-- 기준: 실행 중인 서버의 OpenAPI(`/openapi.json`)와 **실제 호출 응답**(2026-10-13, 개발 DB — `prices`·`indices`·`fx` 실제 수집 후). 배열은 앞 2개만 표시
-- 밸류에이션 수집은 Stage 3이라 예시의 `market_cap`·`per`·`pbr` 등은 `null`이고, 화면에는 `–`로 표시된다. `name_en`·`corp_code`는 `import-sample`을 실행했을 때만 채워진다
+- 기준: 실행 중인 서버의 OpenAPI(`/openapi.json`)와 **실제 호출 응답**(2026-10-15, 개발 DB — 시세·지수·환율·밸류에이션·재무·공시 실제 수집 후 4시간 자동 갱신 운영 중). 배열은 앞 2개만 표시
+- `name_en`·`corp_code`·`cik`는 `master`(온라인)가 DART·SEC 매핑으로 채운다. `master --offline`이면 `null`
 - Swagger UI: `http://localhost:8000/docs`
 
 ## 1. 공통 규칙
@@ -19,10 +19,12 @@
 | 기준 시각 | 시세 응답은 `as_of`(거래일), 환율은 `rate_at`, 통화는 `currency` |
 | 요청 ID | 모든 응답 헤더 `X-Request-ID`, 서버 로그에 같은 ID 기록 |
 | 외부 소스 | **조회 API는 외부 소스를 직접 부르지 않고 DB에 저장된 값만 돌려준다.** 외부 호출은 수집(`app.ingest`)에서만 한다 |
-| 수집 (Stage 1) | `python -m app.ingest prices [--full] [--tickers …]`(국내 pykrx·미국 yfinance 일봉), `indices [--full]`, `fx [--full]`(USD/KRW DAILY). 기본은 증분(저장된 마지막 날짜 다음 날부터, 환율은 마지막 날을 한 번 더 받음), 저장된 값이 없거나 `--full`이면 최근 730일. 대상 1건당 `ingestion_logs` 1행, 한 대상이 실패해도 나머지는 계속 적재. pykrx가 막히면 `PRICE_SOURCE_KR=yfinance`로 국내 시세·지수도 yfinance로 받아 다시 실행(수동 전환), 그래도 안 되면 `master --offline` 후 `import-sample`(CSV)로 대체. 4시간 자동 갱신은 Stage 3 |
+| 수집 (Stage 1) | `python -m app.ingest prices [--full] [--tickers …]`(국내 pykrx·미국 yfinance 일봉), `indices [--full]`, `fx [--full]`(USD/KRW DAILY). 기본은 증분(저장된 마지막 날짜 다음 날부터, 환율은 마지막 날을 한 번 더 받음), 저장된 값이 없거나 `--full`이면 최근 730일. 대상 1건당 `ingestion_logs` 1행, 한 대상이 실패해도 나머지는 계속 적재. pykrx가 막히면 `PRICE_SOURCE_KR=yfinance`로 국내 시세·지수도 yfinance로 받아 다시 실행(수동 전환), 그래도 안 되면 `master --offline` 후 `import-sample`(CSV)로 대체 |
+| 수집 (Stage 3) | `master`(온라인이면 DART `corp_code`·SEC `cik` 매핑까지), `valuation [--full] [--tickers …]`(국내 pykrx 일별 PER·PBR·시총, 미국 yfinance 스냅샷), `financials [--years 5] [--tickers …]`(FY 재무 — 국내 OpenDART, 미국 SEC companyfacts + yfinance 보완), `disclosures [--days 365] [--tickers …]`(최근 공시 — 국내 OpenDART 지분공시 제외, 미국 SEC submissions), `all`(master → prices → indices → fx → financials → valuation → disclosures). 모두 재실행 안전(upsert) |
+| 자동 갱신 (Stage 3) | 앱 안 스케줄러(`SCHEDULER_ENABLED`, 기본 켜짐)가 5분마다 확인해 환율·지수·증분 일봉·밸류에이션을 작업별 TTL(`REFRESH_TTL_HOURS`, 기본 4시간)로 갱신한다. TTL 이내 작업은 외부 호출 없이 `SKIPPED`, 일부 종목만 실패한 작업은 30분 뒤 실패 종목만 다시 받는다. PostgreSQL advisory lock으로 여러 프로세스가 동시에 돌려도 한 번만 실행. 서버를 띄우지 않으면 `python -m app.ingest refresh`를 cron으로 실행(같은 정책) |
 | 데모 데이터 (Stage 2) | `python -m app.ingest seed-demo` — demo 사용자의 관심종목 8건 + 모의 포트폴리오 2개(KRW·USD 혼합, 실제 담기 경로로 생성). 같은 이름 포트폴리오가 있으면 건너뜀(재실행 안전), 시세 없는 종목은 건너뛰고 보고 |
 
-## 2. 엔드포인트 목록 (Stage 0~2)
+## 2. 엔드포인트 목록 (Stage 0~3)
 
 | 구분 | Method | URL | 기능 | 주요 파라미터 | 성공 · 오류(HTTP 상태와 `code`) | 단계 |
 |---|---|---|---|---|---|---|
@@ -30,10 +32,14 @@
 | 헬스체크 | GET | `/health/db` (루트) | DB 연결 확인(`SELECT 1`). 컨테이너 HEALTHCHECK가 사용 | - | 200 · 503 DB_UNAVAILABLE | 0 |
 | 시장 | GET | `/market/indices` | 지수별 최신값·등락·최근 1년 스파크라인(DB 값만, 화면에서 1개월·3개월·1년으로 자름) | - | 200 | 1-B |
 | 시장 | GET | `/market/fx` | USD/KRW 최신값·전일 대비·최근 1년 DAILY 추이. 현재값은 FxService(TTL 안이면 저장값, 지나면 갱신 시도 후 실패 시 저장값 + `fx_stale`) | - | 200 · 503 FX_UNAVAILABLE | 1-B, 2-C |
+| 시장 | POST | `/market/refresh` | 환율·지수·증분 일봉·밸류에이션 갱신. 작업별 TTL 이내면 외부 호출 없이 `SKIPPED`, 결과는 작업별 상태(`SUCCESS`·`PARTIAL`·`FAILED`·`SKIPPED`)와 `next_refresh_available_at` | - | 200 | 3-D |
+| 시장 | GET | `/market/refresh/status` | 갱신 상태 조회 — 외부 호출 없음. 작업별 `FRESH`·`STALE`과 마지막 성공 시각(사이드바 '마지막 갱신') | - | 200 | 3-D |
 | 종목 | GET | `/peer-groups` | 경쟁 그룹 목록 (리스트 필터용) | - | 200 | 1-B |
 | 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 이름·티커 검색, 요청 사용자의 `is_watched`) | country, sort, order, group, q, limit, offset | 200 · 422 VALIDATION_ERROR, VOLUME_SORT_REQUIRES_MARKET | 1-B |
 | 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션 + `is_watched` | - | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR | 1-B |
 | 종목 | GET | `/stocks/{market}/{ticker}/candles` | 기간 일봉 — 종목의 최신 거래일 기준 | range (`1m`·`3m`·`6m`·`1y`, 기본 `3m`) | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR | 1-B |
+| 종목 | GET | `/stocks/{market}/{ticker}/financials` | FY 재무 추이 — 최근 N개 결산기를 오래된 순으로, 영업이익률·ROE는 조회 시 계산 | limit (1~10, 기본 5) | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR | 3-B |
+| 종목 | GET | `/stocks/{market}/{ticker}/disclosures` | 최근 공시 — 접수 시각 최신순 | limit (1~50, 기본 5) | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR | 3-B |
 | 관심종목 | GET | `/watchlist` | 관심종목 카드 목록 (정렬순, 현재가·등락) | - | 200 · 404 USER_NOT_FOUND | 2-B |
 | 관심종목 | POST | `/watchlist` | 관심종목 추가 (맨 뒤 순서) | body `{market, ticker}` | 201 · 404 USER_NOT_FOUND, STOCK_NOT_FOUND · 409 DUPLICATE_WATCHLIST · 422 VALIDATION_ERROR | 2-B |
 | 관심종목 | PATCH | `/watchlist/order` | 정렬 순서 변경 — 하나라도 목록에 없으면 전체 취소 | body `{items: [{market, ticker, sort_order}]}` (1~500개) | 200 · 404 USER_NOT_FOUND, STOCK_NOT_FOUND, WATCHLIST_ITEM_NOT_FOUND · 422 VALIDATION_ERROR | 2-B |
@@ -75,26 +81,26 @@
 응답 `200`:
 ```json
 {
-  "as_of": "2026-10-13",
+  "as_of": "2026-10-14",
   "indices": [
     {
       "code": "KOSPI",
       "name": "KOSPI",
       "country": "KR",
       "currency": "KRW",
-      "as_of": "2026-10-13",
-      "close": 6035.35,
-      "prev_close": 6384.24,
-      "change": -348.89,
-      "change_rate": -0.054649,
+      "as_of": "2026-10-14",
+      "close": 6008.81,
+      "prev_close": 6035.3501,
+      "change": -26.5401,
+      "change_rate": -0.004397,
       "sparkline": [
-        {
-          "date": "2025-10-14",
-          "close": 3561.81
-        },
         {
           "date": "2025-10-15",
           "close": 3657.28
+        },
+        {
+          "date": "2025-10-16",
+          "close": 3748.3701
         },
         "… 외 242개"
       ]
@@ -104,19 +110,19 @@
       "name": "KOSDAQ",
       "country": "KR",
       "currency": "KRW",
-      "as_of": "2026-10-13",
-      "close": 837.03,
-      "prev_close": 849.19,
-      "change": -12.16,
-      "change_rate": -0.01432,
+      "as_of": "2026-10-14",
+      "close": 823.88,
+      "prev_close": 837.03,
+      "change": -13.15,
+      "change_rate": -0.01571,
       "sparkline": [
-        {
-          "date": "2025-10-14",
-          "close": 847.96
-        },
         {
           "date": "2025-10-15",
           "close": 864.72
+        },
+        {
+          "date": "2025-10-16",
+          "close": 865.41
         },
         "… 외 242개"
       ]
@@ -125,31 +131,85 @@
   ]
 }
 ```
-#### `GET /api/v1/market/fx` — SNAPSHOT이 없으므로(Stage 3) 최신 DAILY
+#### `GET /api/v1/market/fx` — FxService가 넣은 SNAPSHOT이 현재값, 전일 대비는 직전 DAILY 기준
 응답 `200`:
 ```json
 {
   "pair": "USD/KRW",
   "currency": "KRW",
-  "usd_krw": 1340.05,
-  "rate_at": "2026-10-13T00:00:00+09:00",
-  "granularity": "DAILY",
+  "usd_krw": 1347.9301,
+  "rate_at": "2026-10-15T14:04:40.455050+09:00",
+  "granularity": "SNAPSHOT",
   "fx_stale": false,
-  "prev_close": 1342.99,
-  "change": -2.94,
-  "change_rate": -0.002189,
+  "prev_close": 1340.3101,
+  "change": 7.62,
+  "change_rate": 0.005685,
   "history": [
     {
-      "date": "2025-10-14",
-      "usd_krw": 1426.0699
+      "date": "2025-10-16",
+      "usd_krw": 1420.09
     },
     {
-      "date": "2025-10-15",
-      "usd_krw": 1429.4301
+      "date": "2025-10-17",
+      "usd_krw": 1415.72
     },
     "… 외 256개"
   ],
-  "as_of": "2026-10-13T00:00:00+09:00"
+  "as_of": "2026-10-15T14:04:40.455050+09:00"
+}
+```
+#### `GET /api/v1/market/refresh/status` — 외부 호출 없음, 작업별 FRESH/STALE
+응답 `200`:
+```json
+{
+  "refreshed_at": "2026-10-15T15:09:10.745505+09:00",
+  "next_refresh_available_at": "2026-10-15T18:04:40.969618+09:00",
+  "ttl_hours": 4.0,
+  "jobs": [
+    {
+      "job_type": "FX",
+      "status": "FRESH",
+      "detail": null,
+      "last_success_at": "2026-10-15T14:04:40.969618+09:00",
+      "counts": {}
+    },
+    {
+      "job_type": "INDICES",
+      "status": "FRESH",
+      "detail": null,
+      "last_success_at": "2026-10-15T15:09:10.745505+09:00",
+      "counts": {}
+    },
+    "… 외 2개"
+  ],
+  "basis": "일봉 기준"
+}
+```
+#### `POST /api/v1/market/refresh` — TTL 이내라 모든 작업이 SKIPPED (외부 호출 0)
+응답 `200`:
+```json
+{
+  "refreshed_at": "2026-10-15T06:49:17.967085Z",
+  "next_refresh_available_at": "2026-10-15T18:04:40.969618+09:00",
+  "ttl_hours": 4.0,
+  "jobs": [
+    {
+      "job_type": "FX",
+      "status": "SKIPPED",
+      "detail": "TTL 이내 — 마지막 성공 2026-10-15T14:04:40.969618+09:00",
+      "last_success_at": "2026-10-15T14:04:40.969618+09:00",
+      "counts": {}
+    },
+    {
+      "job_type": "INDICES",
+      "status": "SKIPPED",
+      "detail": "TTL 이내 — 마지막 성공 2026-10-15T15:09:10.745505+09:00",
+      "last_success_at": "2026-10-15T15:09:10.745505+09:00",
+      "counts": {}
+    },
+    "… 외 2개"
+  ],
+  "basis": "일봉 기준"
 }
 ```
 
@@ -163,7 +223,7 @@
   "offset": 0,
   "sort": "volume",
   "order": "desc",
-  "fx_rate_at": "2026-10-13T00:00:00+09:00",
+  "fx_rate_at": "2026-10-15T14:04:40.455050+09:00",
   "items": [
     {
       "rank": 1,
@@ -173,14 +233,15 @@
       "currency": "KRW",
       "ticker": "005930",
       "name": "삼성전자",
-      "name_en": null,
-      "as_of": "2026-10-13",
-      "close": 234000,
-      "change": -17000,
-      "change_rate": -0.067729,
-      "volume": 25359015,
-      "market_cap": null,
-      "market_cap_krw": null
+      "name_en": "SAMSUNG ELECTRONICS CO,.LTD",
+      "as_of": "2026-10-14",
+      "close": 234500,
+      "change": 0,
+      "change_rate": 0,
+      "volume": 19009052,
+      "market_cap": 1356336637056000,
+      "market_cap_krw": 1356336637056000,
+      "is_watched": true
     },
     {
       "rank": 2,
@@ -190,14 +251,15 @@
       "currency": "KRW",
       "ticker": "000660",
       "name": "SK하이닉스",
-      "name_en": null,
-      "as_of": "2026-10-13",
-      "close": 1456000,
-      "change": -149000,
-      "change_rate": -0.092835,
-      "volume": 5431079,
-      "market_cap": null,
-      "market_cap_krw": null
+      "name_en": "SK hynix Inc.",
+      "as_of": "2026-10-14",
+      "close": 1425000,
+      "change": -47000,
+      "change_rate": -0.031929,
+      "volume": 3739813,
+      "market_cap": 1036568665935000,
+      "market_cap_krw": 1036568665935000,
+      "is_watched": true
     }
   ]
 }
@@ -212,34 +274,35 @@
   "currency": "KRW",
   "ticker": "005930",
   "name": "삼성전자",
-  "name_en": null,
-  "corp_code": null,
+  "name_en": "SAMSUNG ELECTRONICS CO,.LTD",
+  "corp_code": "00126380",
   "cik": null,
-  "as_of": "2026-10-13",
-  "close": 234000,
-  "prev_close": 251000,
-  "change": -17000,
-  "change_rate": -0.067729,
-  "volume": 25359015,
-  "close_krw": 234000,
+  "as_of": "2026-10-14",
+  "close": 234500,
+  "prev_close": 234500,
+  "change": 0,
+  "change_rate": 0,
+  "volume": 19009052,
+  "close_krw": 234500,
   "fx_rate": null,
   "fx_rate_at": null,
   "fx_stale": false,
-  "valuation_as_of": null,
-  "valuation_source": null,
-  "per": null,
-  "pbr": null,
-  "eps": null,
-  "bps": null,
-  "market_cap": null,
-  "market_cap_krw": null,
-  "shares_outstanding": null,
+  "valuation_as_of": "2026-10-14",
+  "valuation_source": "PYKRX",
+  "per": 35.12,
+  "pbr": 3.63,
+  "eps": 6605,
+  "bps": 63997,
+  "market_cap": 1356336637056000,
+  "market_cap_krw": 1356336637056000,
+  "shares_outstanding": 5846278608,
   "groups": [
     {
       "group_id": 1,
       "name": "반도체"
     }
-  ]
+  ],
+  "is_watched": true
 }
 ```
 #### `GET /api/v1/stocks/NASDAQ/AAPL/candles?range=1m`
@@ -250,16 +313,8 @@
   "ticker": "AAPL",
   "currency": "USD",
   "range": "1m",
-  "as_of": "2026-10-12",
+  "as_of": "2026-10-14",
   "candles": [
-    {
-      "date": "2026-09-14",
-      "open": 334.79,
-      "high": 335.5,
-      "low": 331.34,
-      "close": 333.08,
-      "volume": 39269100
-    },
     {
       "date": "2026-09-15",
       "open": 330.14,
@@ -268,7 +323,84 @@
       "close": 331.34,
       "volume": 31748200
     },
-    "… 외 19개"
+    {
+      "date": "2026-09-16",
+      "open": 332.53,
+      "high": 335.48,
+      "low": 330.7,
+      "close": 332.41,
+      "volume": 35981000
+    },
+    "… 외 20개"
+  ]
+}
+```
+#### `GET /api/v1/stocks/KOSPI/005930/financials?limit=5` — 최근 5개 FY, 오래된 순
+응답 `200`:
+```json
+{
+  "market": "KOSPI",
+  "ticker": "005930",
+  "currency": "KRW",
+  "as_of": "2025-12-31",
+  "items": [
+    {
+      "period_end": "2021-12-31",
+      "period_type": "FY",
+      "revenue": 279604799000000,
+      "operating_income": 51633856000000,
+      "net_income": 39243791000000,
+      "total_assets": 426621158000000,
+      "total_equity": 296237697000000,
+      "total_debt": 121721227000000,
+      "operating_margin": 0.184667,
+      "roe": 0.132474,
+      "data_source": "DART",
+      "accounting_std": "K-IFRS"
+    },
+    {
+      "period_end": "2022-12-31",
+      "period_type": "FY",
+      "revenue": 302231360000000,
+      "operating_income": 43376630000000,
+      "net_income": 54730018000000,
+      "total_assets": 448424507000000,
+      "total_equity": 345186142000000,
+      "total_debt": 93674903000000,
+      "operating_margin": 0.143521,
+      "roe": 0.158552,
+      "data_source": "DART",
+      "accounting_std": "K-IFRS"
+    },
+    "… 외 3개"
+  ]
+}
+```
+#### `GET /api/v1/stocks/NASDAQ/AAPL/disclosures?limit=5` — 최신순
+응답 `200`:
+```json
+{
+  "market": "NASDAQ",
+  "ticker": "AAPL",
+  "as_of": "2026-09-02T09:30:35+09:00",
+  "items": [
+    {
+      "rcept_no": "0001140361-26-035325",
+      "title": "8-K/A (Item 5.02)",
+      "report_type": "8-K/A",
+      "filed_at": "2026-09-02T09:30:35+09:00",
+      "url": "https://www.sec.gov/Archives/edgar/data/320193/000114036126035325/ef20081427_8ka.htm",
+      "data_source": "SEC"
+    },
+    {
+      "rcept_no": "0000320193-26-000020",
+      "title": "10-Q",
+      "report_type": "10-Q",
+      "filed_at": "2026-07-31T23:01:02+09:00",
+      "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000020/aapl-20260627.htm",
+      "data_source": "SEC"
+    },
+    "… 외 3개"
   ]
 }
 ```
@@ -294,6 +426,17 @@
 
 ### 3-3. 공통 오류 응답
 #### `GET /api/v1/stocks/KOSPI/999999` — 없는 종목 → 404
+응답 `404`:
+```json
+{
+  "error": {
+    "code": "STOCK_NOT_FOUND",
+    "message": "종목 KOSPI/999999을(를) 찾을 수 없습니다",
+    "detail": null
+  }
+}
+```
+#### `GET /api/v1/stocks/KOSPI/999999/disclosures` — 하위 경로도 같은 404
 응답 `404`:
 ```json
 {
@@ -340,10 +483,10 @@
 }
 ```
 
-## 4. 화면 목록과 API 연결 (Stage 2)
+## 4. 화면 목록과 API 연결 (Stage 3)
 | 화면 | URL | 영역 | 호출 API |
 |---|---|---|---|
-| 공통 | 모든 화면 | 사이드바(대시보드·주식 리스트·모의 포트폴리오) | 없음 (마지막 갱신 시각은 Stage 3) |
+| 공통 | 모든 화면 | 사이드바(대시보드·주식 리스트·모의 포트폴리오), 마지막 갱신 시각·작업별 상태 점(오래되면 강조)·새로고침 버튼 | `GET /market/refresh/status`, 새로고침: `POST /market/refresh` 후 현재 화면 다시 불러오기 |
 | 대시보드 홈 | `/` | 지수·환율 카드 | `GET /market/indices`, `GET /market/fx` |
 | | | 관심종목 카드·▲▼ 순서 변경 | `GET /watchlist`, `PATCH /watchlist/order` |
 | 주식 리스트 | `/stocks` | 순위 리스트·탭·정렬 | `GET /stocks?country=&sort=&order=&group=&q=` (offset이 끝을 넘어도 `total`은 전체 개수) |
@@ -351,12 +494,14 @@
 | | | 행별 ★·담기 | ★: 리스트의 `is_watched` → `POST`·`DELETE /watchlist`. 담기: 담기 팝업(아래) |
 | 종목 상세 | `/stocks/{market}/{ticker}` | 기본 정보·핵심 지표 | `GET /stocks/{market}/{ticker}` |
 | | | 가격 차트 (1M~1Y) | `GET /stocks/{market}/{ticker}/candles?range=` |
+| | | 재무 추이 (FY 5개년 막대 차트 + 표: 매출·영업이익·순이익·영업이익률) | `GET /stocks/{market}/{ticker}/financials` |
+| | | 최근 공시 5건 (원문 링크) | `GET /stocks/{market}/{ticker}/disclosures` |
 | | | ★·포트폴리오에 담기 | ★: 상세의 `is_watched` → `POST`·`DELETE /watchlist`. 담기: 담기 팝업(아래) |
 | 모의 포트폴리오 | `/portfolio` | 포트폴리오 선택·생성·수정·삭제 | `GET·POST /portfolios`, `PUT·DELETE /portfolios/{id}` |
 | | | 요약·비중 차트·담은 종목 표, 항목 수정·삭제 | `GET /portfolios/{id}/summary`, `PUT·DELETE /portfolios/{id}/items/{item_id}` |
 | 담기 팝업 | 리스트·상세에서 열림 | 포트폴리오 선택, 수량·금액·비중 모드 미리보기, 시드 초과 안내 | `GET /portfolios`, `GET /market/fx`(USD 종목), `POST /portfolios/{id}/items` |
 
-## 5. 에러 코드 (Stage 0~2)
+## 5. 에러 코드 (Stage 0~3)
 응답 형식은 모두 `{"error": {"code", "message", "detail"}}`. 도메인 에러 코드는 각 단계에서 `backend/app/core/errors.py`에 추가하면서 이 표도 함께 갱신한다.
 
 | `code` | HTTP | 발생 조건 | 발생 엔드포인트 | 메시지 예시 | 단계 |
@@ -367,7 +512,7 @@
 | `HTTP_ERROR` | 400 등 | 프레임워크가 낸 기타 HTTP 예외 | 본문을 받는 엔드포인트 | There was an error parsing the body | 0 |
 | `INTERNAL_ERROR` | 500 | 처리하지 못한 예외. 응답은 고정 메시지만, 스택은 요청 ID와 함께 서버 로그 | 모든 엔드포인트 | 서버 오류가 발생했습니다 | 0 |
 | `DB_UNAVAILABLE` | 503 | `SELECT 1` 실패(연결 거부·시간 초과 등). 접속 정보는 응답에 넣지 않고 로그에만 | `GET /health/db` | DB에 연결할 수 없습니다 | 0 |
-| `STOCK_NOT_FOUND` | 404 | (시장, 티커) 종목 없음 | `/stocks/{market}/{ticker}`·하위, `/watchlist`(POST·PATCH·DELETE), 담기 | 종목 KOSPI/999999을(를) 찾을 수 없습니다 | 1-B, 2-B, 2-C |
+| `STOCK_NOT_FOUND` | 404 | (시장, 티커) 종목 없음 | `/stocks/{market}/{ticker}`·하위(`candles`·`financials`·`disclosures`), `/watchlist`(POST·PATCH·DELETE), 담기 | 종목 KOSPI/999999을(를) 찾을 수 없습니다 | 1-B, 2-B, 2-C, 3-B |
 | `VOLUME_SORT_REQUIRES_MARKET` | 422 | 전체 탭(country 없음)에서 거래량 정렬 — 시장마다 거래량 단위가 다름 | `GET /stocks` | 시장마다 거래량 단위가 달라 '전체'에서는 거래량 정렬을 할 수 없습니다 | 1-B |
 | `USER_NOT_FOUND` | 404 | 요청 사용자(`DEFAULT_USER_ID`)가 DB에 없음 (게스트 쿠키가 없는 사용자를 가리키면 이 오류 대신 demo로 처리) | `/watchlist`, `/portfolios` | 사용자(ID 99)를 찾을 수 없습니다 | 2-B, 2-C |
 | `WATCHLIST_ITEM_NOT_FOUND` | 404 | 요청 사용자의 관심종목에 없는 종목 | `DELETE /watchlist/{market}/{ticker}`, `PATCH /watchlist/order` | 관심종목에 KOSPI/005930이(가) 없습니다 | 2-B |
@@ -383,3 +528,5 @@
 | `INVALID_QUANTITY` | 422 | 수량 모드인데 정수가 아님 — 서비스 계층 방어(API는 스키마가 먼저 `VALIDATION_ERROR`) | (서비스 직접 호출) | 수량은 정수여야 합니다 | 2-C |
 | `INVALID_MODE` | 422 | 지원하지 않는 담기 모드 — 서비스 계층 방어(API는 스키마가 먼저 `VALIDATION_ERROR`) | (서비스 직접 호출) | 지원하지 않는 모드: shares | 2-C |
 | `FX_UNAVAILABLE` | 503 | 환율 갱신 실패 + 저장된 환율 없음 | `/market/fx`, USD 종목 담기·수정·요약 | 환율을 조회할 수 없고 저장된 값도 없습니다 | 2-C |
+
+Stage 3에서 새 에러 코드는 없다. 갱신 작업의 실패는 HTTP 오류가 아니라 `POST /market/refresh` 응답의 작업별 `status`(`FAILED`·`PARTIAL`)와 `detail`로 알린다.
