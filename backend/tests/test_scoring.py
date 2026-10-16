@@ -7,33 +7,23 @@ from __future__ import annotations
 
 import math
 import statistics
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal as Dec
 
 import pytest
 from sqlalchemy import text
 
+from app.services.fx import FxService
+from app.services.refresh import RefreshService
 from app.ingest.jobs import migrate
 from app.services.scoring import (FACTORS, METRICS, aggregate, compute_scores, load_config, normalize, sync_presets,
                                   validate_presets)
 from tests.conftest import D
+from tests.fakes import make_providers
+from tests.test_analysis import _path, _replace_prices
 
 API = "/api/v1"
 K = 5
-
-
-# TODO(연결): B의 tests/test_analysis.py — 머지되면 원본처럼 `from tests.test_analysis import _path, _replace_prices`로 바꾸고 아래 두 함수를 지운다
-def _path(n: int, phase: float, slope: float, base: float = 100) -> list[Dec]:
-    return [Dec(str(round(base + 10 * math.sin(i / 15 + phase) + i * slope, 4))) for i in range(n)]
-
-
-def _replace_prices(engine, stock_id: int, closes: list[Dec], end: date) -> list[date]:
-    dates = [end - timedelta(days=len(closes) - 1 - i) for i in range(len(closes))]
-    with engine.begin() as conn:
-        conn.execute(text("DELETE FROM daily_prices WHERE stock_id = :s"), {"s": stock_id})
-        conn.execute(text("INSERT INTO daily_prices VALUES (:s, :d, :c, :c + 1, :c - 1, :c, :v)"),
-                     [{"s": stock_id, "d": d, "c": c, "v": 1000 + (i % 7) * 100} for i, (d, c) in enumerate(zip(dates, closes))])
-    return dates
 
 
 def phi(z: float) -> float:
@@ -115,6 +105,19 @@ def test_shrinkage_uses_primary_group_mean_including_self(engine):
     assert adj[9] == z[9]                                                # 주 그룹 표본 n = 1
 
 
+def test_shrinkage_does_not_mix_countries(engine):
+    """같은 주 그룹이라도 국가가 다르면 평균에 넣지 않는다(z는 국가 안에서 표준화한 값)."""
+    with engine.begin() as conn:
+        add_kr_stocks(conn, [5, 6, 7])
+        conn.execute(text("INSERT INTO peer_group_members VALUES (1, 5, true), (1, 6, true), (1, 7, true)"))
+        put_raw(conn, "roe", {1: 0.10, 2: 0.12, 5: 0.08, 6: 0.11, 7: 0.50, 3: 0.1, 4: 0.9})   # 반도체: KR 1·2·5·6·7, US 4
+        normalize(conn, D, K)
+        z, adj = read(conn, "z_raw", "roe"), read(conn, "z_adj", "roe")
+    kr = [1, 2, 5, 6, 7]
+    kr_mean = sum(z[s] for s in kr) / len(kr)
+    for s in kr:
+        assert adj[s] == pytest.approx(z[s] - 5 / (5 + K) * kr_mean, abs=2e-4)
+    assert adj[4] == z[4]                                                # US 반도체는 4 혼자 → n = 1
 
 
 # ------------------------------------------------------------------ 3단계: 합산·Φ 변환
@@ -278,6 +281,37 @@ def reference_scores(raw):
     return z_raw, z_adj, fac, out
 
 
+def test_full_pipeline_matches_reference_implementation(engine, universe):
+    n = compute_scores(engine, as_of=D)
+    assert n == 8 * 4                                                    # 종목 × 프리셋
+    raw_ref = reference_raw(universe)
+    z_raw_ref, z_adj_ref, fac_ref, scores_ref = reference_scores(raw_ref)
+    with engine.connect() as conn:
+        mv = conn.execute(text("SELECT * FROM stock_metric_values WHERE as_of = :d"), {"d": D}).mappings().all()
+        assert len(mv) == 8 * len(METRICS)
+        for r in mv:
+            s, m = r["stock_id"], r["metric"]
+            exp = raw_ref[s][m]
+            assert (r["raw_value"] is None) == (exp is None), (s, m)
+            if exp is not None:
+                assert float(r["raw_value"]) == pytest.approx(exp, rel=1e-5, abs=1e-6), (s, m)
+            assert (r["z_raw"] is None) == (m not in z_raw_ref[s]), (s, m)
+            if r["z_raw"] is not None:
+                assert float(r["z_raw"]) == pytest.approx(z_raw_ref[s][m], abs=2e-4), (s, m)
+                assert float(r["z_adj"]) == pytest.approx(z_adj_ref[s][m], abs=3e-4), (s, m)
+        for code, ref in scores_ref.items():
+            got = scores_by(conn, code)
+            for s in COUNTRY:
+                for f in FACTORS:
+                    v = got[s][f"{f}_score"]
+                    assert (v is None) == (f not in fac_ref[s]), (code, s, f)
+                    if v is not None:
+                        assert float(v) == pytest.approx(fac_ref[s][f], abs=5e-4), (code, s, f)
+                if ref["composite"][s] is None:
+                    assert got[s]["score"] is None, (code, s)
+                else:
+                    assert float(got[s]["composite"]) == pytest.approx(ref["composite"][s], abs=5e-4), (code, s)
+                    assert float(got[s]["score"]) == pytest.approx(ref["score"][s], abs=0.05), (code, s)
 
 
 def test_boundary_cases(engine, universe):
@@ -405,6 +439,23 @@ def test_analysis_api_returns_contributions_metrics_and_rank(client, engine, uni
     assert all(f["contribution"] is None for f in none["factors"].values())
 
 
+def test_preset_parameter_on_lists_and_unknown_preset(client, engine, universe):
+    compute_scores(engine, as_of=D)
+    client.post(f"{API}/watchlist", json={"market": "KOSPI", "ticker": "005930"})
+    by = {}
+    for p in ("balanced", "value"):
+        items = client.get(f"{API}/stocks?preset={p}&country=KR").json()
+        assert items["preset"] == p
+        by[p] = {x["ticker"]: x["score"] for x in items["items"]}
+        w = client.get(f"{API}/watchlist?preset={p}").json()
+        assert w["preset"] == p and w["items"][0]["score"] == by[p]["005930"]
+        assert client.get(f"{API}/stocks/KOSPI/005930?preset={p}").json()["score"] == by[p]["005930"]
+    assert by["balanced"] != by["value"]
+    assert client.get(f"{API}/stocks").json()["preset"] == "balanced"
+    assert client.get(f"{API}/stocks?preset=quality").status_code == 422          # 없어진 프리셋
+    r = client.get(f"{API}/stocks?preset=buffett")
+    assert r.status_code == 422 and r.json()["error"]["code"] == "UNKNOWN_PRESET"
+    assert "balanced" in r.json()["error"]["detail"]["presets"]
 
 
 def test_presets_endpoint(client):
@@ -420,8 +471,11 @@ def test_presets_endpoint(client):
     assert all(sum(x["weights"].values()) == pytest.approx(1) for x in body["presets"])
 
 
-# TODO(연결): 원본 test_scoring.py의 아래 3개는 다른 팀원 코드가 들어오면 그대로 추가한다(원본과 같은 위치)
-#   - test_shrinkage_does_not_mix_countries·test_full_pipeline_matches_reference_implementation: D의 conftest 픽스처가
-#     원본처럼 peer_group_members에 is_primary = true를 넣으면 (지금은 주 그룹이 없어 z_adj = z)
-#   - test_preset_parameter_on_lists_and_unknown_preset: B의 /stocks·/watchlist ?preset= 응답(Stage 4-B 파트 5)
-#   - test_refresh_runs_scorer: D의 RefreshService scorer 연결
+def test_refresh_runs_scorer(client, engine, universe):
+    p = make_providers()
+    svc = RefreshService(engine, p, FxService(engine, p.fx, 4), 4, scorer=compute_scores)
+    job = next(j for j in svc.refresh().jobs if j.job_type == "SCORES")
+    assert job.status == "SUCCESS" and job.counts["rows"] == 8 * 4
+    body = client.get(f"{API}/stocks/KOSPI/005930/analysis").json()
+    assert body["attractiveness"]["score"] is not None and "투자 권유가 아닙니다" in body["disclaimer"]
+    assert client.get(f"{API}/statistics/overview").json()["stock_scores"] == 8 * 4
