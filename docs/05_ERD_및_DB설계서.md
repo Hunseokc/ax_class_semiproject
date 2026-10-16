@@ -395,7 +395,7 @@ Stage 1에는 SNAPSHOT을 쓰는 환율 서비스가 없으므로(Stage 3) `v_fx
 ## 8. 이후 단계에서 채울 절
 
 - 재무제표·공시 테이블, `valuation_snapshots` 수집 — Stage 3
-- 매력도 테이블·`v_stock_metrics`·마이그레이션 001·002 — Stage 4 (계약은 9절) / 비교군(`stocks.coverage`·`detail_synced_at`, 003) — Stage 4-D / 섹터 — Stage 5+
+- 매력도 테이블·`v_stock_metrics`·마이그레이션 001·002 — Stage 4 (계약은 9절) / 비교군(`stocks.coverage`·`detail_synced_at`, 003) — Stage 4-D / 업종 섹터·데이터 유효기간(006) — Stage 5-D (10절)
 - 인덱스 전후 `EXPLAIN (ANALYZE)` 비교, 분석 쿼리와 SQL 요소 정리 — Stage 5
 
 ## 9. Stage 4 — 매력도 (D 계약)
@@ -527,5 +527,68 @@ Stage 1에는 SNAPSHOT을 쓰는 환율 서비스가 없으므로(Stage 3) `v_fx
 | 검증 | 결과 |
 |---|---|
 | 원본 대비 schema·ORM·import 계약 | `python team/tools/check_contract.py 4` 통과 (차이는 `team/contracts/stage4.toml`에 적힌 것만) |
-| ORM ↔ DDL 일치, Stage 1~4 외 테이블 없음 | `test_orm_matches_schema`, `test_tables_are_stage1_to_4_only` 통과 |
+| ORM ↔ DDL 일치, Stage 1~4 외 테이블 없음 | `test_orm_matches_schema`, `test_tables_are_stage1_to_4_only` 통과 (Stage 5부터 `test_tables_are_stage1_to_5_only`) |
 | Stage 4 제약 위반 6건(점수 101, 유효 팩터 6개, 가중치 1 초과, 없는 팩터, 프리셋 code 중복, 종목당 주 그룹 2개) 거부, 종목 삭제 시 지표값·점수 CASCADE, 프리셋 삭제 시 가중치 CASCADE | `test_constraints_reject_bad_rows`, `test_delete_cascades` 통과 |
+
+
+## 10. Stage 5-D — 업종 섹터·데이터 유효기간 (D 계약)
+
+새로 만드는 DB는 `schema.sql`에 반영되어 있고, 이미 적재된 DB는 마이그레이션으로 바꾼다.
+
+### 10-1. 마이그레이션
+| 파일 | 내용 | 실행 |
+|---|---|---|
+| `backend/db/migrations/006_sector_freshness.sql` | `stocks.industry·sic·sector·industry_checked_at`, `peer_groups.kind`(theme/sector), `data_freshness`, `fundamental_bases` 생성, 값이 모두 빈 국내 밸류에이션 행 정리 — 멱등 | `python -m app.ingest migrate 006_sector_freshness` → `python -m app.ingest benchmark --reselect` |
+
+기존 그룹은 모두 `kind = 'theme'`(화면 경쟁 비교용)이 된다. 업종 섹터 그룹(`kind = 'sector'`)은 비교군 선정 때 만들어지고, 그 `is_primary` 구성원이 매력도 섹터 중립화 표본이다. 화면 경쟁 비교·그룹 통계(`peers.sql`·`stock_groups.sql`·`stats_overview.sql`·`stats_peer_group_valuation.sql`)는 테마 그룹만 쓴다.
+
+### 10-2. 테이블·컬럼 정의서
+
+#### `stocks` 추가 컬럼
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| industry | character varying(64) | Y |  |  | 국내 KRX 업종명 / 미국 SEC SIC 설명 |
+| sic | smallint | Y |  |  | 미국 SEC SIC 코드 |
+| sector | character varying(32) | Y |  |  | `config/universe.yaml` sectors 매핑 결과. NULL = 매핑 없음·금융 등 제외 업종 |
+| industry_checked_at | timestamp with time zone | Y |  |  | 업종을 마지막으로 확인한 시각(미국 SIC는 1년마다 다시 확인) |
+
+#### `peer_groups` 추가 컬럼
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| kind | character varying(10) | N | 'theme' | CHECK IN (theme, sector) | theme = 화면 경쟁 비교 / sector = 매력도 섹터 중립화 |
+
+#### `data_freshness`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
+| kind | character varying(16) | N |  | PK, CHECK IN (financials, disclosures, price_history) | 데이터 종류 |
+| fetched_at | timestamp with time zone | N |  |  | 마지막 시도 시각 |
+| valid_until | timestamp with time zone | N |  | CHECK ≥ fetched_at | 이 시각 전에는 다시 받지 않는다 |
+| status | character varying(10) | N |  | CHECK IN (SUCCESS, FAILED) | 마지막 시도 결과 |
+| error | text | Y |  |  | 실패 사유 |
+
+일봉은 이 표와 관계없이 항상 빠진 날짜만 증분으로 받는다(`price_history`는 2년 백필 여부만 정한다).
+
+#### `fundamental_bases`
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
+| shares_outstanding | bigint | Y |  | CHECK > 0 | 발행주식수 |
+| shares_as_of | date | Y |  |  | 발행주식수 기준일 |
+| dps | numeric(18,4) | Y |  | CHECK ≥ 0 | 최근 FY 주당 배당(선언 기준), NULL = 공시값 없음 |
+| dps_period_end | date | Y |  |  | 배당 기준 결산일 |
+| source | character varying(20) | N |  |  | 데이터 출처 |
+| updated_at | timestamp with time zone | N | now() |  | 수정 시각 |
+
+미국 종목 PER·PBR·시가총액을 '기초값 × 종가'로 계산할 때 쓴다. SEC companyfacts에서 재무와 같은 호출로 받고, 유효기간은 `data_freshness.financials`를 따른다.
+
+### 10-3. 검증
+| 검증 | 결과 |
+|---|---|
+| 원본 대비 schema·ORM·import 계약 | `python team/tools/check_contract.py 5` 통과 |
+| ORM ↔ DDL 일치, Stage 1~5 외 테이블 없음 | `test_orm_matches_schema`, `test_tables_are_stage1_to_5_only` 통과 |
+| Stage 5-D 제약 위반 4건(그룹 kind, 유효기간 < 시도 시각, 유효기간 kind, 발행주식수 0) 거부 | `test_constraints_reject_bad_rows` 통과 |

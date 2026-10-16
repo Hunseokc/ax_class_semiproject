@@ -1,10 +1,10 @@
 -- 경쟁 그룹 비교: 대상 종목이 속한 모든 그룹의 구성원 지표 + 그룹 내 순위(RANK)·그룹 평균(AVG OVER)
 -- 순위는 값이 있는 구성원끼리만 매긴다 (PARTITION BY 그룹, 값 IS NULL). PER·PBR은 낮을수록 1위(양수만)
 -- 구성원은 노출 종목(featured)과 대상 종목. 매력도 비교군은 점수 표본으로만 쓰고 이 표에는 넣지 않는다
--- TODO(연결): Stage 5-D의 peer_groups.kind가 생기면 테마 그룹만 고른다(업종 섹터 그룹은 매력도 섹터 중립화용). 지금 그룹은 전부 테마.
-WITH target_groups AS (
+WITH target_groups AS (                -- 테마 그룹만(업종 섹터 그룹은 매력도 섹터 중립화용)
     SELECT gm.group_id
     FROM peer_group_members gm
+    JOIN peer_groups g ON g.group_id = gm.group_id AND g.kind = 'theme'
     WHERE gm.stock_id = :stock_id
 ),
 members AS (

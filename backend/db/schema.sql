@@ -10,7 +10,9 @@
 --            (+ ingestion_logs.job_type에 SCORES) — 기존 DB는 db/migrations/001_scoring_v2 → 002_presets
 --   Stage 4-D: stocks.coverage·detail_synced_at (+ ingestion_logs.job_type에 BENCHMARK·HYDRATE) — 기존 DB는 003_benchmark
 --   Stage 5: watchlist_items.memo·target_price·updated_at (+ 트리거) — 기존 DB는 004_watchlist_memo
---   Stage 5+ 섹터(sector·industry·sic)·listed는 그 작업 때 추가
+--   Stage 5-D: stocks.industry·sic·sector·industry_checked_at, peer_groups.kind, data_freshness, fundamental_bases
+--              — 기존 DB는 006_sector_freshness
+--   Stage 6: listed·dps(005)·홈 위젯(007)·SECTORS_*는 그 작업 때 추가
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -39,14 +41,22 @@ CREATE TABLE stocks (
   -- featured: 화면에 노출하는 종목(4시간 갱신) / benchmark: 매력도 비교군(1일 갱신, 필수 데이터만 저장)
   coverage  VARCHAR(10)  NOT NULL DEFAULT 'featured' CHECK (coverage IN ('featured','benchmark')),
   detail_synced_at TIMESTAMPTZ,                                  -- benchmark 종목의 상세(공시·2년 일봉·5개년 재무)를 마지막으로 받은 시각
+  -- 업종 (migration 006): 국내 KRX 업종명 / 미국 SEC SIC 설명. sector는 config/universe.yaml sectors 매핑 결과(점수 비교 표본의 섹터)
+  industry  VARCHAR(64),
+  sic       SMALLINT,                                            -- 미국 SEC SIC 코드
+  sector    VARCHAR(32),                                         -- NULL: 매핑 없음·금융 등 제외 업종
+  industry_checked_at TIMESTAMPTZ,                               -- 업종을 마지막으로 확인한 시각(미국 SIC는 1년마다 다시 확인)
   UNIQUE (market_id, ticker)
 );
 
 -- 경쟁 그룹
+-- kind (migration 006): theme = 화면 경쟁 비교용 테마 그룹(universe.yaml peer_groups)
+--                       sector = 매력도 섹터 중립화용 업종 그룹(universe.yaml sectors, 비교군 선정 때 구성)
 CREATE TABLE peer_groups (
   group_id    SERIAL PRIMARY KEY,
   name        VARCHAR(64) NOT NULL UNIQUE,
-  description TEXT
+  description TEXT,
+  kind        VARCHAR(10) NOT NULL DEFAULT 'theme' CHECK (kind IN ('theme','sector'))
 );
 
 -- 종목 ↔ 경쟁 그룹 N:M 교차 테이블 (국내·해외 종목 혼합 가능)
@@ -307,4 +317,34 @@ CREATE TABLE stock_scores (
   factor_coverage SMALLINT     NOT NULL CHECK (factor_coverage BETWEEN 0 AND 5),
   data_quality    JSONB        NOT NULL DEFAULT '{}',             -- 계산 불가 지표·팩터와 사유
   PRIMARY KEY (stock_id, as_of, preset_id)
+);
+
+-- =====================================================================
+-- Stage 5-D — 데이터 유효기간·밸류에이션 기초값 (원본 migration 006_sector_freshness)
+-- =====================================================================
+
+-- 데이터 유효기간 (migration 006): 가격 외 데이터를 종목·종류별로 언제 다시 받을지
+--   kind: financials(FY 재무 + 미국 기초값) / disclosures(공시) / price_history(2년 일봉 백필)
+--   valid_until이 지나기 전에는 요청이 와도 다시 받지 않는다(일봉은 이 표와 관계없이 항상 빠진 날짜만 증분)
+CREATE TABLE data_freshness (
+  stock_id    INT          NOT NULL REFERENCES stocks ON DELETE CASCADE,
+  kind        VARCHAR(16)  NOT NULL CHECK (kind IN ('financials','disclosures','price_history')),
+  fetched_at  TIMESTAMPTZ  NOT NULL,                             -- 마지막 시도 시각
+  valid_until TIMESTAMPTZ  NOT NULL,
+  status      VARCHAR(10)  NOT NULL CHECK (status IN ('SUCCESS','FAILED')),
+  error       TEXT,
+  PRIMARY KEY (stock_id, kind),
+  CHECK (valid_until >= fetched_at)
+);
+
+-- 밸류에이션 기초값 (migration 006): 미국 종목 PER·PBR·시가총액을 '기초값 × 종가'로 직접 계산할 때 쓰는 값
+--   SEC companyfacts에서 재무와 같은 호출로 받는다(유효기간은 data_freshness.financials)
+CREATE TABLE fundamental_bases (
+  stock_id           INT           PRIMARY KEY REFERENCES stocks ON DELETE CASCADE,
+  shares_outstanding BIGINT        CHECK (shares_outstanding > 0),
+  shares_as_of       DATE,
+  dps                NUMERIC(18,4) CHECK (dps >= 0),             -- 최근 FY 주당 배당(선언 기준), NULL = 공시값 없음
+  dps_period_end     DATE,
+  source             VARCHAR(20)   NOT NULL,
+  updated_at         TIMESTAMPTZ   NOT NULL DEFAULT now()
 );

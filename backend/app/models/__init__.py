@@ -2,7 +2,8 @@
 
 Stage 1 테이블 10개 + Stage 2 테이블 4개(users·watchlist_items·portfolios·portfolio_items)
 + Stage 3 테이블 2개(financial_statements·disclosures)
-+ Stage 4 테이블 4개(scoring_presets·scoring_weights·stock_metric_values·stock_scores). 이후 단계 테이블은 D가 단계 시작 시 schema.sql과 함께 추가한다.
++ Stage 4 테이블 4개(scoring_presets·scoring_weights·stock_metric_values·stock_scores)
++ Stage 5-D 테이블 2개(data_freshness·fundamental_bases). 이후 단계 테이블은 D가 단계 시작 시 schema.sql과 함께 추가한다.
 """
 from __future__ import annotations
 
@@ -43,6 +44,10 @@ class Stock(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="true")
     coverage: Mapped[str] = mapped_column(String(10), server_default="featured")
     detail_synced_at: Mapped[datetime | None] = mapped_column()
+    industry: Mapped[str | None] = mapped_column(String(64))
+    sic: Mapped[int | None] = mapped_column(SmallInteger)
+    sector: Mapped[str | None] = mapped_column(String(32))
+    industry_checked_at: Mapped[datetime | None] = mapped_column()
     market: Mapped[Market] = relationship(lazy="joined")
     __table_args__ = (UniqueConstraint("market_id", "ticker"), CheckConstraint("coverage IN ('featured','benchmark')"))
 
@@ -52,6 +57,8 @@ class PeerGroup(Base):
     group_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True)
     description: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(10), server_default="theme")
+    __table_args__ = (CheckConstraint("kind IN ('theme','sector')"),)
 
 
 class PeerGroupMember(Base):
@@ -267,3 +274,25 @@ class StockScore(Base):
     factor_coverage: Mapped[int] = mapped_column(SmallInteger)
     data_quality: Mapped[dict] = mapped_column(JSONB, server_default="{}")
     __table_args__ = (CheckConstraint("score BETWEEN 0 AND 100"), CheckConstraint("factor_coverage BETWEEN 0 AND 5"))
+
+
+# ── [S5-D] 데이터 유효기간·밸류에이션 기초값 ──
+class DataFreshness(Base):
+    __tablename__ = "data_freshness"
+    stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    fetched_at: Mapped[datetime] = mapped_column()
+    valid_until: Mapped[datetime] = mapped_column()
+    status: Mapped[str] = mapped_column(String(10))
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class FundamentalBase(Base):
+    __tablename__ = "fundamental_bases"
+    stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
+    shares_outstanding: Mapped[int | None] = mapped_column(BigInteger)
+    shares_as_of: Mapped[date | None] = mapped_column(Date)
+    dps: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    dps_period_end: Mapped[date | None] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(20))
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())

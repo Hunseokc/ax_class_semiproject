@@ -1,12 +1,11 @@
 -- 경쟁 그룹별 평균·최고·최저 지표 (그룹당 1행)
--- TODO(연결): Stage 5-D의 peer_groups.kind가 생기면 테마 그룹(kind = 'theme')만 고른다(업종 섹터 그룹 제외). 지금 그룹은 전부 테마.
 WITH m AS (
     SELECT g.group_id, g.name AS group_name, vm.stock_id,
            CASE WHEN vm.per > 0 THEN vm.per END AS per,
            CASE WHEN vm.pbr > 0 THEN vm.pbr END AS pbr,
            vm.roe, vm.operating_margin, vm.revenue_yoy, vm.return_1y, vm.market_cap_krw, mk.country
     FROM peer_groups g
-    JOIN peer_group_members gm ON gm.group_id = g.group_id
+    JOIN peer_group_members gm ON gm.group_id = g.group_id AND g.kind = 'theme'   -- 테마 그룹(업종 섹터 그룹 제외)
     JOIN v_stock_metrics vm    ON vm.stock_id = gm.stock_id
     JOIN stocks s              ON s.stock_id = gm.stock_id AND s.coverage = 'featured'   -- 노출 종목 기준
     JOIN markets mk            ON mk.market_id = s.market_id

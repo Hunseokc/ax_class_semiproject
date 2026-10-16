@@ -1,4 +1,4 @@
-"""DB 설계(Stage 1 테이블 10개 + Stage 2 테이블 4개 + Stage 3 테이블 2개 + Stage 4 테이블 4개): ORM ↔ schema.sql 일치, 제약조건(CHECK/UNIQUE/FK/CASCADE) 방어.
+"""DB 설계(Stage 1 테이블 10개 + Stage 2 테이블 4개 + Stage 3 테이블 2개 + Stage 4 테이블 4개 + Stage 5 테이블 2개): ORM ↔ schema.sql 일치, 제약조건(CHECK/UNIQUE/FK/CASCADE) 방어.
 
 이후 단계 테이블이 추가되면 담당 단계에서 테이블 수와 제약 케이스를 늘린다.
 """
@@ -16,7 +16,8 @@ STAGE1_TABLES = {"markets", "stocks", "peer_groups", "peer_group_members", "dail
 STAGE2_TABLES = {"users", "watchlist_items", "portfolios", "portfolio_items"}
 STAGE3_TABLES = {"financial_statements", "disclosures"}
 STAGE4_TABLES = {"scoring_presets", "scoring_weights", "stock_metric_values", "stock_scores"}
-ALL_TABLES = STAGE1_TABLES | STAGE2_TABLES | STAGE3_TABLES | STAGE4_TABLES
+STAGE5_TABLES = {"data_freshness", "fundamental_bases"}
+ALL_TABLES = STAGE1_TABLES | STAGE2_TABLES | STAGE3_TABLES | STAGE4_TABLES | STAGE5_TABLES
 
 
 def test_orm_matches_schema(engine):
@@ -37,7 +38,7 @@ def test_orm_matches_schema(engine):
     assert diffs == []
 
 
-def test_tables_are_stage1_to_4_only(engine):
+def test_tables_are_stage1_to_5_only(engine):
     assert set(Base.metadata.tables) == ALL_TABLES
     assert set(inspect(engine).get_table_names()) == ALL_TABLES
 
@@ -101,6 +102,11 @@ def test_tables_are_stage1_to_4_only(engine):
                        "INSERT INTO peer_group_members (group_id, stock_id, is_primary) VALUES (2, 1, true)"),
     # ── Stage 5 ── (004_watchlist_memo)
     ("목표가 0", "INSERT INTO watchlist_items (user_id, stock_id, target_price) VALUES (1, 1, 0)"),
+    # ── Stage 5-D ── (006_sector_freshness)
+    ("잘못된 그룹 kind", "INSERT INTO peer_groups (name, kind) VALUES ('x', 'etc')"),
+    ("유효기간 < 시도 시각", "INSERT INTO data_freshness VALUES (1, 'financials', now(), now() - interval '1 day', 'SUCCESS')"),
+    ("잘못된 유효기간 kind", "INSERT INTO data_freshness VALUES (1, 'scores', now(), now(), 'SUCCESS')"),
+    ("발행주식수 0", "INSERT INTO fundamental_bases (stock_id, shares_outstanding, source) VALUES (1, 0, 'SEC')"),
 ])
 def test_constraints_reject_bad_rows(engine, label, sql):
     with pytest.raises(IntegrityError):
