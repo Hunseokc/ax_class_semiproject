@@ -81,7 +81,7 @@ def delete_item(portfolio_id: IdPath, item_id: IdPath, svc: PortfolioService = D
 
 
 @router.get("/{portfolio_id}/summary", response_model=SummaryOut,
-            summary="요약: 사용·잔여·비중·평가손익(환 효과 분리)")
+            summary="요약: 사용·잔여·비중·가중 매력도·평가손익(환 효과 분리)")
 def summary(portfolio_id: IdPath, svc: PortfolioService = Depends(get_portfolio_service)):
     return svc.summary(portfolio_id)
 

@@ -19,6 +19,7 @@ from app.core.errors import Conflict, NotFound, Unprocessable
 from app.models import Market, Portfolio, PortfolioItem, Stock, User, WatchlistItem
 from app.queries import sql
 from app.services.fx import FxQuote, FxService
+from app.services.scoring import default_preset
 
 CENT = Decimal("0.01")
 WON = Decimal("1")
@@ -220,7 +221,7 @@ class PortfolioService:
         return self._valued_items(portfolio_id)
 
     def _valued_items(self, portfolio_id: int) -> tuple[list[dict], FxQuote | None]:
-        rows = self.db.execute(sql("portfolio_items_valued"), {"pid": portfolio_id}).mappings().all()
+        rows = self.db.execute(sql("portfolio_items_valued"), {"pid": portfolio_id, "preset": default_preset()}).mappings().all()
         fx = self.fx.get_current_rate() if any(r["currency"] == "USD" for r in rows) else None
         out = []
         for r in rows:
@@ -232,8 +233,7 @@ class PortfolioService:
             local_ret = close / ref_p - 1 if close is not None else None
             out.append({
                 **{k: r[k] for k in ("item_id", "stock_id", "market", "ticker", "name", "currency", "country",
-                                     "quantity", "ref_price", "ref_fx_rate", "ref_date", "memo")},
-                "score": None,                     # 매력도는 Stage 4에서 채운다(응답 필드는 유지)
+                                     "quantity", "ref_price", "ref_fx_rate", "ref_date", "memo", "score")},
                 "cost_krw": cost,
                 "current_price": close, "price_date": r["trade_date"], "current_fx_rate": fx_now,
                 "value_krw": value, "pnl_krw": q(pnl, WON) if pnl is not None else None,
@@ -265,6 +265,8 @@ class PortfolioService:
             by_market[i["country"]] = by_market.get(i["country"], Decimal(0)) + i["cost_krw"]
             for g in i["groups"]:                  # 여러 그룹 소속이면 각 그룹에 모두 반영
                 by_group[g] = by_group.get(g, Decimal(0)) + i["cost_krw"]
+        scored = [i for i in items if i["score"] is not None]
+        scored_cost = sum((i["cost_krw"] for i in scored), Decimal(0))
         valued = [i for i in items if i["value_krw"] is not None]
         total_value = sum((i["value_krw"] for i in valued), Decimal(0))
         valued_cost = sum((i["cost_krw"] for i in valued), Decimal(0))
@@ -276,7 +278,8 @@ class PortfolioService:
             "market_weights": [{"country": k, "cost_krw": v, "weight": ratio(v, used)} for k, v in sorted(by_market.items())],
             "group_weights": [{"group": k, "cost_krw": v, "weight": ratio(v, used)}
                               for k, v in sorted(by_group.items(), key=lambda kv: -kv[1])],
-            "weighted_score": None,                # 가중 매력도는 Stage 4에서 계산한다
+            "weighted_score": q(sum((i["cost_krw"] * i["score"] for i in scored), Decimal(0)) / scored_cost)
+                              if scored_cost else None,
             "total_value_krw": total_value, "total_pnl_krw": q(total_pnl, WON),
             "total_pnl_rate": ratio(total_pnl, valued_cost),
             "price_effect_krw": sum((i["price_effect_krw"] for i in valued), Decimal(0)),
