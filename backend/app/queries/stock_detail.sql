@@ -1,8 +1,8 @@
--- 종목 상세: 기본 정보 + 최신 시세·밸류에이션·환율·소속 그룹·관심 여부 (행이 없으면 라우터가 404 STOCK_NOT_FOUND)
+-- 종목 상세: 기본 정보 + 최신 시세·밸류에이션·환율·매력도(preset 프리셋)·소속 그룹·관심 여부 (행이 없으면 라우터가 404 STOCK_NOT_FOUND)
 -- 시세·밸류에이션은 LEFT JOIN — 데이터가 아직 없는 종목도 404가 아니라 null 필드로 응답한다
 -- fx_rate·close_krw는 USD 종목만 v_fx_latest(DB 최신값)로 채운다. KRW 종목은 fx_rate = NULL, close_krw = close
 -- fx_stale은 라우터가 false로 고정한다(TTL 외부 호출 서비스는 Stage 2에서 교체)
--- Stage 2: 매력도·coverage·업종은 이후 단계에서 컬럼과 JOIN을 추가한다
+-- coverage·업종은 이후 단계에서 컬럼과 JOIN을 추가한다
 SELECT s.stock_id, s.ticker, s.name, s.name_en, s.corp_code, s.cik,
        m.code AS market, m.country, m.currency,
        lp.trade_date AS as_of, lp.close, lp.prev_close, lp.change, lp.change_rate, lp.volume,
@@ -11,6 +11,7 @@ SELECT s.stock_id, s.ticker, s.name, s.name_en, s.corp_code, s.cik,
        CASE WHEN m.currency = 'USD' THEN fx.rate_at END AS fx_rate_at,
        v.as_of AS valuation_as_of, v.per, v.pbr, v.eps, v.bps, v.market_cap, v.shares_outstanding, v.source AS valuation_source,
        ROUND(v.market_cap * CASE WHEN m.currency = 'USD' THEN fx.usd_krw ELSE 1 END, 0) AS market_cap_krw,
+       sc.as_of AS score_as_of, sc.score,
        (SELECT json_agg(json_build_object('group_id', g.group_id, 'name', g.name) ORDER BY g.name)
           FROM peer_group_members gm JOIN peer_groups g ON g.group_id = gm.group_id
          WHERE gm.stock_id = s.stock_id) AS groups,
@@ -21,4 +22,7 @@ LEFT JOIN v_latest_price lp ON lp.stock_id = s.stock_id
 LEFT JOIN LATERAL (SELECT * FROM valuation_snapshots vs WHERE vs.stock_id = s.stock_id
                    ORDER BY vs.as_of DESC LIMIT 1) v ON true
 LEFT JOIN v_fx_latest fx ON true
+LEFT JOIN LATERAL (SELECT st.as_of, st.score FROM stock_scores st WHERE st.stock_id = s.stock_id
+                     AND st.preset_id = (SELECT preset_id FROM scoring_presets WHERE code = :preset)
+                   ORDER BY st.as_of DESC LIMIT 1) sc ON true
 WHERE m.code = :market AND s.ticker = :ticker

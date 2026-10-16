@@ -3,7 +3,7 @@ API = "/api/v1/watchlist"
 
 
 def test_empty_watchlist(client):
-    assert client.get(API).json() == {"user_id": 1, "count": 0, "items": []}
+    assert client.get(API).json() == {"user_id": 1, "preset": "balanced", "count": 0, "items": []}
 
 
 def test_crud_flow(client):
