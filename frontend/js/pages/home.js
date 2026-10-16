@@ -1,6 +1,6 @@
 // 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
-import { PRESET_EVENT, getFx, getIndices, getPreset, getRanking, getSectors, getSentiment, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S5-A] getRanking
-import { changeHtml, changeLabel, date, dateTime, esc, num, pct, price, shortDate, stockUrl, usd, volume } from "../format.js";   // [S5-A] pct·volume
+import { PRESET_EVENT, getFx, getIndices, getPreset, getHomeRanking, getSectors, getSentiment, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S6-A] getHomeRanking·getSectors·getSentiment
+import { changeHtml, changeLabel, date, dateTime, esc, num, pct, price, shortDate, stockUrl, usd } from "../format.js";   // [S5-A] pct
 import { color, destroyCharts, scoreBand, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
 import { emptyState, errorState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";   // [S5-A] marketBadge
@@ -288,7 +288,7 @@ window.addEventListener("resize", () => {
 loadWatchlist();
 
 // ── [S3-A] 사이드바 새로고침이 끝나면 지수·환율·관심종목을 새 값으로 다시 불러온다 ──
-document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); loadRanking(); loadSectors(); loadSentiment(); });   // [S5-A] loadRanking  [S6-A] 섹터·심리
+document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); loadSectors(); loadSentiment(); loadTop(); });   // [S6-A] 섹터·심리·순위
 
 // ── [S4-A] 투자 성향: 관심종목 카드의 매력도 게이지가 따르는 값 ──
 // 성향 메뉴(#preset-menu)는 index.html에 자리가 있고, 아래에서 맨 위 검색바 줄로 옮긴다 [S6-A]
@@ -307,58 +307,7 @@ mountSearch();   // .main__inner 맨 앞에 .topbar(검색바)를 붙인다
 const topbar = $(".topbar");
 if (topbar) { topbar.classList.add("topbar--home"); topbar.append(presetBox); }
 mountPresetMenu(presetBox);
-document.addEventListener(PRESET_EVENT, loadWatchlist);   // 지수·환율은 성향과 무관해서 관심종목만 다시 조회
-
-// ── [S5-A] 순위 상위 5 (GET /statistics/ranking) ──
-// 2열 칸막이(.home-split) 아래에 칸을 만들어 붙인다(파트 3에서 index.html의 '시장 주목 종목' 구역으로 대체).
-// 행 = 순위 · 종목명(티커·시장 배지) · 그 탭의 순위 근거 값 하나. 거래량은 시장을 정해야 해서 국내/미국 탭이 항상 하나 선택돼 있다
-const RANK_METRICS = [
-  { value: "volume", label: "거래량" },
-  { value: "return_1m", label: "1개월 수익률" },
-  { value: "return_1y", label: "1년 수익률" },
-];
-let rankMetric = "volume";
-let rankCountry = "KR";
-
-const rankSection = h(`<section class="section" aria-labelledby="h-rank">
-    <div class="section__head"><h2 id="h-rank">순위 상위 5 <span class="section__meta">일봉 기준</span></h2>
-      <div class="section__tools"><div id="rank-metric"></div><div id="rank-country"></div></div></div>
-    <div id="rank-list"></div></section>`);
-$(".home-split").after(rankSection);   // [S6-A]
-
-function rankValue(i) {
-  const text = rankMetric === "volume" ? volume(i.value) : pct(i.value, { sign: true, digits: 1 });
-  const cls = rankMetric === "volume" ? "" : i.value > 0 ? " chg--up" : i.value < 0 ? " chg--down" : "";
-  return `<span class="row__value num${cls}" title="기준일 ${esc(shortDate(i.as_of))}">${text}</span>`;
-}
-
-function rankRow(i) {
-  return h(`<li><a class="row" href="${stockUrl(i.market, i.ticker)}">
-      <span class="rank">${i.rank}</span>
-      <span class="row__main"><span class="row__title">${esc(i.name)}</span>
-        <span class="row__sub">${esc(i.ticker)} ${marketBadge(i.market, i.country)}</span></span>
-      ${rankValue(i)}
-    </a></li>`);
-}
-
-function loadRanking() {
-  return load($("#rank-list"), {
-    skeleton: skeleton("row", 5),
-    fetch: async () => (await getRanking(rankMetric, rankCountry, 5)).items,
-    render: (items) => {
-      const ul = h('<ul class="list card card--flush"></ul>');
-      ul.append(...items.map(rankRow));
-      return ul;
-    },
-    empty: emptyState({ title: "순위를 매길 종목이 없습니다", body: "데이터 적재 후 다시 확인해 주세요." }),
-  });
-}
-
-$("#rank-metric").append(segmented(RANK_METRICS, rankMetric,
-  (v) => { rankMetric = v; loadRanking(); }, { label: "순위 기준 선택" }));
-$("#rank-country").append(segmented([{ value: "KR", label: "국내" }, { value: "US", label: "미국" }], rankCountry,
-  (v) => { rankCountry = v; loadRanking(); }, { label: "순위 시장 선택" }));
-loadRanking();
+document.addEventListener(PRESET_EVENT, () => { loadWatchlist(); if (topKind === "attractiveness") loadTop(); });   // 지수·환율은 성향과 무관해서 관심종목(과 매력도 순위)만 다시 조회
 
 // ── [S6-A] 섹터 히트맵 · 시장 심리 지수 ──
 const isNum = (v) => typeof v === "number" && Number.isFinite(v);
@@ -466,3 +415,56 @@ function loadSentiment() {
 // 처음 열 때: 국내 섹터 데이터가 없으면 미국 탭으로 시작
 loadSectors({ fallback: true });
 loadSentiment();
+
+// ---------------------------------------------------------------- 시장 주목 종목 TOP 5 (GET /home/ranking)
+// 행 = 순위 · 종목명(종목코드·시장 배지, 관심종목이면 ★) · 그 탭의 순위 근거 값 하나. 가격·등락률은 관심종목·리스트에 있으므로 넣지 않는다
+const TOP_KINDS = [
+  { value: "volume_surge", label: "거래량 급증", empty: "20거래일 거래량이 쌓인 종목이 없습니다" },
+  { value: "attractiveness", label: "매력도 순위", empty: "매력도 점수가 계산된 종목이 없습니다",
+    note: "현재는 공개 재무·시세로 계산한 규칙 기반 점수이며 투자 권유가 아닙니다." },
+];
+let topCountry = "KR";
+let topKind = "volume_surge";
+
+function topValue(s) {
+  if (topKind === "volume_surge") {
+    return `<span class="row__value num" title="당일 거래량 ÷ 직전 20거래일 평균 (기준일 ${esc(shortDate(s.as_of))})">${num(s.value, 1)}배</span>`;
+  }
+  const band = scoreBand(s.value);
+  return `<span class="row__value top-score"><strong class="num">${Math.round(s.value)}</strong>${band
+    ? `<span class="wl-compact__band"><i style="background:var(--gauge-${band.index})"></i>${band.label}</span>` : ""}</span>`;
+}
+
+function topRow(s) {
+  return h(`<li><a class="row" href="${stockUrl(s.market, s.ticker)}">
+      <span class="rank">${s.rank}</span>
+      <span class="row__main"><span class="row__title">${esc(s.name)}${s.is_watched
+        ? ' <span class="top-star" role="img" aria-label="관심종목">★</span>' : ""}</span>
+        <span class="row__sub">${esc(s.ticker)} ${marketBadge(s.market, s.country)}</span></span>
+      ${topValue(s)}
+    </a></li>`);
+}
+
+function loadTop() {
+  const kind = TOP_KINDS.find((k) => k.value === topKind);
+  $("#top-more").href = `/stocks?country=${topCountry}`;
+  $("#top-note").textContent = kind.note || "";
+  $("#top-note").hidden = !kind.note;
+  return load($("#top-list"), {
+    skeleton: skeleton("row", 5),
+    fetch: async () => (await getHomeRanking(topKind, topCountry, 5)).items,
+    render: (items) => {
+      const ul = h('<ul class="list card card--flush"></ul>');
+      ul.append(...items.map(topRow));
+      return ul;
+    },
+    empty: emptyState({ title: kind.empty, body: "데이터 적재 후 다시 확인해 주세요." }),
+  });
+}
+
+$("#top-metric").append(segmented(TOP_KINDS, topKind,
+  (v) => { topKind = v; loadTop(); }, { label: "순위 기준 선택" }));
+$("#top-tabs").append(segmented([{ value: "KR", label: "국내" }, { value: "US", label: "미국" }], topCountry,
+  (v) => { topCountry = v; loadTop(); }, { label: "순위 시장 선택" }));
+
+loadTop();
