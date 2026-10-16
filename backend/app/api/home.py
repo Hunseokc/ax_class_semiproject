@@ -15,15 +15,13 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_id, get_db, get_engine_dep, get_preset
+from app.queries import sql
 from app.schemas.api import HomeRankingOut, SectorsOut, SentimentOut
 
 router = APIRouter(prefix="/home", tags=["home"])
 
 
 # ── [S6-B] 시장 주목 종목 순위 ──
-# TODO(껍데기): B — 본문을 원본대로 교체(services/home_ranking.py의 get_volume_surge_ranking·get_attractiveness_ranking,
-#   queries/home_volume_surge.sql·home_attractiveness.sql). 주소·인자·응답 모델은 원본 그대로다.
-#   지금은 docs/06 3-7 예시 값(kind별 2개)을 limit만큼 잘라 돌려준다(country를 바꿔도 같은 종목).
 @router.get("/ranking", response_model=HomeRankingOut,
             summary="시장 주목 종목 TOP N — 거래량 급증(20거래일 평균 대비 배수) 또는 매력도 순위 (노출 종목 + 관심종목)")
 def ranking(kind: Literal["volume_surge", "attractiveness"] = Query(description="volume_surge·attractiveness"),
@@ -32,20 +30,22 @@ def ranking(kind: Literal["volume_surge", "attractiveness"] = Query(description=
             user_id: int = Depends(get_current_user_id),
             preset: dict = Depends(get_preset),
             db: Session = Depends(get_db)):
+    # TODO(연결): C의 services/home_ranking.py — 연결 시 원본처럼 맨 위 import로 옮기고 아래 except 대체 경로를 지운다
+    try:
+        from app.services.home_ranking import get_attractiveness_ranking, get_volume_surge_ranking
+    except ImportError:          # C의 파일이 stage6에 들어오기 전: 같은 SQL을 직접 실행(원본 함수 본문과 같음)
+        def get_volume_surge_ranking(db, country, limit=5, *, user_id):
+            rows = db.execute(sql("home_volume_surge"), {"country": country, "limit": limit, "user_id": user_id})
+            return [dict(r) for r in rows.mappings().all()]
+
+        def get_attractiveness_ranking(db, country, limit=5, *, preset, user_id):
+            rows = db.execute(sql("home_attractiveness"),
+                              {"country": country, "limit": limit, "preset": preset, "user_id": user_id})
+            return [dict(r) for r in rows.mappings().all()]
     if kind == "volume_surge":
-        items = [
-            {"rank": 1, "stock_id": 7, "market": "KOSPI", "country": "KR", "currency": "KRW", "ticker": "373220",
-             "name": "LG에너지솔루션", "value": Decimal("3.181"), "as_of": date(2026, 10, 8), "is_watched": True},
-            {"rank": 2, "stock_id": 14, "market": "KOSPI", "country": "KR", "currency": "KRW", "ticker": "012450",
-             "name": "한화에어로스페이스", "value": Decimal("2.4753"), "as_of": date(2026, 10, 8), "is_watched": False},
-        ][:limit]
+        items = get_volume_surge_ranking(db, country, limit, user_id=user_id)
     else:
-        items = [
-            {"rank": 1, "stock_id": 21, "market": "NASDAQ", "country": "US", "currency": "USD", "ticker": "NVDA",
-             "name": "NVIDIA", "value": Decimal("95.28"), "as_of": date(2026, 10, 12), "is_watched": True},
-            {"rank": 2, "stock_id": 19, "market": "NASDAQ", "country": "US", "currency": "USD", "ticker": "GOOGL",
-             "name": "Alphabet", "value": Decimal("92.39"), "as_of": date(2026, 10, 12), "is_watched": False},
-        ][:limit]
+        items = get_attractiveness_ranking(db, country, limit, preset=preset["code"], user_id=user_id)
     return {"kind": kind, "country": country, "preset": preset["code"] if kind == "attractiveness" else None,
             "items": items}
 
