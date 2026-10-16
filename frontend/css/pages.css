@@ -304,3 +304,9 @@
 .chip__check { display: none; }
 .chip[aria-pressed="true"] .chip__check { display: inline-flex; }
 @media (max-width: 767px) { .picker__group { grid-template-columns: 1fr; gap: var(--sp-2); } }
+
+/* ── [S5-A] 모바일: 창(.modal) 안의 표(균등 배분 미리보기)를 좁은 폭에 맞춘다 ── */
+@media (max-width: 480px) {
+  .modal .table th, .modal .table td { padding: var(--sp-2) 6px; }
+  .modal .table td:first-child { white-space: normal; }   /* 종목명·1주 원가는 두 줄로 */
+}
