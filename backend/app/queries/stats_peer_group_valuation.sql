@@ -1,6 +1,5 @@
 -- 경쟁 그룹별 평균·최고·최저 지표 (그룹당 1행)
 -- TODO(연결): Stage 5-D의 peer_groups.kind가 생기면 테마 그룹(kind = 'theme')만 고른다(업종 섹터 그룹 제외). 지금 그룹은 전부 테마.
--- TODO(연결): D의 stocks.coverage(003_benchmark)가 생기면 stocks 조인에 s.coverage = 'featured'(노출 종목 기준)를 복원한다.
 WITH m AS (
     SELECT g.group_id, g.name AS group_name, vm.stock_id,
            CASE WHEN vm.per > 0 THEN vm.per END AS per,
@@ -9,7 +8,7 @@ WITH m AS (
     FROM peer_groups g
     JOIN peer_group_members gm ON gm.group_id = g.group_id
     JOIN v_stock_metrics vm    ON vm.stock_id = gm.stock_id
-    JOIN stocks s              ON s.stock_id = gm.stock_id
+    JOIN stocks s              ON s.stock_id = gm.stock_id AND s.coverage = 'featured'   -- 노출 종목 기준
     JOIN markets mk            ON mk.market_id = s.market_id
 )
 SELECT group_id, group_name,
