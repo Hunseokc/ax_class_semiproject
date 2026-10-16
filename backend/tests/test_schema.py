@@ -99,6 +99,8 @@ def test_tables_are_stage1_to_4_only(engine):
     ("프리셋 code 중복", "INSERT INTO scoring_presets (code, name) VALUES ('t', 't'), ('t', 'u')"),
     ("종목당 주 그룹 2개", "UPDATE peer_group_members SET is_primary = true WHERE stock_id = 1;"
                        "INSERT INTO peer_group_members (group_id, stock_id, is_primary) VALUES (2, 1, true)"),
+    # ── Stage 5 ── (004_watchlist_memo)
+    ("목표가 0", "INSERT INTO watchlist_items (user_id, stock_id, target_price) VALUES (1, 1, 0)"),
 ])
 def test_constraints_reject_bad_rows(engine, label, sql):
     with pytest.raises(IntegrityError):
@@ -150,6 +152,10 @@ def test_user_delete_cascades_and_updated_at_trigger(engine):
                           "updated_at = updated_at - interval '1 day' WHERE portfolio_id = 1"))
         conn.execute(text("UPDATE portfolios SET name = 'Q' WHERE portfolio_id = 1"))
         assert conn.execute(text("SELECT updated_at > created_at + interval '12 hours' FROM portfolios")).scalar()
+        conn.execute(text("UPDATE watchlist_items SET added_at = added_at - interval '1 day', "
+                          "updated_at = updated_at - interval '1 day'"))
+        conn.execute(text("UPDATE watchlist_items SET memo = 'm'"))      # 관심종목도 같은 트리거 (Stage 5, migration 004)
+        assert conn.execute(text("SELECT updated_at > added_at + interval '12 hours' FROM watchlist_items")).scalar()
         conn.execute(text("DELETE FROM users WHERE user_id = 1"))
         left = conn.execute(text("""SELECT (SELECT count(*) FROM watchlist_items), (SELECT count(*) FROM portfolios),
                                            (SELECT count(*) FROM portfolio_items)""")).one()

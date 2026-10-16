@@ -1,7 +1,7 @@
 # 05. ERD 및 DB 설계서 (Stage 2 범위)
 
 > **상태: Stage 2 확정.** Stage 1 테이블 10개 + Stage 2 사용자 테이블 4개, VIEW 2개, 보조 인덱스 8개, 트리거 2개를 실제 DDL 기준으로 담았다. 이후 단계에서 D가 테이블을 추가할 때 이 문서의 해당 절을 함께 확장한다.
-> (Stage 3: 재무·공시·밸류에이션 수집 / Stage 4+: 매력도·비교군·섹터 — 의도적 비정규화 5-2, `v_stock_metrics`, EXPLAIN 비교도 그때 채운다. `watchlist_items`의 메모·목표가·`updated_at`은 Stage 5.)
+> (Stage 3: 재무·공시·밸류에이션 수집 / Stage 4+: 매력도·비교군·섹터 — 의도적 비정규화 5-2, `v_stock_metrics`, EXPLAIN 비교도 그때 채운다. `watchlist_items`의 메모·목표가·`updated_at`은 Stage 5 — 기존 DB는 migration 004.)
 > **Stage 4 계약**(매력도 테이블 4개, `peer_group_members.is_primary`, `v_stock_metrics` 컬럼, 마이그레이션 001·002)은 9절에 모았다. 1~8절의 Stage 4 반영은 단계 통합 때 한다.
 
 - DDL 원문: `backend/db/schema.sql` → `backend/db/indexes.sql` → `backend/db/views.sql` 순서로 실행 (`python -m app.ingest init-db`가 같은 순서로 적용)
@@ -305,8 +305,11 @@ Stage 1에서 쓰는 값: `MASTER`(INTERNAL, `master`), `PRICES`(PYKRX·YFINANCE
 | stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
 | sort_order | integer | N | 0 |  | 표시 순서 |
 | added_at | timestamp with time zone | N | now() |  | 추가 시각 |
+| memo | character varying(200) | Y |  |  | 사용자 메모 (Stage 5) |
+| target_price | numeric(20,4) | Y |  | CHECK > 0 | 목표가(종목 통화) (Stage 5) |
+| updated_at | timestamp with time zone | N | now() |  | 수정 시각 — 트리거 `trg_watchlist_items_updated_at`가 갱신 (Stage 5) |
 
-메모·목표가·`updated_at`(트리거 `trg_watchlist_items_updated_at`)은 Stage 5에서 추가한다.
+메모·목표가·`updated_at`은 Stage 5에서 추가했다. 기존 DB는 `python -m app.ingest migrate 004_watchlist_memo`(멱등, 기존 행 값은 그대로).
 
 #### `portfolios`
 
