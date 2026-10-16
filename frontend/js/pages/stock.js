@@ -1,6 +1,6 @@
 // 종목 상세: 헤더(이름·가격·등락) · 가격 차트(종가 선 + 거래량 막대) · 핵심 정보(시총·PER·PBR)
-import { PRESET_EVENT, getAnalysis, getCandles, getDisclosures, getFinancials, getPeers, getPeersChart, getPreset, getStock } from "../api.js";   // [S4-A] PRESET_EVENT·getAnalysis·getPreset
-import { DASH, changeHtml, date, esc, krw, num, pct, price, stockUrl, usd } from "../format.js";   // [S4-A] stockUrl
+import { PRESET_EVENT, getAnalysis, getCandles, getDisclosures, getFinancials, getMonthly, getPeers, getPeersChart, getPreset, getStock } from "../api.js";   // [S4-A] PRESET_EVENT·getAnalysis·getPreset  [S5-A] getMonthly
+import { DASH, changeHtml, date, esc, krw, num, pct, price, stockUrl, usd, volume } from "../format.js";   // [S4-A] stockUrl  [S5-A] volume
 import { color, dashedAxis, draw, plainAxis, scoreBand } from "../components/charts.js";   // [S4-A] scoreBand
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
 import { emptyState, errorState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";
@@ -557,6 +557,40 @@ function loadPeers() {
 
 fold("peers", loadPeers);
 
+// ── [S5-A] 월별 요약 (GET /statistics/monthly) ──
+// stock.html을 못 고쳐서 이 파일이 접이식 칸을 만들어 재무 추이 아래(경쟁 비교 위)에 붙인다
+const foldMonthly = h(`<details class="section card detail-section fold" id="fold-monthly">
+    <summary><h2>월별 요약</h2><span class="subtle">최근 12개월 거래일·평균 종가·수익률</span></summary>
+    <div class="fold__body" id="monthly"></div></details>`);
+finSection.after(foldMonthly);
+
+function loadMonthly() {
+  return load($("#monthly"), {
+    skeleton: skeleton("row", 3),
+    fetch: () => getMonthly(MARKET, TICKER, 12),
+    isEmpty: (d) => !d.items.length,
+    empty: emptyState({ title: "월별로 집계할 시세가 없습니다" }),
+    render: (d) => {
+      const rows = [...d.items].reverse().map((m) => `<tr>
+          <td>${esc(m.month)}${m.is_partial ? ' <span class="badge badge--market">진행 중</span>' : ""}</td>
+          <td class="num">${m.trading_days}</td>
+          <td class="num">${price(m.avg_close, d.currency)}</td>
+          <td class="num">${price(m.max_high, d.currency)}</td>
+          <td class="num">${price(m.min_low, d.currency)}</td>
+          <td class="num">${changeHtml(m.monthly_return, stock.country)}</td>
+          <td class="num">${volume(m.total_volume)}</td></tr>`).join("");
+      return h(`<div class="section"><div class="table-wrap"><table class="table">
+          <caption class="sr-only">월별 거래일 수, 평균 종가, 최고가, 최저가, 월간 수익률, 거래량 합계</caption>
+          <thead><tr><th scope="col">월</th><th scope="col">거래일</th><th scope="col">평균 종가</th><th scope="col">최고</th>
+            <th scope="col">최저</th><th scope="col">월간 수익률</th><th scope="col">거래량</th></tr></thead>
+          <tbody>${rows}</tbody></table></div>
+        <p class="subtle">월간 수익률 = 그 달 첫 거래일 종가 대비 마지막 거래일 종가 · 단위 ${esc(d.currency)} · 진행 중인 달은 마지막 거래일까지</p></div>`);
+    },
+  });
+}
+
+fold("monthly", loadMonthly);
+
 // ---------------------------------------------------------------- 시작
 async function init() {
   $("#head").replaceChildren(h('<div class="skeleton" style="height:120px"></div>'));
@@ -577,6 +611,7 @@ async function init() {
   loadDisclosures();  // [S3-A]
   mountPresetControl();   // [S4-A] 성향 메뉴(한 번만)
   loadAnalysis();         // [S4-A] 매력도
+  reloadFold("monthly");  // [S5-A] 월별 요약(펼쳐져 있으면 다시, 접혀 있으면 다음에 펼칠 때)
   reloadFold("peers");    // [S4-A] 경쟁 비교(펼쳐져 있으면 다시, 접혀 있으면 다음에 펼칠 때)
 }
 init();

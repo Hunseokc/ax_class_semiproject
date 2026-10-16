@@ -1,18 +1,20 @@
 // 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
-import { PRESET_EVENT, getFx, getIndices, getPreset, getWatchlist, reorderWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset
-import { changeHtml, date, dateTime, esc, num, price, shortDate, stockUrl, usd } from "../format.js";
+import { PRESET_EVENT, getFx, getIndices, getPreset, getRanking, getWatchlist, reorderWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S5-A] getRanking
+import { changeHtml, date, dateTime, esc, num, pct, price, shortDate, stockUrl, usd, volume } from "../format.js";   // [S5-A] pct·volume
 import { color, destroyCharts, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
-import { emptyState, h, load, segmented, skeleton, toast } from "../components/ui.js";
+import { emptyState, h, load, marketBadge, segmented, skeleton, toast } from "../components/ui.js";   // [S5-A] marketBadge
 import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";   // [S4-A]
+import { FX_CODE, DEFAULT_METRICS, metricPicker, storedMetrics } from "../components/metric-picker.js";   // [S5-A]
+import { openWatchNote } from "../components/watch-note.js";   // [S5-A]
+import { icons } from "../components/icons.js";   // [S5-A]
 
 mountSidebar("home");
 const $ = (sel) => document.querySelector(sel);
 // 등락 색은 시장과 무관하게 상승 --up(빨강)·하락 --down(파랑)
 const trendColor = (rate) => (!rate ? color("--text-2") : color(rate > 0 ? "--up" : "--down"));
 
-// 화면에 보여줄 카드 (서버는 지수 10개를 주지만 이번 단계는 5개 + 환율)
-const SHOWN = ["KOSPI", "KOSDAQ", "SPX", "IXIC", "DJI"];
+// [S5-A] 화면에 보여줄 카드는 사용자가 metric-picker로 고른다(저장값 → 없으면 기본 5개 지수 + 환율)
 
 // ---------------------------------------------------------------- 지수·환율
 // 스파크라인 기간 — API는 1년치를 주고 화면에서 자른다(일봉 기준이라 '1일'은 없음). 기본 1개월
@@ -73,15 +75,19 @@ function fxCard(fx) {
   return el;
 }
 
+// 마지막 응답 — 표시 지표를 바꿀 때는 다시 요청하지 않고 이 값으로 다시 그린다
 let market = { indices: null, fx: null, error: null };
+let shown = [];   // [S5-A]
 
 function renderMarketRow() {
   const box = $("#market");
   destroyCharts(box);                                    // 카드를 갈아엎기 전에 이전 차트 정리
   const row = h('<div class="metric-row"></div>');
   const byCode = new Map((market.indices || []).map((i) => [i.code, i]));
-  for (const code of SHOWN) if (byCode.has(code)) row.append(indexCard(byCode.get(code)));
-  if (market.fx) row.append(fxCard(market.fx));
+  for (const code of shown) {   // [S5-A] 고른 순서대로(환율 포함)
+    if (code === FX_CODE) { if (market.fx) row.append(fxCard(market.fx)); }
+    else if (byCode.has(code)) row.append(indexCard(byCode.get(code)));
+  }
   if (market.error) {
     const card = h(`<div class="state state--error" role="alert"><p class="state__title">일부 지표를 불러오지 못했습니다</p>
       <p>${esc(market.error.message)}</p><button class="btn btn--sm" type="button">다시 시도</button></div>`);
@@ -94,7 +100,7 @@ function renderMarketRow() {
 async function loadMarket() {
   const box = $("#market");
   destroyCharts(box);
-  const sk = skeleton("card", SHOWN.length + 1);
+  const sk = skeleton("card", shown.length || DEFAULT_METRICS.length);
   sk.className = "metric-row";
   box.replaceChildren(sk);
   // 둘 중 하나가 실패해도 나머지는 보여준다
@@ -105,19 +111,67 @@ async function loadMarket() {
     error: ix.status === "rejected" ? ix.reason : fx.status === "rejected" ? fx.reason : null,
   };
   if (market.indices) $("#as-of").textContent = `일봉 기준 · 기준일 ${date(ix.value.as_of)}`;
+  mountPicker();   // [S5-A] 고를 수 있는 지표가 정해졌으니 선택 상자를 만든다
   renderMarketRow();
 }
 
 $("#spark-range").append(segmented(SPARK_RANGES, sparkRange,
   (v) => { sparkRange = v; if (market.indices || market.fx) renderMarketRow(); }, { label: "스파크라인 기간" }));
 
+// ── [S5-A] 표시 지표 선택 ──
+// index.html은 A의 담당 파일이 아니라서, 이 파일이 버튼과 상자 자리를 만들어 붙인다
+const editBtn = h('<button id="market-edit" class="btn btn--sm" type="button" aria-expanded="false" aria-controls="market-picker" disabled>표시 지표</button>');
+$("#spark-range").before(editBtn);
+$("#market").before(h('<div id="market-picker-slot"></div>'));
+editBtn.addEventListener("click", () => togglePicker(editBtn.getAttribute("aria-expanded") !== "true"));
+
+const availableMetrics = () => [...(market.indices || []).map((i) => i.code), FX_CODE];
+
+function metricGroups() {
+  const by = (country) => market.indices.filter((i) => i.country === country).map((i) => ({ code: i.code, name: i.name }));
+  return [{ label: "국내", items: by("KR") }, { label: "미국", items: by("US") },
+    { label: "환율", items: [{ code: FX_CODE, name: "USD/KRW" }] }].filter((g) => g.items.length);
+}
+
+function togglePicker(open, { focus = true } = {}) {
+  const panel = $("#market-picker");
+  if (!panel) return;
+  panel.hidden = !open;
+  editBtn.setAttribute("aria-expanded", String(open));
+  if (focus) (open ? panel.querySelector(".chip:not(:disabled)") : editBtn)?.focus();
+}
+
+function mountPicker() {
+  const wasOpen = editBtn.getAttribute("aria-expanded") === "true";
+  shown = storedMetrics(availableMetrics());
+  // 지수 목록을 못 받으면 고를 수 없다(저장된 선택을 덮어쓰지 않도록 설정을 막음)
+  if (!market.indices) {
+    $("#market-picker-slot").replaceChildren();
+    editBtn.disabled = true;
+    editBtn.setAttribute("aria-expanded", "false");
+    return;
+  }
+  $("#market-picker-slot").replaceChildren(metricPicker({
+    id: "market-picker", groups: metricGroups(), selected: shown,
+    onChange: (codes) => { shown = codes; renderMarketRow(); },
+    onClose: () => togglePicker(false),
+  }));
+  editBtn.disabled = false;
+  togglePicker(wasOpen, { focus: false });
+}
+
 loadMarket();
 
 // ---------------------------------------------------------------- 내 관심종목 [S2-A]
 let watchItems = [];
 
+// [S5-A] 목표가 줄 — 괴리율(target_gap)은 서버가 계산한 값을 그대로 쓴다
+const watchTarget = (w) => (w.target_price != null
+  ? `목표 ${price(w.target_price, w.currency)} (${w.target_gap != null ? pct(w.target_gap, { sign: true, digits: 1 }) : "–"})` : "");
+
 function watchCard(w, i) {
   const us = w.currency === "USD";
+  const target = watchTarget(w);   // [S5-A]
   const el = h(`<li class="wl-card">
       <a class="wl-card__link card--link" href="${stockUrl(w.market, w.ticker)}?preset=${encodeURIComponent(getPreset())}" aria-label="${esc(w.name)} 상세 보기">
         <div class="wl-card__gauge">${scoreGauge(w.score)}</div>
@@ -126,12 +180,16 @@ function watchCard(w, i) {
         <div class="subtle">${esc(w.ticker)} · ${shortDate(w.as_of)} 종가</div>
         <div class="wl-card__price num">${price(w.close, w.currency)}</div>
         <div class="wl-card__chg num">${changeHtml(w.change_rate, w.country)}</div>
+        ${target ? `<div class="subtle num">${esc(target)}</div>` : ""}
+        ${w.memo ? `<div class="subtle" title="${esc(w.memo)}">${esc(w.memo)}</div>` : ""}
       </a>
       <div class="wl-card__move">
+        <button class="btn btn--sm" type="button" data-edit aria-label="${esc(w.name)} 메모·목표가 편집" title="메모·목표가">${icons.edit}</button>
         <button class="btn btn--sm" type="button" data-dir="-1" aria-label="${esc(w.name)} 위로" ${i === 0 ? "disabled" : ""}>▲</button>
         <button class="btn btn--sm" type="button" data-dir="1" aria-label="${esc(w.name)} 아래로" ${i === watchItems.length - 1 ? "disabled" : ""}>▼</button>
       </div>
     </li>`);
+  el.querySelector("[data-edit]").addEventListener("click", () => openWatchNote(w, () => loadWatchlist()));   // [S5-A]
   el.querySelectorAll("[data-dir]").forEach((b) => b.addEventListener("click", () => moveWatch(i, Number(b.dataset.dir))));
   return el;
 }
@@ -180,7 +238,7 @@ function loadWatchlist() {
 loadWatchlist();
 
 // ── [S3-A] 사이드바 새로고침이 끝나면 지수·환율·관심종목을 새 값으로 다시 불러온다 ──
-document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); });
+document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); loadRanking(); });   // [S5-A] loadRanking
 
 // ── [S4-A] 투자 성향: 관심종목 카드의 매력도 게이지가 따르는 값 ──
 // index.html은 A의 담당 파일 목록에 없어서, 이 파일이 성향 메뉴 자리를 '내 관심종목' 제목줄에 만들어 붙인다
@@ -197,3 +255,54 @@ loadPresets().then(({ presets }) => {
 });
 mountPresetMenu(presetBox);
 document.addEventListener(PRESET_EVENT, loadWatchlist);   // 지수·환율은 성향과 무관해서 관심종목만 다시 조회
+
+// ── [S5-A] 순위 상위 5 (GET /statistics/ranking) ──
+// index.html은 A의 담당 파일이 아니라서, 이 파일이 관심종목 아래에 칸을 만들어 붙인다.
+// 행 = 순위 · 종목명(티커·시장 배지) · 그 탭의 순위 근거 값 하나. 거래량은 시장을 정해야 해서 국내/미국 탭이 항상 하나 선택돼 있다
+const RANK_METRICS = [
+  { value: "volume", label: "거래량" },
+  { value: "return_1m", label: "1개월 수익률" },
+  { value: "return_1y", label: "1년 수익률" },
+];
+let rankMetric = "volume";
+let rankCountry = "KR";
+
+const rankSection = h(`<section class="section" aria-labelledby="h-rank">
+    <div class="section__head"><h2 id="h-rank">순위 상위 5 <span class="section__meta">일봉 기준</span></h2>
+      <div class="section__tools"><div id="rank-metric"></div><div id="rank-country"></div></div></div>
+    <div id="rank-list"></div></section>`);
+$("#watchlist").closest("section").after(rankSection);
+
+function rankValue(i) {
+  const text = rankMetric === "volume" ? volume(i.value) : pct(i.value, { sign: true, digits: 1 });
+  const cls = rankMetric === "volume" ? "" : i.value > 0 ? " chg--up" : i.value < 0 ? " chg--down" : "";
+  return `<span class="row__value num${cls}" title="기준일 ${esc(shortDate(i.as_of))}">${text}</span>`;
+}
+
+function rankRow(i) {
+  return h(`<li><a class="row" href="${stockUrl(i.market, i.ticker)}">
+      <span class="rank">${i.rank}</span>
+      <span class="row__main"><span class="row__title">${esc(i.name)}</span>
+        <span class="row__sub">${esc(i.ticker)} ${marketBadge(i.market, i.country)}</span></span>
+      ${rankValue(i)}
+    </a></li>`);
+}
+
+function loadRanking() {
+  return load($("#rank-list"), {
+    skeleton: skeleton("row", 5),
+    fetch: async () => (await getRanking(rankMetric, rankCountry, 5)).items,
+    render: (items) => {
+      const ul = h('<ul class="list card card--flush"></ul>');
+      ul.append(...items.map(rankRow));
+      return ul;
+    },
+    empty: emptyState({ title: "순위를 매길 종목이 없습니다", body: "데이터 적재 후 다시 확인해 주세요." }),
+  });
+}
+
+$("#rank-metric").append(segmented(RANK_METRICS, rankMetric,
+  (v) => { rankMetric = v; loadRanking(); }, { label: "순위 기준 선택" }));
+$("#rank-country").append(segmented([{ value: "KR", label: "국내" }, { value: "US", label: "미국" }], rankCountry,
+  (v) => { rankCountry = v; loadRanking(); }, { label: "순위 시장 선택" }));
+loadRanking();

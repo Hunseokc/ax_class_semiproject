@@ -144,3 +144,11 @@ export const getPeersChart = (market, ticker, range, groupId) =>
   api.get(`/stocks/${market}/${ticker}/peers/chart`, { range, group_id: groupId });
 
 // ── [S5] 홈 · 통계 · 검색 ──
+
+// ── [S5-A] 메모 · 월별 · 순위 · 균등 배분 ──
+// 보낸 필드만 바뀌고, null 을 보내면 그 값이 지워진다(memo·target_price)
+export const putWatchlist = (market, ticker, body) => api.put(`/watchlist/${market}/${ticker}`, body);
+export const getMonthly = (market, ticker, months = 12) => api.get("/statistics/monthly", { market, ticker, months });
+export const getRanking = (metric, country, limit = 5) => api.get("/statistics/ranking", { metric, country, limit });
+// 저장하지 않는 계산 전용 — 담기는 기존 addPortfolioItem 으로 한다
+export const previewEqualWeight = (id, body) => api.post(`/portfolios/${id}/preview/equal-weight`, body);
