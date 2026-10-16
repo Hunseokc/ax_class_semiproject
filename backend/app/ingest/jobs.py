@@ -86,9 +86,17 @@ def load_master(engine: Engine, offline: bool = False) -> None:
             gid = dict(conn.execute(text("SELECT name, group_id FROM peer_groups")).all())
             sid = {(m, t): i for i, m, t in conn.execute(text(
                 "SELECT s.stock_id, m.code, s.ticker FROM stocks s JOIN markets m USING (market_id)")).all()}
-            res.rows += upsert(conn, "peer_group_members", [
-                {"group_id": gid[g.name], "stock_id": sid[(market_of[t], t)]}
-                for g in u.peer_groups for t in g.members], ["group_id", "stock_id"])
+            # [S4-D] 주 그룹(섹터 중립화·비교군 선정 기준) = universe.yaml에서 종목이 처음 나오는 그룹
+            seen: set[int] = set()
+            members = []
+            for g in u.peer_groups:
+                for t in g.members:
+                    s_id = sid[(market_of[t], t)]
+                    members.append({"group_id": gid[g.name], "stock_id": s_id, "is_primary": s_id not in seen})
+                    seen.add(s_id)
+            conn.execute(text("UPDATE peer_group_members SET is_primary = false WHERE is_primary AND stock_id = ANY(:ids)"),
+                         {"ids": list(seen)})      # 노출 종목만 다시 정한다(비교군 종목의 주 그룹은 그대로)
+            res.rows += upsert(conn, "peer_group_members", members, ["group_id", "stock_id"], update=["is_primary"])
             # ── [S2-D] 기본 사용자(demo) — get_current_user_id가 돌려주는 DEFAULT_USER_ID(=1)의 행 ──
             conn.execute(text("INSERT INTO users (nickname) VALUES ('demo') ON CONFLICT (nickname) DO NOTHING"))
     if offline:

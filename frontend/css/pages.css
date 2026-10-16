@@ -150,3 +150,134 @@
 @keyframes sb-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .sidebar__foot [data-refresh][aria-busy="true"] svg { animation: none; } }
 @media (max-width: 767px) { .sidebar__foot [data-jobs] { display: none; } }
+
+/* ── [S4-A] 투자 성향 메뉴 · 매력도 게이지 · 매력도 패널 ── */
+/* TODO(D가 components.css로 이동): 성향 메뉴·미니 게이지·.score·.gauge 블록 — 원본은 components.css에 있다. 아래 매력도 패널은 원본 pages.css와 같다 */
+/* 매력도 미니 게이지 (색 구간·바늘·데이터 부족) */
+.gauge-mini { width: 92px; display: flex; flex-direction: column; align-items: center; }
+.gauge-mini svg { width: 92px; height: 54px; display: block; overflow: visible; }
+.gauge-mini__arc path { fill: none; stroke-width: 8; }
+.gauge-mini__ticks { fill: none; stroke: var(--text-on-pastel-2); stroke-width: 7; stroke-dasharray: 2 5; opacity: .45; }
+.gauge-mini__needle { transform-box: view-box; transform-origin: 46px 48px; animation: needle-sweep .9s var(--ease) both; }
+.gauge-mini__needle line { stroke: var(--text-on-pastel); stroke-width: 2.5; stroke-linecap: round; }
+.gauge-mini__needle circle { fill: var(--text-on-pastel); }
+@keyframes needle-sweep { from { transform: rotate(-90deg); } }
+.gauge-mini__value { display: flex; align-items: center; gap: 6px; margin-top: 2px; white-space: nowrap; }
+.gauge-mini__value strong { font-size: var(--fs-lg); font-weight: var(--fw-extra); line-height: 1; }
+.gauge-mini__band { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: var(--fw-semibold); color: var(--text-on-pastel-2); }
+.gauge-mini__band i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+.gauge-mini__band .gauge-mini__ring { background: none; border: 1.5px dashed var(--text-on-pastel-2); }
+
+/* 매력도 점수 뱃지 */
+.score { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; padding: 4px 10px; border-radius: var(--r-pill); font-weight: var(--fw-extra); font-size: var(--fs-sm); background: var(--lavender); color: var(--text-on-pastel); }
+.score--none { background: var(--card-active); color: var(--text-3); font-weight: var(--fw-semibold); }
+.card--ice .score, .card--lavender .score { background: var(--text-on-pastel); color: var(--text); }
+
+/* 상세 매력도 반원 게이지 */
+.gauge { width: 168px; height: 100px; }
+.gauge text { fill: var(--text); font-family: var(--font); }
+
+/* 투자 성향 펼침 메뉴 */
+.preset-menu { position: relative; }
+.preset-menu__trigger {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  padding: 8px 14px 8px 16px; border-radius: var(--r-pill);
+  background: var(--surface); border: 1px solid var(--line); color: var(--text);
+}
+.preset-menu__trigger:hover { background: var(--card); }
+.preset-menu__label { color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.preset-menu__current { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); }
+.preset-menu__trigger svg { color: var(--text-2); transition: transform .15s var(--ease); }
+.preset-menu__trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
+.preset-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; display: inline-block; }
+.preset-menu__list {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: 230px;
+  margin: 0; padding: 6px; list-style: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+}
+.preset-menu__list--fixed { position: fixed; left: var(--sp-4); right: var(--sp-4); width: auto; }
+.preset-menu__option {
+  display: grid; grid-template-columns: 10px 1fr 16px; align-items: center; gap: var(--sp-3);
+  padding: 10px 12px; border-radius: 10px; cursor: pointer;
+}
+.preset-menu__option:hover { background: var(--card); }
+.preset-menu__option[aria-selected="true"] { background: var(--card-active); }
+.preset-menu__option:focus-visible { outline: none; box-shadow: var(--focus); }
+.preset-menu__text { display: flex; flex-direction: column; min-width: 0; }
+.preset-menu__text strong { font-size: var(--fs-sm); }
+.preset-menu__text small { color: var(--text-3); font-size: var(--fs-xs); }
+.preset-menu__check { color: var(--text); visibility: hidden; display: flex; }
+.preset-menu__option[aria-selected="true"] .preset-menu__check { visibility: visible; }
+
+/* 상세 매력도 패널 */
+.score-panel { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--sp-5) var(--sp-6); align-items: center; }
+.score-panel > :not(.score-panel__gauge):not(.score-panel__radar) { grid-column: 1 / -1; }
+.score-panel__gauge { display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); text-align: center; }
+.score-panel__rank { font-size: var(--fs-md); }
+.score-band { display: inline-flex; align-items: center; gap: 6px; font-weight: var(--fw-bold); }
+.score-band i { width: 10px; height: 10px; border-radius: 50%; }
+.score-panel__radar { display: flex; flex-direction: column; gap: var(--sp-2); align-items: center; }
+.chart-box--radar { width: 100%; max-width: 420px; height: 280px; }
+.score-summary { font-size: var(--fs-md); color: var(--text); }
+.score-summary strong { color: var(--lavender); }
+/* 요소별 '날씨' 카드 */
+.wx-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-3); }
+.wx { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-row); background: var(--surface); }
+.wx__icon { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--card-active); }
+.wx--sun .wx__icon { color: #ffd166; }
+.wx--cloud .wx__icon { color: var(--ice-strong); }
+.wx--rain .wx__icon { color: var(--kr-down); }
+.wx--na .wx__icon { color: var(--text-3); }
+.wx__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wx__head { display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; }
+.wx__word { font-size: var(--fs-sm); color: var(--text-2); font-weight: var(--fw-semibold); }
+.wx__desc { font-size: var(--fs-xs); color: var(--text-3); line-height: 1.4; }
+.score-basis { display: flex; flex-direction: column; gap: var(--sp-4); margin-top: var(--sp-4); }
+@media (max-width: 1279px) { .wx-list { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); } }
+.score-panel__factors { display: flex; flex-direction: column; gap: var(--sp-3); }
+/* 팩터 기여도: 가운데(0) 기준 양수는 오른쪽, 음수는 왼쪽 */
+.contrib { display: grid; grid-template-columns: 96px 1fr 72px; gap: var(--sp-3); align-items: center; font-size: var(--fs-sm); }
+.contrib__name { color: var(--text-2); font-weight: var(--fw-semibold); }
+.contrib__track { position: relative; height: 12px; border-radius: var(--r-pill); background: var(--card-active); }
+.contrib__axis { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--text-3); }
+.contrib__bar { position: absolute; top: 0; bottom: 0; border-radius: var(--r-pill); background: var(--lavender); }
+.contrib__bar--neg { background: var(--ice); }
+.contrib__value { text-align: right; font-weight: var(--fw-bold); }
+.contrib--na .contrib__value { color: var(--text-3); font-weight: var(--fw-semibold); font-size: var(--fs-xs); }
+.score-notes { margin: 0; padding-left: 1.2em; color: var(--text-3); font-size: var(--fs-sm); }
+.score-method summary { cursor: pointer; color: var(--text-2); font-weight: var(--fw-semibold); font-size: var(--fs-sm); }
+.score-method summary .subtle { font-weight: var(--fw-regular); margin-left: var(--sp-2); }
+.score-method p { color: var(--text-3); font-size: var(--fs-sm); margin-top: var(--sp-2); }
+@media (max-width: 767px) { .score-panel { grid-template-columns: 1fr; } }
+
+/* ── [S4-A] 수치 분석 · 접힌 섹션 ── */
+.numeric { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+/* 접힌 섹션: 요약(제목·설명·화살표)만 보이고, 펼치면 처음 한 번 불러온다 */
+.fold { display: block; }
+.fold > summary { list-style: none; display: flex; align-items: center; gap: var(--sp-3); cursor: pointer; flex-wrap: wrap; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::after {
+  content: ""; margin-left: auto; width: 10px; height: 10px; flex: none;
+  border-right: 2px solid var(--text-2); border-bottom: 2px solid var(--text-2);
+  transform: translateY(-3px) rotate(45deg); transition: transform .15s var(--ease);
+}
+.fold[open] > summary::after { transform: translateY(2px) rotate(-135deg); }
+.fold > summary:hover h2 { text-decoration: underline; text-underline-offset: 4px; }
+.fold__body { display: flex; flex-direction: column; gap: var(--sp-5); margin-top: var(--sp-4); }
+
+/* ── [S4-A] 리스트 매력도 열 · 홈 관심종목 게이지 · 성향 메뉴 줄 ── */
+/* [S2-A]의 .stock-row 규칙 뒤에 같은 선택자를 다시 써서 덮어쓴다 (남의 구역은 그대로 둔다) */
+.stock-row { grid-template-columns: 28px minmax(180px, 2fr) minmax(130px, 1.2fr) minmax(90px, 1fr) minmax(90px, 1fr) 56px 116px; }
+.stock-row__score { text-align: center; }
+.stock-row--head > :nth-child(6) { text-align: center; }
+@media (max-width: 1023px) {
+  .stock-row { grid-template-columns: 24px minmax(150px, 2fr) minmax(110px, 1fr) 48px 116px; }
+}
+@media (max-width: 767px) {
+  .stock-row { grid-template-columns: 20px 1fr auto; }
+  .stock-row__score { grid-column: 2; justify-self: start; }
+  .stock-row__actions { grid-column: 3; grid-row: 2; justify-content: flex-end; }   /* 폰 폭: 매력도와 버튼이 같은 줄 */
+}
+.page-head__actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }   /* TODO(D가 components.css로 이동) */
+.wl-card__gauge { display: flex; justify-content: center; margin-bottom: var(--sp-2); }   /* TODO(D가 components.css로 이동) */

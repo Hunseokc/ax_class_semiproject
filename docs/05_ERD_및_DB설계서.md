@@ -156,7 +156,7 @@ erDiagram
 | 배경 | indices | 지수 정의 | index_id |
 | 배경 | index_daily_prices | 지수 일봉 | (index_id, trade_date) |
 | 배경 | fx_rates | USD/KRW | fx_id, UQ (granularity, rate_at) |
-| 사용자 | users | 사용자(인증 없음, 기본 사용자 demo는 `master`가 시드) | user_id |
+| 사용자 | users | 사용자(인증 없음, 기본 사용자 demo는 `master`가 시드, 배포의 게스트는 `guest-…`) | user_id |
 | 사용자 | watchlist_items | 관심종목 N:M + 정렬 순서 | (user_id, stock_id) |
 | 사용자 | portfolios | 모의 포트폴리오 | portfolio_id, UQ (user_id, name) |
 | 사용자 | portfolio_items | 담은 종목 (담은 시점 가격·환율 복사) | item_id, UQ (portfolio_id, stock_id) |
@@ -295,7 +295,7 @@ Stage 1에서 쓰는 값: `MASTER`(INTERNAL, `master`), `PRICES`(PYKRX·YFINANCE
 | nickname | character varying(50) | N |  | UQ | 닉네임 |
 | created_at | timestamp with time zone | N | now() |  | 생성 시각 |
 
-요청 사용자는 `get_current_user_id`(설정 `DEFAULT_USER_ID`, 기본 1 = demo)가 정한다. 2차에서 로그인으로 대체한다.
+요청 사용자는 `get_current_user_id`(설정 `DEFAULT_USER_ID`, 기본 1 = demo)가 정한다. 배포(`GUEST_SESSION_ENABLED=true`)에서는 첫 쓰기 요청 때 게스트 행(`nickname = 'guest-' + 16자리 16진수`)을 만들고 demo의 `watchlist_items`·`portfolios`·`portfolio_items`를 복사한다(`app/services/guest.py` — 포트폴리오는 사용자 안에서 이름이 유일하므로 이름으로 원본과 짝지어 항목을 옮긴다). 2차에서 로그인으로 대체한다.
 
 #### `watchlist_items`
 

@@ -55,6 +55,8 @@ class Universe:
     stocks: tuple[StockSpec, ...]
     peer_groups: tuple[PeerGroupSpec, ...]
     fx_yf_symbol: str
+    benchmark: dict                 # [S4-D] 비교군 설정 (per_sector·price_days·fin_years·reselect_days …)
+    benchmark_candidates: dict      # [S4-D] 경쟁 그룹 → 국가 → 후보 [{market, ticker, name}]
 
 
 @lru_cache
@@ -69,6 +71,8 @@ def load_universe() -> Universe:
         peer_groups=tuple(PeerGroupSpec(name=g["name"], members=tuple(g["members"]))
                           for g in raw["peer_groups"]),
         fx_yf_symbol=raw["fx"]["usd_krw"]["yf_symbol"],
+        benchmark=raw["benchmark"],
+        benchmark_candidates=raw["benchmark_candidates"],
     )
 
 
@@ -77,16 +81,26 @@ def yf_symbol(market: str, ticker: str) -> str:
     return {"KOSPI": f"{ticker}.KS", "KOSDAQ": f"{ticker}.KQ"}.get(market, ticker)
 
 
-def stock_refs(conn: Connection, tickers: list[str] | None = None, *,
+# ── [S4-D] 갱신 범위 ──
+# 자주 갱신(4시간)할 종목 = 노출 종목 + 관심종목·포트폴리오에 담긴 종목
+FREQUENT_SQL = """(s.coverage = 'featured'
+    OR EXISTS (SELECT 1 FROM watchlist_items w WHERE w.stock_id = s.stock_id)
+    OR EXISTS (SELECT 1 FROM portfolio_items pi WHERE pi.stock_id = s.stock_id))"""
+SCOPES = {"all": "true", "frequent": FREQUENT_SQL,
+          "benchmark": f"s.coverage = 'benchmark' AND NOT {FREQUENT_SQL}"}
+
+
+def stock_refs(conn: Connection, tickers: list[str] | None = None, *, scope: str = "frequent",
                stock_ids: list[int] | None = None) -> list[StockRef]:
-    """수집 대상(활성 종목). tickers·stock_ids를 주면 그 종목만(stock_ids는 비활성 종목도 포함).
+    """수집 대상(활성 종목). scope: frequent(4시간 갱신) / benchmark(그 밖의 비교군, 1일 갱신) / all.
+    tickers·stock_ids를 주면 scope와 관계없이 그 종목만(stock_ids는 비활성 종목도 포함).
     yfinance 심볼은 universe.yaml 값을 쓰고, 없으면 시장 규칙(.KS/.KQ)으로 만든다."""
     if stock_ids:
         where, params = "s.stock_id = ANY(:ids)", {"ids": stock_ids}
     elif tickers:
         where, params = "s.is_active AND s.ticker = ANY(:tickers)", {"tickers": tickers}
     else:
-        where, params = "s.is_active", {}
+        where, params = f"s.is_active AND {SCOPES[scope]}", {}
     yf = {(s.market, s.ticker): s.yf_symbol for s in load_universe().stocks}
     rows = conn.execute(text(f"""
         SELECT s.stock_id, m.code, m.country, s.ticker, m.timezone, s.corp_code, s.cik
