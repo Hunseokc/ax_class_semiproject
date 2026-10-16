@@ -266,15 +266,18 @@
 .fold > summary:hover h2 { text-decoration: underline; text-underline-offset: 4px; }
 .fold__body { display: flex; flex-direction: column; gap: var(--sp-5); margin-top: var(--sp-4); }
 
-/* ── [S4-A] 주식 리스트 매력도 열 · 홈 관심종목 게이지 (D 통합 수정: 원본 pages.css·components.css 값) ── */
-.stock-row { grid-template-columns: 28px minmax(180px, 2fr) minmax(130px, 1.2fr) minmax(90px, 1fr) minmax(90px, 1fr) 56px 120px; }
+/* ── [S4-A] 리스트 매력도 열 · 홈 관심종목 게이지 · 성향 메뉴 줄 ── */
+/* [S2-A]의 .stock-row 규칙 뒤에 같은 선택자를 다시 써서 덮어쓴다 (남의 구역은 그대로 둔다) */
+.stock-row { grid-template-columns: 28px minmax(180px, 2fr) minmax(130px, 1.2fr) minmax(90px, 1fr) minmax(90px, 1fr) 56px 116px; }
 .stock-row__score { text-align: center; }
 .stock-row--head > :nth-child(6) { text-align: center; }
 @media (max-width: 1023px) {
-  .stock-row { grid-template-columns: 24px minmax(150px, 2fr) minmax(110px, 1fr) 48px 120px; }
+  .stock-row { grid-template-columns: 24px minmax(150px, 2fr) minmax(110px, 1fr) 48px 116px; }
 }
 @media (max-width: 767px) {
+  .stock-row { grid-template-columns: 20px 1fr auto; }
   .stock-row__score { grid-column: 2; justify-self: start; }
-  .stock-row__actions { grid-column: 3; grid-row: 2; }
+  .stock-row__actions { grid-column: 3; grid-row: 2; justify-content: flex-end; }   /* 폰 폭: 매력도와 버튼이 같은 줄 */
 }
-.wl-card__gauge { display: flex; justify-content: center; margin-bottom: var(--sp-2); }
+.page-head__actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }   /* TODO(D가 components.css로 이동) */
+.wl-card__gauge { display: flex; justify-content: center; margin-bottom: var(--sp-2); }   /* TODO(D가 components.css로 이동) */
