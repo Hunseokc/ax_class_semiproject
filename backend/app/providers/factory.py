@@ -1,6 +1,6 @@
 """시장·설정에 따라 Provider 구현을 고른다. 테스트는 Providers를 직접 만들어 fake를 주입한다.
 
-이후 단계: 상장 목록(kr_listing·us_listing)·비교군 시가총액(market_caps)은 Stage 6.
+Stage 6-B: 상장 목록(kr_listing·us_listing). 비교군 시가총액(market_caps)은 Stage 6-D.
 """
 from __future__ import annotations
 
@@ -31,6 +31,9 @@ class Providers:
     # ── [S3-C] 대량 조회 ──
     kr_bulk: base.MarketBulkProvider | None = None   # 국내 날짜별 전 종목(일봉·밸류에이션). None이면 종목별 수집
     us_batch_price: base.BatchPriceProvider | None = None   # 미국 일봉 묶음 다운로드. None이면 종목별 수집
+    # ── [S6-B] 상장 목록 ──
+    kr_listing: base.ListingProvider | None = None   # 상장 보통주 목록(검색용). None이면 그 국가는 건너뛴다
+    us_listing: base.ListingProvider | None = None
     # ── [S5-D] 미국 참조 데이터 ──
     us_reference: base.ReferenceDataProvider | None = None  # 미국 발행주식수·SIC·기초값(SEC). None이면 yfinance 밸류에이션
 
@@ -48,6 +51,9 @@ class Providers:
 
     def disclosure(self, country: str) -> base.DisclosureProvider | None:
         return self.kr_disclosure if country == "KR" else self.us_disclosure
+
+    def listing(self, country: str) -> base.ListingProvider | None:
+        return self.kr_listing if country == "KR" else self.us_listing
 
 
 class _Lazy:
@@ -80,6 +86,8 @@ def default_providers() -> Providers:
         kr_valuation=kr if s.price_source_kr == "pykrx" else None,
         us_valuation=yahoo,
         kr_bulk=kr if s.price_source_kr == "pykrx" else None, us_batch_price=yahoo,
+        # ── [S6-B] 상장 목록 ──
+        kr_listing=kr if s.price_source_kr == "pykrx" else None, us_listing=sec,
         # ── [S5-D] 미국 참조 데이터 ──
         us_reference=sec,
         # ── [S3-B] 재무·공시 ──
