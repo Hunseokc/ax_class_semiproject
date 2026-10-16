@@ -17,7 +17,8 @@ STAGE2_TABLES = {"users", "watchlist_items", "portfolios", "portfolio_items"}
 STAGE3_TABLES = {"financial_statements", "disclosures"}
 STAGE4_TABLES = {"scoring_presets", "scoring_weights", "stock_metric_values", "stock_scores"}
 STAGE5_TABLES = {"data_freshness", "fundamental_bases"}
-ALL_TABLES = STAGE1_TABLES | STAGE2_TABLES | STAGE3_TABLES | STAGE4_TABLES | STAGE5_TABLES
+STAGE6_TABLES = {"sector_performance_daily", "market_sentiment_daily"}
+ALL_TABLES = STAGE1_TABLES | STAGE2_TABLES | STAGE3_TABLES | STAGE4_TABLES | STAGE5_TABLES | STAGE6_TABLES
 
 
 def test_orm_matches_schema(engine):
@@ -38,7 +39,7 @@ def test_orm_matches_schema(engine):
     assert diffs == []
 
 
-def test_tables_are_stage1_to_5_only(engine):
+def test_tables_are_stage1_to_6_only(engine):
     assert set(Base.metadata.tables) == ALL_TABLES
     assert set(inspect(engine).get_table_names()) == ALL_TABLES
 
@@ -107,6 +108,13 @@ def test_tables_are_stage1_to_5_only(engine):
     ("유효기간 < 시도 시각", "INSERT INTO data_freshness VALUES (1, 'financials', now(), now() - interval '1 day', 'SUCCESS')"),
     ("잘못된 유효기간 kind", "INSERT INTO data_freshness VALUES (1, 'scores', now(), now(), 'SUCCESS')"),
     ("발행주식수 0", "INSERT INTO fundamental_bases (stock_id, shares_outstanding, source) VALUES (1, 0, 'SEC')"),
+    # ── Stage 6 ── (005_listed_dividend · 007_home_widgets)
+    ("잘못된 coverage", "UPDATE stocks SET coverage = 'etc' WHERE stock_id = 1"),
+    ("음수 주당배당금", "UPDATE valuation_snapshots SET dps = -1"),
+    ("잘못된 섹터 시장", "INSERT INTO sector_performance_daily (market, sector_code, sector_name, trade_date) VALUES ('JP', 'X', 'x', '2030-01-01')"),
+    ("섹터 같은 날 중복", "INSERT INTO sector_performance_daily (market, sector_code, sector_name, trade_date) "
+                     "VALUES ('US', 'XLK', 't', '2030-01-01'), ('US', 'XLK', 't', '2030-01-01')"),
+    ("심리 지수 100 초과", "INSERT INTO market_sentiment_daily (market, trade_date, score, label, formula_version) VALUES ('KR', '2030-01-01', 101, 'x', 1)"),
 ])
 def test_constraints_reject_bad_rows(engine, label, sql):
     with pytest.raises(IntegrityError):
