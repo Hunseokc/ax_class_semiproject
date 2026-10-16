@@ -1,9 +1,9 @@
 // 모의 포트폴리오: 선택·생성·삭제, 시드 수정, 담은 목록(수정·삭제), 요약·비중 차트
 // 체결 기록이 아니라 "시드 안에서 담아보는 계산기"다. 종목 담기는 담기 모달(add-to-portfolio.js)에서 한다.
 import {
-  createPortfolio, deletePortfolio, deletePortfolioItem, getPortfolioSummary, getPortfolios,
-  updatePortfolio, updatePortfolioItem,
-} from "../api.js";
+  addPortfolioItem, createPortfolio, deletePortfolio, deletePortfolioItem, getPortfolioSummary, getPortfolios,
+  previewEqualWeight, updatePortfolio, updatePortfolioItem,
+} from "../api.js";   // [S5-A] addPortfolioItem·previewEqualWeight
 import { DASH, changeHtml, dateTime, esc, initials, krw, num, pct, price, signedKrw, stockUrl } from "../format.js";
 import { color, dashedAxis, draw, plainAxis } from "../components/charts.js";
 import { mountSidebar } from "../components/sidebar.js";
@@ -110,8 +110,10 @@ async function loadPortfolio() {
 
 function renderToolbar(pf, s) {
   const el = h(`<div class="pf-toolbar"><div><h2>${esc(s.name)}</h2><p class="subtle">시드 ${krw(s.seed_krw)} · 기준일 ${s.as_of ? s.as_of : DASH}</p></div>
-      <div class="pf-toolbar__actions"><button class="btn btn--sm" type="button" data-edit>이름·시드 수정</button>
+      <div class="pf-toolbar__actions"><button class="btn btn--sm" type="button" data-equal>관심종목 균등 배분 미리보기</button>
+        <button class="btn btn--sm" type="button" data-edit>이름·시드 수정</button>
         <button class="btn btn--sm btn--danger" type="button" data-del aria-label="${esc(s.name)} 포트폴리오 삭제">삭제</button></div></div>`);
+  el.querySelector("[data-equal]").addEventListener("click", () => openEqualWeight());   // [S5-A]
   el.querySelector("[data-edit]").addEventListener("click", () => editPortfolio({ ...pf, used_krw: s.used_krw }));
   el.querySelector("[data-del]").addEventListener("click", () => confirmDelete("포트폴리오 삭제",
     `<strong>${esc(s.name)}</strong>과(와) 담은 종목 ${s.items.length}개를 모두 삭제합니다.`, async () => {
@@ -239,6 +241,49 @@ function renderWeights(s) {
   });
   hbar(el.querySelector("[data-market]"), s.market_weights.map((m) => (m.country === "KR" ? "국내" : "미국")), s.market_weights.map((m) => m.weight));
   hbar(el.querySelector("[data-group]"), s.group_weights.map((g) => g.group), s.group_weights.map((g) => g.weight));
+}
+
+// ── [S5-A] 관심종목 균등 배분 미리보기 (POST …/preview/equal-weight — 저장하지 않음) ──
+async function openEqualWeight() {
+  let d;
+  try {
+    d = await previewEqualWeight(currentId);
+  } catch (e) {
+    toast(e.code === "EMPTY_WATCHLIST" ? "관심종목이 없습니다. 주식 리스트에서 ★로 추가하세요." : e.message, "error");
+    return;
+  }
+  const rows = d.items.map((i) => `<tr><td>${esc(i.name)}<br><span class="subtle">${esc(i.ticker)} · 1주 ${krw(i.unit_cost_krw)}</span></td>
+      <td class="num">${num(i.quantity)}주</td><td class="num">${krw(i.cost_krw)}</td><td class="num">${pct(i.weight, { digits: 1 })}</td></tr>`).join("");
+  const body = h(`<div class="add-form">
+      <p class="subtle">${d.target_count
+        ? `예산(잔여 시드) ${krw(d.budget_krw)} ÷ ${d.target_count}종목 = 종목당 ${krw(d.share_krw)} · 1주 원가로 나눠 내림한 정수 수량${d.fx_rate ? ` · 환율 ${num(d.fx_rate, 2)}` : ""}`
+        : `예산(잔여 시드) ${krw(d.budget_krw)} · 나눌 대상 종목이 없습니다(아래 사유)`}</p>
+      ${d.items.length ? `<div class="table-wrap"><table class="table"><caption class="sr-only">균등 배분 미리보기</caption>
+        <thead><tr><th scope="col">종목</th><th scope="col">수량</th><th scope="col">금액</th><th scope="col">비중</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>` : '<p class="notice">살 수 있는 종목이 없습니다.</p>'}
+      <dl class="preview"><dt>사용 금액</dt><dd class="num">${krw(d.total_cost_krw)}</dd>
+        <dt>남는 금액</dt><dd class="num">${krw(d.leftover_krw)}</dd></dl>
+      ${d.skipped.length ? `<ul class="score-notes">${d.skipped.map((x) => `<li>${esc(x.name)}: ${esc(x.message)}${x.unit_cost_krw ? ` (1주 ${krw(x.unit_cost_krw)} > 몫 ${krw(x.share_krw)})` : ""}</li>`).join("")}</ul>` : ""}
+      <p class="subtle">미리보기는 저장되지 않습니다. '모두 담기'를 누르면 종목별로 수량 담기를 차례로 실행합니다.</p>
+      <div class="modal__foot"><button class="btn" type="button" data-close>닫기</button>
+        <button class="btn btn--primary" type="button" data-save ${d.items.length ? "" : "disabled"}>모두 담기</button></div></div>`);
+  const modal = openModal({ title: "관심종목 균등 배분 미리보기", body });
+  body.querySelector("[data-save]").addEventListener("click", async (e) => {
+    e.currentTarget.disabled = true;
+    let done = 0;
+    for (const i of d.items) {
+      try {
+        await addPortfolioItem(currentId, { market: i.market, ticker: i.ticker, mode: "quantity", value: i.quantity });
+        done += 1;
+      } catch (err) {
+        toast(`${i.name} 담기 실패: ${err.message} (${done}종목 담음)`, "error");
+        break;
+      }
+    }
+    modal.close();
+    if (done === d.items.length) toast(`${done}종목을 담았습니다`);
+    refreshCurrent();
+  });
 }
 
 // ---------------------------------------------------------------- 시작
