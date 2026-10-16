@@ -18,6 +18,7 @@
     python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용)
     python -m app.ingest benchmark [--reselect]   # 매력도 비교군: 선정(30일마다/강제) → 평시 데이터 → 점수
     python -m app.ingest hydrate 042700      # 비교군 종목 상세(공시·2년 일봉·5개년 재무) 받기
+    python -m app.ingest listing             # 상장 보통주 목록(국내 pykrx·미국 SEC) → 검색용 마스터(coverage=listed)
 """
 from __future__ import annotations
 
@@ -119,6 +120,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("hydrate").add_argument("tickers", nargs="+")
     # ── [S5-C] 데이터 상태 ──
     sub.add_parser("status")
+    # ── [S6-B] 상장 목록 ──
+    sub.add_parser("listing")
     args = ap.parse_args(argv)
 
     setup_logging(get_settings().log_level)
@@ -208,6 +211,11 @@ def main(argv: list[str] | None = None) -> int:
     # ── [S5-C] 데이터 상태 ──
     elif args.cmd == "status":
         status(engine)
+    # ── [S6-B] 상장 목록 ──
+    elif args.cmd == "listing":
+        from app.ingest.listing import sync_listing
+        for country, res in sync_listing(engine, providers()).items():
+            print(country, res)
     if args.cmd not in ("status",):
         print(f"[{args.cmd}] 완료 {time.monotonic() - t0:.1f}s")
     return 0
