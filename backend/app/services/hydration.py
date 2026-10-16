@@ -1,6 +1,6 @@
-"""비교군 종목의 상세 데이터 요청 시 수집 (상세 화면 열기·관심종목 추가).
+"""비교군·상장 목록 종목의 상세 데이터 요청 시 수집 (상세 화면 열기·관심종목 추가).
 
-비교군(benchmark) 종목은 평시에 점수 계산용 데이터만 있으므로
+비교군(benchmark) 종목은 평시에 점수 계산용 데이터만, 상장 목록(listed) 종목은 이름·티커만 있으므로
 사용자가 상세를 요구하면 그때 백그라운드에서 받는다. 순서: 일봉 → FY 재무(5개년) → 밸류에이션 → 공시(1년).
 일봉을 먼저 받아 화면이 가격 차트부터 채울 수 있게 한다. 같은 종목은 detail_ttl_hours(24시간) 안에 다시 확인하지 않는다.
 가격 외 데이터는 유효기간(data_freshness) 안이면 받지 않는다 → 다시 열 때는 보통 일봉 증분만 받는다.
@@ -27,7 +27,7 @@ from app.services import freshness
 
 log = logging.getLogger(__name__)
 FAILED_BACKOFF = timedelta(minutes=10)   # 실패하면 이 시간 동안은 다시 시도하지 않는다
-ON_DEMAND = ("benchmark",)               # 상세 데이터를 요청 시 받는 계층 (featured는 평시에 모두 있음, listed는 Stage 6)
+ON_DEMAND = ("benchmark", "listed")      # 상세 데이터를 요청 시 받는 계층 (featured는 평시에 모두 있음)
 
 
 class Hydrator:
@@ -99,7 +99,7 @@ def hydrate(engine: Engine, providers: Providers, stock_id: int) -> dict:
             with engine.begin() as conn:
                 freshness.mark(conn, "price_history", stock_id, True)
         if fin_due:
-            map_ids(engine, providers, ids, res.notes)        # 고유번호가 아직 없으면 먼저 매핑한다
+            map_ids(engine, providers, ids, res.notes)        # 상장 목록 종목은 DART 고유번호가 아직 없을 수 있다
             out["financials"] = jobs.load_financials(engine, providers, stock_ids=ids)
         else:
             out["financials"] = "FRESH"

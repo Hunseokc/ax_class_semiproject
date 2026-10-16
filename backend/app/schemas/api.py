@@ -158,6 +158,8 @@ class StockDetailOut(Schema):
     preset: str
     groups: list[GroupRef]                   # 소속 경쟁 그룹(없으면 빈 목록)
     is_watched: bool
+    coverage: str
+    detail_status: str              # ready / loading(비교군 상세 데이터 받는 중) / failed
 
 
 class Candle(Schema):
