@@ -1,9 +1,9 @@
 // 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
-import { PRESET_EVENT, getFx, getIndices, getPreset, getRanking, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S5-A] getRanking
+import { PRESET_EVENT, getFx, getIndices, getPreset, getRanking, getSectors, getSentiment, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S5-A] getRanking
 import { changeHtml, changeLabel, date, dateTime, esc, num, pct, price, shortDate, stockUrl, usd, volume } from "../format.js";   // [S5-A] pct·volume
 import { color, destroyCharts, scoreBand, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
-import { emptyState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";   // [S5-A] marketBadge
+import { emptyState, errorState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";   // [S5-A] marketBadge
 import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";   // [S4-A]
 import { FX_CODE, DEFAULT_METRICS, metricPicker, storedMetrics } from "../components/metric-picker.js";   // [S5-A]
 import { openWatchNote } from "../components/watch-note.js";   // [S5-A]
@@ -288,7 +288,7 @@ window.addEventListener("resize", () => {
 loadWatchlist();
 
 // ── [S3-A] 사이드바 새로고침이 끝나면 지수·환율·관심종목을 새 값으로 다시 불러온다 ──
-document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); loadRanking(); });   // [S5-A] loadRanking
+document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); loadRanking(); loadSectors(); loadSentiment(); });   // [S5-A] loadRanking  [S6-A] 섹터·심리
 
 // ── [S4-A] 투자 성향: 관심종목 카드의 매력도 게이지가 따르는 값 ──
 // 성향 메뉴(#preset-menu)는 index.html에 자리가 있고, 아래에서 맨 위 검색바 줄로 옮긴다 [S6-A]
@@ -359,3 +359,110 @@ $("#rank-metric").append(segmented(RANK_METRICS, rankMetric,
 $("#rank-country").append(segmented([{ value: "KR", label: "국내" }, { value: "US", label: "미국" }], rankCountry,
   (v) => { rankCountry = v; loadRanking(); }, { label: "순위 시장 선택" }));
 loadRanking();
+
+// ── [S6-A] 섹터 히트맵 · 시장 심리 지수 ──
+const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+const monthDay = (iso) => (iso ? `${iso.slice(5, 7)}.${iso.slice(8, 10)}` : "");
+
+// ---------------------------------------------------------------- 섹터 히트맵 (GET /home/sectors — DB만 읽음, 수집은 갱신 작업)
+// 타일 = 섹터명 + 등락률. 크기는 섹터 가중치(근사치, 서버 상수), 색은 부호(상승 --up / 하락 --down)와 크기(±3%에서 최대 농도)
+const HEAT_FULL = 3;
+let sectorCountry = "KR";
+
+function heatTile(s) {
+  const c = s.change_pct;
+  const label = isNum(c) ? `${s.name} ${changeLabel(c / 100)}` : `${s.name} 데이터 없음`;
+  let bg = "var(--card-active)";
+  if (isNum(c) && c !== 0) {
+    const mix = Math.round(18 + 72 * Math.min(Math.abs(c) / HEAT_FULL, 1));
+    bg = `color-mix(in srgb, var(${c > 0 ? "--heat-up" : "--heat-down"}) ${mix}%, var(--surface))`;
+  }
+  const chg = !isNum(c) ? "–" : `${c > 0 ? "▲" : c < 0 ? "▼" : ""}${pct(Math.abs(c) / 100)}`;
+  return `<div class="heat__tile" role="listitem" aria-label="${esc(label)}"
+      style="flex:${s.weight} 1 ${(s.weight * 0.9).toFixed(1)}%;background:${bg}">
+      <span class="heat__name">${esc(s.name)}</span><span class="heat__chg num">${chg}</span></div>`;
+}
+
+function renderSectors(d) {
+  const foot = $("#sector-foot");
+  if (!d.available) {
+    foot.replaceChildren();
+    return emptyState({ title: `${d.country === "KR" ? "국내" : "미국"} 섹터 데이터 준비 중`,
+      body: d.country === "KR" ? "KRX 섹터 지수를 아직 받지 못했습니다. 미국 탭은 볼 수 있습니다." : "다음 갱신 때 섹터 등락률을 받습니다." });
+  }
+  foot.innerHTML = `<span>기준일 ${esc(monthDay(d.as_of))}</span>${sessionBadge({ as_of: d.as_of, country: d.country, session_status: d.session_status })}`;
+  const el = h(`<div class="heat" role="list" aria-label="${d.country === "KR" ? "국내" : "미국"} 섹터 전일 대비 등락률"></div>`);
+  el.innerHTML = [...d.sectors].sort((a, b) => b.weight - a.weight).map(heatTile).join("");
+  return el;
+}
+
+const sectorTabs = segmented([{ value: "KR", label: "국내" }, { value: "US", label: "미국" }], sectorCountry,
+  (v) => { sectorCountry = v; loadSectors(); }, { label: "섹터 시장 선택" });
+$("#sector-tabs").append(sectorTabs);
+
+async function loadSectors({ fallback = false } = {}) {
+  const box = $("#sectors");
+  box.replaceChildren(h('<div class="skeleton heat-skeleton" aria-busy="true" aria-label="불러오는 중"></div>'));
+  try {
+    let d = await getSectors(sectorCountry);
+    // 처음 열 때 국내 데이터가 없으면 미국으로 시작
+    if (fallback && !d.available && sectorCountry === "KR") {
+      const us = await getSectors("US");
+      if (us.available) { sectorCountry = "US"; sectorTabs.setValue("US"); d = us; }
+    }
+    box.replaceChildren(renderSectors(d));
+  } catch (err) {
+    $("#sector-foot").replaceChildren();
+    box.replaceChildren(errorState(err, () => loadSectors()));
+  }
+}
+
+// ---------------------------------------------------------------- 시장 심리 지수 (GET /home/sentiment — StockMind 간이 계산, CNN Fear & Greed 아님)
+const SENTIMENT_LABELS = ["극단적 공포", "공포", "중립", "탐욕", "극단적 탐욕"];
+let sentimentCountry = "KR";
+
+function sentimentHistory(name, p) {
+  return `<div class="senti__hist-item"><dt>${name}</dt><dd>${p
+    ? `<strong class="num">${Math.round(p.score)}</strong> <span>${esc(p.label)}</span>` : "–"}</dd></div>`;
+}
+
+function renderSentiment(d) {
+  if (!isNum(d.score)) {
+    return emptyState({ title: "데이터 부족", body: "심리 지수를 계산할 지수 일봉이 부족합니다." });
+  }
+  const c = d.components;
+  const parts = [["가격 위치 (52주)", c.price_position], ["이동평균 괴리 (125일)", c.ma_gap_score], ["RSI (14일)", c.rsi_score]];
+  if (d.market === "US") parts.push(["변동성 (VIX)", c.vix_score]);
+  const band = scoreBand(d.score);
+  const index = d.index_code === "SPX" ? "S&P 500" : "KOSPI";
+  return h(`<div class="senti">
+      <div class="senti__gauge" tabindex="0" aria-describedby="senti-tip"
+           aria-label="시장 심리 지수 ${Math.round(d.score)}점 ${esc(d.label)}">
+        ${scoreGauge(d.score, { labels: SENTIMENT_LABELS })}
+        <ol class="senti__scale" aria-hidden="true">${SENTIMENT_LABELS.map((l, i) =>
+          `<li class="${band && band.index === i + 1 ? "is-current" : ""}"><i style="background:var(--gauge-${i + 1})"></i>${l}</li>`).join("")}</ol>
+        <div class="senti__tip" role="tooltip" id="senti-tip"><strong>구성요소 점수 (0~100)</strong>
+          ${parts.map(([n, v]) => `<span>${n}</span><span class="num">${isNum(v) ? Math.round(v) : "계산 불가"}</span>`).join("")}
+        </div>
+      </div>
+      <dl class="senti__hist">${sentimentHistory("어제", d.previous)}${sentimentHistory("지난주", d.week_ago)}</dl>
+      <p class="home-widget__foot senti__foot"><span>${index} 기준 · 기준일 ${esc(monthDay(d.as_of))}</span>${
+        sessionBadge({ as_of: d.as_of, country: d.market, session_status: d.session_status })}</p>
+    </div>`);
+}
+
+$("#sentiment-tabs").append(segmented([{ value: "KR", label: "국내" }, { value: "US", label: "미국" }], sentimentCountry,
+  (v) => { sentimentCountry = v; loadSentiment(); }, { label: "심리 지수 시장 선택" }));
+
+function loadSentiment() {
+  return load($("#sentiment"), {
+    skeleton: h('<div class="skeleton senti-skeleton" aria-busy="true" aria-label="불러오는 중"></div>'),
+    fetch: () => getSentiment(sentimentCountry),
+    render: renderSentiment,
+    isEmpty: () => false,
+  });
+}
+
+// 처음 열 때: 국내 섹터 데이터가 없으면 미국 탭으로 시작
+loadSectors({ fallback: true });
+loadSentiment();
