@@ -14,6 +14,7 @@
     python -m app.ingest scores              # 매력도 점수 재생성 (오늘 as_of, DELETE 후 INSERT)
     python -m app.ingest explain             # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
     python -m app.ingest seed-demo           # demo 관심종목 8건 + 모의 포트폴리오 2개
+    python -m app.ingest status              # 테이블별 행 수·기간·최근 실패 + 데이터 품질(최근 7일)
     python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용)
     python -m app.ingest benchmark [--reselect]   # 매력도 비교군: 선정(30일마다/강제) → 평시 데이터 → 점수
     python -m app.ingest hydrate 042700      # 비교군 종목 상세(공시·2년 일봉·5개년 재무) 받기
@@ -30,6 +31,55 @@ from app.core.config import get_settings
 from app.core.db import get_engine
 from app.core.logging import setup_logging
 from app.ingest import jobs, sample
+
+
+# ── [S5-C] 데이터 상태 ──
+def status(engine) -> None:
+    q = {
+        "markets": "SELECT count(*) FROM markets",
+        "stocks": "SELECT count(*) FROM stocks",
+        "peer_groups / members": "SELECT (SELECT count(*) FROM peer_groups) || ' / ' || (SELECT count(*) FROM peer_group_members)",
+        "daily_prices": "SELECT count(*) || '  (' || min(trade_date) || ' ~ ' || max(trade_date) || ')' FROM daily_prices",
+        "  종목당 봉 수 min/avg/max": """SELECT min(c) || ' / ' || round(avg(c)) || ' / ' || max(c)
+                                     FROM (SELECT count(*) c FROM daily_prices GROUP BY stock_id) t""",
+        "index_daily_prices": "SELECT count(*) || '  (' || min(trade_date) || ' ~ ' || max(trade_date) || ')' FROM index_daily_prices",
+        "fx_rates DAILY": "SELECT count(*) || '  (' || min(rate_at AT TIME ZONE 'Asia/Seoul')::date || ' ~ ' || max(rate_at AT TIME ZONE 'Asia/Seoul')::date || ')' FROM fx_rates WHERE granularity='DAILY'",
+        "fx_rates SNAPSHOT": "SELECT count(*) FROM fx_rates WHERE granularity='SNAPSHOT'",
+        "valuation_snapshots": """SELECT (SELECT count(*) FROM valuation_snapshots) || '  (' ||
+                                  (SELECT string_agg(source || ' ' || n, ', ' ORDER BY source)
+                                   FROM (SELECT source, count(*) n FROM valuation_snapshots GROUP BY source) t) || ')'""",
+        "financial_statements FY": "SELECT count(*) FROM financial_statements WHERE period_type='FY'",
+        "  종목당 FY min/max": """SELECT min(c) || ' / ' || max(c) FROM (SELECT count(*) c FROM financial_statements
+                                WHERE period_type='FY' GROUP BY stock_id) t""",
+        "disclosures": "SELECT count(*) || '  (DART ' || count(*) FILTER (WHERE data_source='DART') || ', SEC ' || count(*) FILTER (WHERE data_source='SEC') || ')' FROM disclosures",
+        "users / watchlist / portfolios / items": """SELECT (SELECT count(*) FROM users) || ' / ' || (SELECT count(*) FROM watchlist_items)
+                                    || ' / ' || (SELECT count(*) FROM portfolios) || ' / ' || (SELECT count(*) FROM portfolio_items)""",
+        "ingestion_logs (S/F/K)": """SELECT count(*) FILTER (WHERE status='SUCCESS') || ' / ' || count(*) FILTER (WHERE status='FAILED')
+                                    || ' / ' || count(*) FILTER (WHERE status='SKIPPED') FROM ingestion_logs""",
+    }
+    with engine.connect() as conn:
+        for label, sql in q.items():
+            print(f"{label:<40} {conn.execute(text(sql)).scalar()}")
+        fails = conn.execute(text("""
+            SELECT l.job_type, coalesce(s.ticker, '-'), l.finished_at::timestamp(0), left(split_part(l.error, chr(10), 1), 160) FROM ingestion_logs l LEFT JOIN stocks s USING (stock_id)
+            WHERE l.status = 'FAILED' ORDER BY l.log_id DESC LIMIT 10""")).all()
+        if fails:
+            print("\n최근 실패:")
+            for f in fails:
+                print("  ", *f)
+        # GET /api/v1/statistics/data-quality와 같은 기준(app/services/data_quality.py)
+        from app.core.config import get_settings
+        from app.services.data_quality import data_quality
+        dq = data_quality(conn, days=7, ttl_hours=get_settings().refresh_ttl_hours)
+        t = dq["totals"]
+        print(f"\n데이터 품질 (최근 {dq['days']}일): 성공 {t['success']} / 실패 {t['failed']} / 부분 실패 {t['partial']}"
+              f" / 건너뜀 {t['skipped']} / 격리 {t['quarantined_rows']}행")
+        if dq["stale_jobs"]:
+            print(f"   오래된 갱신 작업(TTL×2 = {dq['stale_after_hours']:g}시간 초과):",
+                  ", ".join(f"{s['job_type']}(" + (f"{s['hours_since_success']}시간 전" if s["hours_since_success"] is not None
+                                                     else "작업 단위 성공 기록 없음") + ")" for s in dq["stale_jobs"]))
+        else:
+            print(f"   오래된 갱신 작업 없음 (기준 TTL×2 = {dq['stale_after_hours']:g}시간)")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -67,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
     # ── [S4-D] 비교군 ──
     sub.add_parser("benchmark").add_argument("--reselect", action="store_true", help="시가총액 순위로 지금 다시 고른다")
     sub.add_parser("hydrate").add_argument("tickers", nargs="+")
+    # ── [S5-C] 데이터 상태 ──
+    sub.add_parser("status")
     args = ap.parse_args(argv)
 
     setup_logging(get_settings().log_level)
@@ -153,6 +205,9 @@ def main(argv: list[str] | None = None) -> int:
             ids = conn.execute(text("SELECT stock_id FROM stocks WHERE ticker = ANY(:t)"), {"t": args.tickers}).scalars().all()
         for sid in ids:
             print(sid, hydrate(engine, providers(), sid))
+    # ── [S5-C] 데이터 상태 ──
+    elif args.cmd == "status":
+        status(engine)
     print(f"[{args.cmd}] 완료 {time.monotonic() - t0:.1f}s")
     return 0
 
