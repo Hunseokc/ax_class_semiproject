@@ -32,20 +32,37 @@ function inRange(points, lastDate) {
   return points.filter((p) => p.date >= since);
 }
 
+const FLAT_FX = 0.001;   // 환율 변동이 ±0.1% 미만이면 '보합'으로 보고 원화 관점 문구를 생략
+const isNum = (v) => typeof v === "number" && Number.isFinite(v);   // [S6-A]
+const monthDay = (iso) => (iso ? `${iso.slice(5, 7)}.${iso.slice(8, 10)}` : "");   // [S6-A]
 const localDay = (tz, at = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(at);   // YYYY-MM-DD
 
-/** 최신 데이터 날짜가 그 시장의 오늘이 아니면 배지. Stage 1 API에는 거래소 달력 판정(session_status)이 없어
- *  주말 여부로만 판단한다 (session_status는 이후 단계에서 API에 추가되면 다시 우선 사용) */
+/** 최신 데이터 날짜가 그 시장의 오늘이 아니면 배지. 판정은 서버의 거래소 달력(session_status),
+ *  서버가 판정하지 못하면(null) 주말 여부로만 판단한다 */
 function sessionBadge(ix) {
   if (!ix.as_of) return "";
-  const today = localDay(ix.country === "US" ? "America/New_York" : "Asia/Seoul");
-  const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
-  const status = ix.as_of >= today ? "today" : dow === 0 || dow === 6 ? "holiday" : "previous_session";
+  let status = ix.session_status;
+  if (!status) {
+    const today = localDay(ix.country === "US" ? "America/New_York" : "Asia/Seoul");
+    const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
+    status = ix.as_of >= today ? "today" : dow === 0 || dow === 6 ? "holiday" : "previous_session";
+  }
   if (status === "today") return "";
   const [text, why] = status === "holiday"
     ? ["휴장", "오늘은 휴장일(거래소 달력 기준)이라 마지막 거래일 종가를 표시합니다"]
     : ["직전 거래일", "오늘 일봉이 아직 없어 직전 거래일 종가를 표시합니다(일봉 기준)"];
   return `<span class="badge badge--market" title="${why}">${text}</span>`;
+}
+
+/** 52주 저점~고점 사이 현재 위치 바. 1년치가 없으면 같은 높이의 안내 줄(카드 높이 유지) */
+function range52(low, high, pos, digits = 2) {
+  if (!isNum(pos) || !isNum(low) || !isNum(high)) {
+    return '<div class="r52 r52--na"><span class="r52__lbl">52주</span><span>1년치 데이터 부족</span></div>';
+  }
+  const p = Math.max(0, Math.min(1, pos)) * 100;
+  return `<div class="r52" role="img" aria-label="52주 범위 ${num(low, digits)}~${num(high, digits)} 중 ${Math.round(p)}% 위치"
+      title="52주 저점 ${num(low, digits)} · 고점 ${num(high, digits)} · 현재 ${Math.round(p)}% 위치">
+      <span class="r52__lbl">52주</span><span class="r52__track"><i class="r52__dot" style="left:${p.toFixed(1)}%"></i></span></div>`;
 }
 
 function indexCard(ix) {
@@ -54,6 +71,7 @@ function indexCard(ix) {
       <div class="metric-card__value num">${num(ix.close, 2)}</div>
       <div class="metric-card__spark"><canvas aria-hidden="true"></canvas></div>
       <div class="metric-card__meta"><span>${sparkMeta().label} 추이</span>${sessionBadge(ix)}</div>
+      ${range52(ix.low_52w, ix.high_52w, ix.position_52w)}
       <div class="metric-card__foot">${changeHtml(ix.change_rate, ix.country)}<span class="subtle" title="기준일 ${date(ix.as_of)}">${shortDate(ix.as_of)}</span></div>
     </article>`);
   const closes = inRange(ix.sparkline || [], ix.as_of).map((p) => p.close);
@@ -61,19 +79,70 @@ function indexCard(ix) {
   return el;
 }
 
+/** 원화 관점 한 줄: 환율 상승(원화 약세)은 미국 종목의 원화 환산에 유리, 하락은 불리. 변동이 작으면 생략 */
+function fxNote(rate) {
+  if (!isNum(rate) || Math.abs(rate) < FLAT_FX) return "";
+  return `미국 종목 원화 환산에 소폭 ${rate > 0 ? "유리" : "불리"}`;
+}
+
 function fxCard(fx) {
+  const note = fxNote(fx.change_rate);
   const el = h(`<article class="metric-card" aria-label="원달러 환율">
       <div class="metric-card__label"><span>USD/KRW</span>${fx.fx_stale ? '<span class="badge badge--market" title="최신 환율을 가져오지 못해 마지막 값을 표시합니다">지연</span>' : '<span class="subtle">환율</span>'}</div>
       <div class="metric-card__value num">${num(fx.usd_krw, 2)}<span class="subtle">원</span></div>
       <div class="metric-card__spark"><canvas aria-hidden="true"></canvas></div>
       <div class="metric-card__meta"><span>${sparkMeta().label} 추이</span></div>
+      ${range52(fx.low_52w, fx.high_52w, fx.position_52w)}
       <div class="metric-card__foot">${changeHtml(fx.change_rate, "KR")}<span class="subtle" title="환율 기준 시각 ${dateTime(fx.rate_at)}">${dateTime(fx.rate_at).slice(-5)}</span></div>
+      ${note ? `<div class="metric-card__note">${note}</div>` : ""}
     </article>`);
   // 현재값이 SNAPSHOT(장중 시각)일 때만 끝에 덧붙인다. DAILY면 이미 history의 마지막 점이라 덧붙이면 꼬리가 평평해진다
   const history = inRange(fx.history || [], localDay("Asia/Seoul", new Date(fx.rate_at))).map((p) => p.usd_krw);
   const values = fx.granularity === "SNAPSHOT" ? [...history, fx.usd_krw] : history;
   queueMicrotask(() => sparkline(el.querySelector("canvas"), values, color("--lavender")));
   return el;
+}
+
+// ---------------------------------------------------------------- 한 줄 시장 요약 (규칙 기반 문장 조합, 조각별 데이터가 없으면 그 조각만 생략)
+const direction = (r) => (r > 0 ? 1 : r < 0 ? -1 : 0);
+function together(list) {
+  const d = list.map((i) => direction(i.change_rate));
+  if (d.every((x) => x === 1)) return "동반 상승";
+  if (d.every((x) => x === -1)) return "동반 하락";
+  if (d.every((x) => x === 0)) return "보합";
+  return "혼조";
+}
+
+function marketSummary() {
+  const byCode = new Map((market.indices || []).map((i) => [i.code, i]));
+  // 그룹의 지수가 하나라도 없거나 등락이 없으면 '동반'을 말할 수 없으므로 그 조각을 뺀다
+  const group = (codes) => {
+    const list = codes.map((c) => byCode.get(c));
+    return list.every((i) => i && isNum(i.change_rate)) ? list : null;
+  };
+  const kr = group(["KOSPI", "KOSDAQ"]);
+  const us = group(["SPX", "IXIC", "DJI"]);
+  const datesDiffer = kr && us && kr[0].as_of !== us[0].as_of;
+  const prefix = (list) => (datesDiffer ? `<span class="market-brief__date">${monthDay(list[0].as_of)}</span> ` : "");
+  const parts = [];
+  if (kr) parts.push(`${prefix(kr)}코스피·코스닥 ${together(kr)}`);
+  if (us) parts.push(`${prefix(us)}미국 3대 지수 ${together(us)}`);
+  const r = market.fx?.change_rate;
+  if (isNum(r)) parts.push(Math.abs(r) < FLAT_FX ? "환율 보합" : r < 0 ? "원화 강세" : "원화 약세");
+  const el = $("#market-summary");
+  el.innerHTML = parts.join('<span class="market-brief__sep" aria-hidden="true"> · </span>');
+  el.hidden = !parts.length;
+}
+
+/** "내 관심종목 N개 중 M개 하락(또는 상승)" — 많은 쪽을 보여 준다(같으면 상승). 비었거나 등락이 모두 없으면 숨김 */
+function renderWatchSummary(items) {
+  const el = $("#watch-summary");
+  const up = (items || []).filter((w) => isNum(w.change_rate) && w.change_rate > 0).length;
+  const down = (items || []).filter((w) => isNum(w.change_rate) && w.change_rate < 0).length;
+  el.hidden = !items?.length || (!up && !down);
+  if (el.hidden) return;
+  const [m, word, cls] = down > up ? [down, "하락", "chg--down"] : [up, "상승", "chg--up"];
+  el.innerHTML = `내 관심종목 ${items.length}개 중 <strong class="chg ${cls}">${m}개 ${word}</strong>`;
 }
 
 // 마지막 응답 — 표시 지표를 바꿀 때는 다시 요청하지 않고 이 값으로 다시 그린다
@@ -114,6 +183,7 @@ async function loadMarket() {
   if (market.indices) $("#as-of").textContent = `일봉 기준 · 기준일 ${date(ix.value.as_of)}`;
   mountPicker();   // [S5-A] 고를 수 있는 지표가 정해졌으니 선택 상자를 만든다
   renderMarketRow();
+  marketSummary();   // [S6-A]
 }
 
 $("#spark-range").append(segmented(SPARK_RANGES, sparkRange,
@@ -237,6 +307,7 @@ function renderWatchMore(items) {
 
 function renderWatch(items) {
   watchCount = items.length;   // [S4-A]
+  renderWatchSummary(items);   // [S6-A]
   paintWatchCount();
   renderWatchMore(items);
   const shownItems = items.slice(0, watchLimit());
@@ -268,7 +339,7 @@ async function loadWatchlist() {
       action: '<a class="btn btn--primary" href="/stocks">주식 리스트로</a>' }),
   });
   watchItems = items;
-  if (!items?.length) renderWatchMore(null);
+  if (!items?.length) { renderWatchMore(null); renderWatchSummary(null); }
   return items;
 }
 
@@ -310,9 +381,6 @@ mountPresetMenu(presetBox);
 document.addEventListener(PRESET_EVENT, () => { loadWatchlist(); if (topKind === "attractiveness") loadTop(); });   // 지수·환율은 성향과 무관해서 관심종목(과 매력도 순위)만 다시 조회
 
 // ── [S6-A] 섹터 히트맵 · 시장 심리 지수 ──
-const isNum = (v) => typeof v === "number" && Number.isFinite(v);
-const monthDay = (iso) => (iso ? `${iso.slice(5, 7)}.${iso.slice(8, 10)}` : "");
-
 // ---------------------------------------------------------------- 섹터 히트맵 (GET /home/sectors — DB만 읽음, 수집은 갱신 작업)
 // 타일 = 섹터명 + 등락률. 크기는 섹터 가중치(근사치, 서버 상수), 색은 부호(상승 --up / 하락 --down)와 크기(±3%에서 최대 농도)
 const HEAT_FULL = 3;
