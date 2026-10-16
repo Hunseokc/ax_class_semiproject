@@ -1,6 +1,6 @@
 """분석 API: 종목 수치 분석·매력도, 경쟁 그룹 비교·기준일=100 차트, DB 통계.
 
-Stage 6-B 2번: 응답의 reference·reference_note(listed 참고 점수). metrics의 dps·dividend_yield는 4번.
+Stage 6-B: 응답의 reference·reference_note(listed 참고 점수), metrics의 dps·dividend_yield(배당).
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ PEER_METRICS = ["return_1m", "return_3m", "return_1y", "per", "pbr", "roe", "ope
 METRIC_FIELDS = ["return_1w", "return_1m", "return_3m", "return_6m", "return_1y", "volatility_1y", "max_drawdown_1y",
                  "ma20", "ma60", "ma120", "ma120_gap", "high_52w", "low_52w", "position_52w", "volume",
                  "avg_volume_20d", "volume_ratio_20d", "per", "pbr", "eps", "bps", "market_cap", "market_cap_krw",
-                 "operating_margin", "roe", "debt_ratio", "revenue_yoy", "operating_income_yoy"]
+                 "operating_margin", "roe", "debt_ratio", "revenue_yoy", "operating_income_yoy", "dps", "dividend_yield"]
 
 
 # ------------------------------------------------------------------ 스키마 (Swagger 문서용)
