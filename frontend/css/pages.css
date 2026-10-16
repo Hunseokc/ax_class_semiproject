@@ -281,3 +281,26 @@
 }
 .page-head__actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }   /* TODO(D가 components.css로 이동) */
 .wl-card__gauge { display: flex; justify-content: center; margin-bottom: var(--sp-2); }   /* TODO(D가 components.css로 이동) */
+
+/* ── [S5-A] 표시 지표 선택 상자(metric-picker) — TODO(D가 components.css로 이동) ── */
+#market-picker-slot:not(:empty) { margin-bottom: var(--sp-4); }
+.picker { display: flex; flex-direction: column; gap: var(--sp-4); }
+.picker[hidden] { display: none; }
+.picker__head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap; }
+.picker__group { display: grid; grid-template-columns: 56px 1fr; gap: var(--sp-3); align-items: start; }
+.picker__group-label { padding-top: 6px; color: var(--text-3); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.picker__chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.picker__foot { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 0; border-radius: var(--r-pill); padding: 6px var(--sp-4);
+  background: var(--card-active); color: var(--text);
+  font-weight: var(--fw-semibold); font-size: var(--fs-sm);
+  transition: background .15s var(--ease), color .15s var(--ease);
+}
+.chip:hover:not([aria-pressed="true"]):not(:disabled) { background: #444; }
+.chip[aria-pressed="true"] { background: var(--ice); color: var(--text-on-pastel); }
+.chip:disabled { cursor: not-allowed; }
+.chip__check { display: none; }
+.chip[aria-pressed="true"] .chip__check { display: inline-flex; }
+@media (max-width: 767px) { .picker__group { grid-template-columns: 1fr; gap: var(--sp-2); } }
