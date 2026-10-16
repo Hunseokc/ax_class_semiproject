@@ -27,11 +27,6 @@ D = ["backend/app/ingest/benchmark.py", "backend/app/services/hydration.py", "ba
 # ------------------------------------------------------------------ 이후 단계 컬럼 (Stage 1 테이블)
 [[exclude]]
 table = "stocks"
-columns = ["coverage", "detail_synced_at"]
-until = "Stage 4-D 비교군 — D의 [내 구현] 1번(원본 migration 003_benchmark)에서 추가하고 이 항목을 지운다"
-
-[[exclude]]
-table = "stocks"
 columns = ["sector", "industry", "sic", "industry_checked_at"]
 until = "Stage 5-D 업종 섹터 (원본 migration 006_sector_freshness)"
 
@@ -46,10 +41,19 @@ columns = ["dps"]
 until = "Stage 5+ 배당 (원본 migration 005_listed_dividend)"
 
 [[exclude]]
-until = "Stage 4-D+ — 수집 작업 종류는 단계마다 늘어난다 (BENCHMARK·HYDRATE는 Stage 4-D 비교군, SECTORS_*는 006·007)"
+until = "Stage 5~6 — 수집 작업 종류는 단계마다 늘어난다 (BENCHMARK·HYDRATE는 Stage 4-D 003에서 추가됨, SECTORS_*는 006·007)"
 keys = [
   "constraint:ingestion_logs:CHECK (((job_type)::text = ANY ((ARRAY['PRICES'::character varying, 'INDICES'::character varying, 'FX'::character varying, 'VALUATION'::character varying, 'FINANCIALS'::character varying, 'DISCLOSURES'::character varying, 'SCORES'::character varying, 'MASTER'::character varying, 'BENCHMARK'::character varying, 'HYDRATE'::character varying, 'SECTORS_US'::character varying, 'SECTORS_KR'::character varying])::text[])))",
-  "constraint:ingestion_logs:CHECK (((job_type)::text = ANY ((ARRAY['PRICES'::character varying, 'INDICES'::character varying, 'FX'::character varying, 'VALUATION'::character varying, 'FINANCIALS'::character varying, 'DISCLOSURES'::character varying, 'SCORES'::character varying, 'MASTER'::character varying])::text[])))",
+  "constraint:ingestion_logs:CHECK (((job_type)::text = ANY ((ARRAY['PRICES'::character varying, 'INDICES'::character varying, 'FX'::character varying, 'VALUATION'::character varying, 'FINANCIALS'::character varying, 'DISCLOSURES'::character varying, 'SCORES'::character varying, 'MASTER'::character varying, 'BENCHMARK'::character varying, 'HYDRATE'::character varying])::text[])))",
+]
+
+[[exclude]]
+until = "Stage 6-B 상장 목록 — coverage 'listed'는 원본 migration 005_listed_dividend에서 추가 (Stage 4-D 003은 featured·benchmark만)"
+keys = [
+  "constraint:stocks:CHECK (((coverage)::text = ANY ((ARRAY['featured'::character varying, 'benchmark'::character varying, 'listed'::character varying])::text[])))",
+  "constraint:stocks:CHECK (((coverage)::text = ANY ((ARRAY['featured'::character varying, 'benchmark'::character varying])::text[])))",
+  "orm:Stock.__table_args__:CheckConstraint(\"coverage IN ('featured','benchmark','listed')\")",
+  "orm:Stock.__table_args__:CheckConstraint(\"coverage IN ('featured','benchmark')\")",
 ]
 
 # ------------------------------------------------------------------ 이후 단계 컬럼 (Stage 2 테이블)
