@@ -4,11 +4,12 @@
 -- 금액·가격은 모두 NUMERIC (float 사용 안 함)
 --
 -- Stage 1 테이블 10개 + Stage 2 테이블 4개 + Stage 3 테이블 2개 + Stage 4 테이블 4개. 이후 단계 테이블·컬럼은 D가 단계 시작 시 추가해 "계약"으로 배포한다.
---   Stage 2: users, watchlist_items(memo·target_price는 Stage 5), portfolios, portfolio_items (+ updated_at 트리거)
+--   Stage 2: users, watchlist_items, portfolios, portfolio_items (+ updated_at 트리거)
 --   Stage 3: financial_statements, disclosures (+ ingestion_logs.job_type에 FINANCIALS·DISCLOSURES)
 --   Stage 4: scoring_presets, scoring_weights, stock_metric_values, stock_scores, peer_group_members.is_primary
 --            (+ ingestion_logs.job_type에 SCORES) — 기존 DB는 db/migrations/001_scoring_v2 → 002_presets
 --   Stage 4-D: stocks.coverage·detail_synced_at (+ ingestion_logs.job_type에 BENCHMARK·HYDRATE) — 기존 DB는 003_benchmark
+--   Stage 5: watchlist_items.memo·target_price·updated_at (+ 트리거) — 기존 DB는 004_watchlist_memo
 --   Stage 5+ 섹터(sector·industry·sic)·listed는 그 작업 때 추가
 -- =====================================================================
 
@@ -166,14 +167,19 @@ CREATE TABLE users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 관심종목: 사용자 ↔ 종목 N:M 교차 테이블 + 정렬 순서. 메모·목표가는 Stage 5에서 컬럼 추가
+-- 관심종목: 사용자 ↔ 종목 N:M 교차 테이블 + 정렬 순서·메모·목표가
 CREATE TABLE watchlist_items (
   user_id    INT         NOT NULL REFERENCES users  ON DELETE CASCADE,
   stock_id   INT         NOT NULL REFERENCES stocks ON DELETE CASCADE,
   sort_order INT         NOT NULL DEFAULT 0,                       -- 작을수록 먼저 (PATCH /watchlist/order가 다시 매김)
   added_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  memo         VARCHAR(200),                                                  -- 사용자 메모 (migration 004)
+  target_price NUMERIC(20,4) CHECK (target_price > 0),                        -- 목표가(종목 통화)
+  updated_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),                          -- 트리거가 갱신
   PRIMARY KEY (user_id, stock_id)                                  -- 같은 종목 중복 담기 금지 → 409 DUPLICATE_WATCHLIST
 );
+CREATE TRIGGER trg_watchlist_items_updated_at BEFORE UPDATE ON watchlist_items
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- 모의 포트폴리오: "시드 안에서 담아보는 계산기 겸 장바구니" (거래 원장 아님)
 CREATE TABLE portfolios (

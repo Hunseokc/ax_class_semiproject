@@ -21,8 +21,8 @@ def create_guest(db: Session, template_user_id: int) -> int:
                      {"n": f"guest-{secrets.token_hex(8)}"}).scalar_one()
     p = {"uid": uid, "src": template_user_id}
     db.execute(text("""
-        INSERT INTO watchlist_items (user_id, stock_id, sort_order)
-        SELECT :uid, stock_id, sort_order FROM watchlist_items WHERE user_id = :src"""), p)
+        INSERT INTO watchlist_items (user_id, stock_id, sort_order, memo, target_price)
+        SELECT :uid, stock_id, sort_order, memo, target_price FROM watchlist_items WHERE user_id = :src"""), p)
     # 포트폴리오 이름은 사용자 안에서 유일하다 → 새 포트폴리오와 원본을 이름으로 짝지어 항목을 옮긴다
     db.execute(text("""
         WITH src AS (
