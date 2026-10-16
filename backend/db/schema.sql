@@ -12,7 +12,8 @@
 --   Stage 5: watchlist_items.memo·target_price·updated_at (+ 트리거) — 기존 DB는 004_watchlist_memo
 --   Stage 5-D: stocks.industry·sic·sector·industry_checked_at, peer_groups.kind, data_freshness, fundamental_bases
 --              — 기존 DB는 006_sector_freshness
---   Stage 6: listed·dps(005)·홈 위젯(007)·SECTORS_*는 그 작업 때 추가
+--   Stage 6: stocks.coverage 'listed'·valuation_snapshots.dps — 기존 DB는 005_listed_dividend
+--            sector_performance_daily·market_sentiment_daily (+ ingestion_logs.job_type에 SECTORS_US·SECTORS_KR) — 기존 DB는 007_home_widgets
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -39,8 +40,9 @@ CREATE TABLE stocks (
   cik       VARCHAR(10),                                         -- SEC CIK 10자리 (US)
   is_active BOOLEAN      NOT NULL DEFAULT true,                  -- false: 수집·점수 계산 대상에서 제외(데이터는 보존)
   -- featured: 화면에 노출하는 종목(4시간 갱신) / benchmark: 매력도 비교군(1일 갱신, 필수 데이터만 저장)
-  coverage  VARCHAR(10)  NOT NULL DEFAULT 'featured' CHECK (coverage IN ('featured','benchmark')),
-  detail_synced_at TIMESTAMPTZ,                                  -- benchmark 종목의 상세(공시·2년 일봉·5개년 재무)를 마지막으로 받은 시각
+  -- listed: 상장 보통주 목록(이름·티커만). 상세를 열 때 데이터를 받고, 매력도 유니버스에는 들어가지 않는다 (migration 005)
+  coverage  VARCHAR(10)  NOT NULL DEFAULT 'featured' CHECK (coverage IN ('featured','benchmark','listed')),
+  detail_synced_at TIMESTAMPTZ,                                  -- benchmark·listed 종목의 상세(공시·2년 일봉·5개년 재무)를 마지막으로 받은 시각
   -- 업종 (migration 006): 국내 KRX 업종명 / 미국 SEC SIC 설명. sector는 config/universe.yaml sectors 매핑 결과(점수 비교 표본의 섹터)
   industry  VARCHAR(64),
   sic       SMALLINT,                                            -- 미국 SEC SIC 코드
@@ -98,6 +100,7 @@ CREATE TABLE valuation_snapshots (
   market_cap         NUMERIC(26,0) CHECK (market_cap >= 0),      -- 종목 통화 기준
   shares_outstanding BIGINT        CHECK (shares_outstanding >= 0),
   source             VARCHAR(20)   NOT NULL CHECK (source IN ('PYKRX','YFINANCE','DERIVED')),
+  dps                NUMERIC(18,4) CHECK (dps >= 0),             -- 주당배당금(연간, 종목 통화). 0 = 무배당, NULL = 미제공 (migration 005)
   PRIMARY KEY (stock_id, as_of)
 );
 
@@ -139,12 +142,13 @@ CREATE TABLE fx_rates (
 -- ---------------------------------------------------------------------
 
 -- 수집·갱신 작업 로그. 갱신 TTL 판단(작업별 마지막 성공 시각)에도 사용
--- job_type은 Stage 4 매력도(SCORES)까지의 작업만 허용한다. BENCHMARK·HYDRATE(Stage 4-D 비교군)·SECTORS_*는 그 작업 때 추가한다.
+-- job_type은 단계마다 늘었다: SCORES(Stage 4) · BENCHMARK·HYDRATE(Stage 4-D) · SECTORS_US·SECTORS_KR(Stage 6 홈 섹터, migration 007)
 CREATE TABLE ingestion_logs (
   log_id      SERIAL PRIMARY KEY,
   source      VARCHAR(20) NOT NULL,                              -- PYKRX / YFINANCE / DART / SEC / INTERNAL
   job_type    VARCHAR(30) NOT NULL CHECK (job_type IN
-                ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','SCORES','MASTER','BENCHMARK','HYDRATE')),
+                ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','SCORES','MASTER','BENCHMARK','HYDRATE',
+                 'SECTORS_US','SECTORS_KR')),
   stock_id    INT         REFERENCES stocks ON DELETE SET NULL,  -- 종목 단위 작업일 때만
   status      VARCHAR(10) NOT NULL CHECK (status IN ('SUCCESS','FAILED','SKIPPED')),
   rows_loaded INT         NOT NULL DEFAULT 0 CHECK (rows_loaded >= 0),
@@ -347,4 +351,36 @@ CREATE TABLE fundamental_bases (
   dps_period_end     DATE,
   source             VARCHAR(20)   NOT NULL,
   updated_at         TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+
+-- =====================================================================
+-- Stage 6 — 홈 위젯 (원본 migration 007_home_widgets)
+-- =====================================================================
+
+-- 섹터 등락률 (대시보드 섹터 히트맵, 캐시 성격 — 30일 지난 행은 갱신 작업이 정리). 가중치는 코드 상수
+CREATE TABLE sector_performance_daily (
+  id          BIGSERIAL    PRIMARY KEY,
+  market      CHAR(2)      NOT NULL CHECK (market IN ('KR','US')),
+  sector_code VARCHAR(16)  NOT NULL,                        -- 미국 섹터 ETF 티커(XLK…) / KRX 섹터 지수 코드
+  sector_name VARCHAR(40)  NOT NULL,
+  trade_date  DATE         NOT NULL,
+  change_pct  NUMERIC(8,4),                                 -- 전일 대비 %(1.23 = 1.23%)
+  fetched_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  UNIQUE (market, sector_code, trade_date)
+);
+
+-- 시장 심리 지수 (StockMind 간이 계산, 0~100 높을수록 탐욕). 구성요소 점수도 0~100
+CREATE TABLE market_sentiment_daily (
+  id              BIGSERIAL     PRIMARY KEY,
+  market          CHAR(2)       NOT NULL CHECK (market IN ('KR','US')),
+  trade_date      DATE          NOT NULL,                   -- 기준 지수(KOSPI·S&P 500)의 거래일
+  score           NUMERIC(5,2)  NOT NULL CHECK (score BETWEEN 0 AND 100),
+  label           VARCHAR(10)   NOT NULL,
+  price_position  NUMERIC(5,2)  CHECK (price_position BETWEEN 0 AND 100),
+  ma_gap_score    NUMERIC(5,2)  CHECK (ma_gap_score BETWEEN 0 AND 100),
+  rsi_score       NUMERIC(5,2)  CHECK (rsi_score BETWEEN 0 AND 100),
+  vix_score       NUMERIC(5,2)  CHECK (vix_score BETWEEN 0 AND 100),   -- 미국만
+  formula_version SMALLINT      NOT NULL,
+  computed_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  UNIQUE (market, trade_date)
 );

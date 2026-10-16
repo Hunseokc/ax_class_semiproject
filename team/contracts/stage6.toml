@@ -1,0 +1,41 @@
+# Stage 6 계약 — 원본(정답지)과 다르게 두는 것의 전체 목록.
+# 검사: python team/tools/check_contract.py 6   (여기 없는 차이가 하나라도 있으면 실패)
+# 다음 단계 계약은 이 파일을 복사해 stage{N}.toml로 만들고, 그 단계에서 추가되는 항목을 지운다.
+#
+#   [[exclude]]     원본에 있지만 이번 단계에서 뺀 것(이후 단계에서 추가). table+columns를 적으면 그 컬럼을
+#                   언급하는 제약·인덱스·ORM __table_args__도 함께 빠진 것으로 본다. 나머지는 keys로 적는다.
+#   [[allow]]       의도적으로 원본과 다르게 둔 것(사유 필수). 가능하면 쓰지 않는다.
+#   [[planned]]     이번 단계에 팀원이 새로 만드는 이름 — 모듈(app.x.y) 또는 모듈:이름, settings:/query: 형식
+#   [[skip_import]] 소비자가 원본을 옮길 때 빼는 import(시작 프롬프트의 "이번 단계에서 뺄 것")
+
+stage = 6
+required_tables = ["sector_performance_daily", "market_sentiment_daily"]   # 007_home_widgets (005는 컬럼·제약만)
+
+# 이번 단계 팀원이 옮길 원본 파일 (시작 프롬프트의 [참조 원본] 중 백엔드)
+[consumers]
+B = ["backend/app/ingest/listing.py", "backend/app/ingest/__main__.py", "backend/app/services/reference_score.py",
+     "backend/app/queries/stock_search.sql", "backend/app/queries/home_volume_surge.sql", "backend/app/queries/home_attractiveness.sql",
+     "backend/app/api/stocks.py", "backend/app/api/home.py", "backend/app/api/analysis.py",
+     "backend/tests/test_listing.py", "backend/tests/test_home_api.py"]
+C = ["backend/app/services/sectors.py", "backend/app/services/sentiment.py", "backend/app/services/home_ranking.py",
+     "backend/app/api/home.py", "backend/tests/test_home_widgets.py"]
+
+# ------------------------------------------------------------------ 원본과 다르게 둔 것
+[[allow]]
+keys = ["view:v_stock_metrics"]
+reason = "원본 끝 열 dps·dividend_yield(배당)는 Stage 6-B 4번(views.sql [S6-B])에서 추가 — 그 전까지 이 두 열만큼 다르다"
+
+# ------------------------------------------------------------------ 이번 단계에 팀원이 만드는 것
+# owner는 본문을 원본대로 쓰는 사람. D가 단계 시작 때 껍데기(TODO(껍데기))를 먼저 넣는 이름도 여기 적는다.
+[[planned]]
+owner = "B"
+names = ["app.ingest.listing", "app.providers.base:Listing", "app.providers.krx:is_common_kr", "app.providers.sec:is_common_us",
+         "app.services.reference_score", "query:stock_search", "query:home_volume_surge", "query:home_attractiveness"]
+
+[[planned]]
+owner = "C"
+names = ["app.services.sectors", "app.services.sentiment", "app.services:sentiment", "app.services.home_ranking"]
+
+[[planned]]
+owner = "D"
+names = ["app.services.market_calendar"]   # 장 상태(session_status)·마지막 확정 거래일 — Stage 6-D 1번
