@@ -1,18 +1,23 @@
-"""데이터 유효기간(공시 일정 기반 + 90일 상한)·사업보고서 공시 시 만료, 국내 밸류에이션은 확정된 거래일까지만, 마이그레이션 006.
+"""데이터 유효기간(공시 일정 기반 + 90일 상한)·사업보고서 공시 시 만료, 미국 밸류에이션 = 기초값 × 종가,
+국내 밸류에이션은 확정된 거래일까지만, 업종 섹터 매핑, 마이그레이션 006.
 
-미국 밸류에이션 = 기초값 × 종가, 업종 섹터 매핑은 업종 섹터 작업(sectors.py·us_reference)과 함께 원본 test_freshness에서 옮긴다.
+배당(dps·dividend_yield)은 Stage 6 migration 005와 함께 원본 검증을 붙인다.
 """
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
 
 from app.ingest import jobs
+from app.ingest.sectors import sector_for_krx, sector_for_sic
+from app.providers.base import ValuationBase
 from app.services import freshness
 from app.services.freshness import SEOUL, financials_valid_until
-from tests.fakes import make_providers
+from tests.conftest import D
+from tests.fakes import FakeReference, make_providers
 
 T0 = datetime(2026, 1, 15, 9, 0, tzinfo=timezone.utc)
 
@@ -77,11 +82,41 @@ def test_load_financials_and_disclosures_record_freshness(engine):
     assert rows == {"financials": "SUCCESS", "disclosures": "SUCCESS"}
 
 
+# ------------------------------------------------------------------ 미국 밸류에이션 = 기초값 × 종가
+def test_us_valuation_is_derived_from_base_and_close(engine):
+    pv = make_providers(with_fundamentals=True)
+    pv.us_reference = FakeReference(bases={"AAPL": ValuationBase(shares_outstanding=1000, shares_as_of=D,
+                                                                 dps=Decimal(2), dps_period_end=D)})
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE stocks SET cik = '0000320193' WHERE stock_id = 3"))
+    jobs.load_financials(engine, pv, stock_ids=[3])               # FY 순이익 9, 자본 100 (fake 최신 FY)
+    with engine.connect() as conn:
+        v = conn.execute(text("""SELECT per, pbr, eps, bps, market_cap, source FROM valuation_snapshots
+                                 WHERE stock_id = 3 AND as_of = :d"""), {"d": D}).mappings().one()
+        base = conn.execute(text("SELECT shares_outstanding, dps FROM fundamental_bases WHERE stock_id = 3")).one()
+    # 종가 200: EPS = 9/1000, PER = 200/0.009, BPS = 100/1000, PBR = 2000, 시총 = 200×1000
+    assert v["source"] == "DERIVED" and v["eps"] == Decimal("0.009") and v["per"] == Decimal("22222.2222")
+    assert v["bps"] == Decimal("0.1") and v["pbr"] == 2000 and v["market_cap"] == 200000
+    assert tuple(base) == (1000, 2)                               # 주당 배당은 기초값에 보관(화면 반영은 Stage 6)
+    calls = pv.us_valuation.count
+    st = jobs.load_valuations(engine, pv, stock_ids=[3])          # 4시간 갱신 경로도 외부 호출 없이 계산
+    assert st == {"AAPL": "SUCCESS"} and pv.us_valuation.count == calls
+
+
 def test_kr_valuation_requests_only_confirmed_days(engine):
     pv = make_providers()
     jobs.load_valuations(engine, pv, stock_ids=[1], full=True)
     _, _, end = pv.kr_valuation.calls[-1]
     assert end <= jobs.last_closed_day("KR")                      # KRX 공표 전 당일(0 → 빈 행)은 요청하지 않는다
+
+
+# ------------------------------------------------------------------ 섹터 매핑
+def test_sector_mapping_uses_narrowest_sic_range_and_excludes_finance():
+    assert sector_for_sic(3674) == "반도체·전자" and sector_for_sic(7372) == "IT·인터넷"
+    assert sector_for_sic(3826) == "헬스케어"                     # 3800-3839(산업재)보다 좁은 범위가 이긴다
+    assert sector_for_sic(2844) == "필수소비재" and sector_for_sic(2851) == "소재"
+    assert sector_for_sic(6022) is None and sector_for_sic(None) is None   # 은행
+    assert sector_for_krx("전기·전자") == "반도체·전자" and sector_for_krx("은행") is None
 
 
 # ------------------------------------------------------------------ 마이그레이션

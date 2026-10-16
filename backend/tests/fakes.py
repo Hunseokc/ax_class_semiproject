@@ -1,7 +1,7 @@
 """테스트용 fake provider. 외부 호출 대신 고정 데이터를 돌려주고 호출 횟수·인자를 기록한다.
 
-이후 단계: 비교군 시가총액(caps·get_market_caps)·corp_code·CIK 일괄 매핑은 Stage 4, 상장 목록(FakeListing)·
-업종 분류·미국 기초값(FakeReference)·배당(dps)은 Stage 5~6.
+Stage 5-D: 업종 분류(FakeKrBulk classifications)·미국 기초값(FakeReference).
+이후 단계: 비교군 시가총액(caps·get_market_caps)·상장 목록(FakeListing)·배당(dps)은 Stage 6.
 """
 from __future__ import annotations
 
@@ -10,7 +10,8 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from app.providers.base import Bar, Disclosure, Financial, FxPoint, IndexRef, StockRef, Valuation
+from app.providers.base import (Bar, Classification, Disclosure, Financial, FxPoint, IndexRef, StockRef, Valuation,
+                                ValuationBase)
 from app.providers.factory import Providers
 
 SAFE_LAG = timedelta(days=2)    # 어느 시장 기준으로도 '오늘(미확정 봉)'이 되지 않도록 이틀 전까지만 돌려준다
@@ -114,10 +115,15 @@ class FakeKrBulk(CallLog):
     """국내 날짜별 전 종목 조회. 주말은 휴장(빈 결과). override = {티커: (종가, 등락률%)}로 수정주가 이벤트를 흉내 낸다."""
     source = "PYKRX"
 
-    def __init__(self, tickers: set[str] | None = None):
+    def __init__(self, classifications: list[Classification] | None = None, tickers: set[str] | None = None):
         super().__init__()
-        self.tickers = tickers if tickers is not None else set()
+        self.classifications = classifications or []
+        self.tickers = tickers if tickers is not None else {c.ticker for c in self.classifications}
         self.override: dict[str, tuple[Decimal, Decimal]] = {}
+
+    def get_sector_classifications(self, as_of: date) -> list[Classification]:
+        self.record("sector", as_of)
+        return list(self.classifications)
 
     def get_bars_by_date(self, day: date) -> dict[str, Bar]:
         self.record("bars", day)
@@ -152,6 +158,29 @@ class FakeUsBatch(CallLog):
             c = self.closes.get(s.ticker, Decimal(105))
             out[s.ticker] = [Bar(d, c, c + 5, c - 5, c, 1000) for d in _days(start, end) if d.weekday() < 5]
         return out
+
+
+class FakeReference(CallLog):
+    """SEC 참조 데이터: 시장 전체 발행주식수(frames), SIC, 밸류에이션 기초값."""
+    source = "SEC"
+
+    def __init__(self, shares: dict[str, int] | None = None, sic: dict[str, int] | None = None,
+                 bases: dict[str, ValuationBase] | None = None):
+        super().__init__()
+        self.shares, self.sic, self.bases = shares or {}, sic or {}, bases or {}
+
+    def get_shares_frame(self, as_of: date) -> dict[str, int]:
+        self.record("frame", as_of)
+        return dict(self.shares)
+
+    def get_sic(self, cik: str) -> tuple[int | None, str | None]:
+        self.record("sic", cik)
+        code = self.sic.get(cik)
+        return code, (f"SIC {code}" if code else None)
+
+    def get_valuation_base(self, stock: StockRef) -> ValuationBase:
+        self.record("base", stock.ticker)
+        return self.bases.get(stock.ticker, ValuationBase(shares_outstanding=None, shares_as_of=None))
 
 
 def make_providers(fx: FakeFx | None = None, *, with_fundamentals: bool = False) -> Providers:

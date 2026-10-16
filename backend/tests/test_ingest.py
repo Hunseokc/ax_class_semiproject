@@ -253,7 +253,7 @@ def test_window_limiter_caps_calls_per_minute():
 
 def test_kr_bulk_detects_adjusted_price_and_refetches(engine):
     pv = make_providers()
-    pv.kr_bulk = FakeKrBulk({"005930", "000660"})
+    pv.kr_bulk = FakeKrBulk(tickers={"005930", "000660"})
     pv.kr_bulk.override["000660"] = (Decimal(150000), Decimal(0))     # 픽스처 종가 그대로 — 정상
     pv.kr_bulk.override["005930"] = (Decimal(35000), Decimal(0))      # 1:2 분할 — 등락률 0인데 종가가 절반
     before = pv.kr_price.count
