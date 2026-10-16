@@ -1,10 +1,12 @@
 // 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
 import { PRESET_EVENT, getFx, getIndices, getPreset, getWatchlist, reorderWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset
-import { changeHtml, date, dateTime, esc, num, price, shortDate, stockUrl, usd } from "../format.js";
+import { changeHtml, date, dateTime, esc, num, pct, price, shortDate, stockUrl, usd } from "../format.js";   // [S5-A] pct
 import { color, destroyCharts, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
 import { emptyState, h, load, segmented, skeleton, toast } from "../components/ui.js";
 import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";   // [S4-A]
+import { openWatchNote } from "../components/watch-note.js";   // [S5-A]
+import { icons } from "../components/icons.js";   // [S5-A]
 
 mountSidebar("home");
 const $ = (sel) => document.querySelector(sel);
@@ -116,8 +118,13 @@ loadMarket();
 // ---------------------------------------------------------------- 내 관심종목 [S2-A]
 let watchItems = [];
 
+// [S5-A] 목표가 줄 — 괴리율(target_gap)은 서버가 계산한 값을 그대로 쓴다
+const watchTarget = (w) => (w.target_price != null
+  ? `목표 ${price(w.target_price, w.currency)} (${w.target_gap != null ? pct(w.target_gap, { sign: true, digits: 1 }) : "–"})` : "");
+
 function watchCard(w, i) {
   const us = w.currency === "USD";
+  const target = watchTarget(w);   // [S5-A]
   const el = h(`<li class="wl-card">
       <a class="wl-card__link card--link" href="${stockUrl(w.market, w.ticker)}?preset=${encodeURIComponent(getPreset())}" aria-label="${esc(w.name)} 상세 보기">
         <div class="wl-card__gauge">${scoreGauge(w.score)}</div>
@@ -126,12 +133,16 @@ function watchCard(w, i) {
         <div class="subtle">${esc(w.ticker)} · ${shortDate(w.as_of)} 종가</div>
         <div class="wl-card__price num">${price(w.close, w.currency)}</div>
         <div class="wl-card__chg num">${changeHtml(w.change_rate, w.country)}</div>
+        ${target ? `<div class="subtle num">${esc(target)}</div>` : ""}
+        ${w.memo ? `<div class="subtle" title="${esc(w.memo)}">${esc(w.memo)}</div>` : ""}
       </a>
       <div class="wl-card__move">
+        <button class="btn btn--sm" type="button" data-edit aria-label="${esc(w.name)} 메모·목표가 편집" title="메모·목표가">${icons.edit}</button>
         <button class="btn btn--sm" type="button" data-dir="-1" aria-label="${esc(w.name)} 위로" ${i === 0 ? "disabled" : ""}>▲</button>
         <button class="btn btn--sm" type="button" data-dir="1" aria-label="${esc(w.name)} 아래로" ${i === watchItems.length - 1 ? "disabled" : ""}>▼</button>
       </div>
     </li>`);
+  el.querySelector("[data-edit]").addEventListener("click", () => openWatchNote(w, () => loadWatchlist()));   // [S5-A]
   el.querySelectorAll("[data-dir]").forEach((b) => b.addEventListener("click", () => moveWatch(i, Number(b.dataset.dir))));
   return el;
 }
