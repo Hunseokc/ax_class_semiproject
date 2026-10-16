@@ -5,8 +5,8 @@
 
 Stage 1은 일봉·지수·환율만 둔다. 밸류에이션·재무·공시·대량 조회 인터페이스는 Stage 3에서 추가했다.
 Bar·FxPoint는 Stage 2에서 preprocess.py로부터 이곳으로 옮겼다(서비스·provider가 전처리 모듈에 기대지 않도록).
-이후 단계: 배당(Valuation.dps, Stage 5+), 업종 분류·상장 목록·미국 기초값(Classification·Listing·ValuationBase와
-그 provider, Stage 4~5).
+Stage 5-D: 업종 분류(Classification)·미국 기초값(ValuationBase)과 ReferenceDataProvider.
+이후 단계: 배당(Valuation.dps)·상장 목록(Listing·ListingProvider)은 Stage 6.
 """
 from __future__ import annotations
 
@@ -17,7 +17,8 @@ from typing import Protocol
 
 __all__ = ["Bar", "FxPoint", "Valuation", "Financial", "Disclosure", "StockRef", "IndexRef",
            "PriceProvider", "IndexProvider", "FxProvider", "ValuationProvider", "FinancialProvider",
-           "DisclosureProvider", "MarketBulkProvider", "BatchPriceProvider", "ProviderError"]
+           "DisclosureProvider", "MarketBulkProvider", "BatchPriceProvider", "ProviderError",
+           "Classification", "ValuationBase", "ReferenceDataProvider"]
 
 
 # ------------------------------------------------------------------ 레코드
@@ -63,6 +64,24 @@ class Financial:
     data_source: str = ""
     accounting_std: str | None = None
     notes: list[str] = field(default_factory=list)   # 대체 계정 사용 등 추적 정보
+
+
+# ── [S5-D] 업종 분류·미국 밸류에이션 기초값 ──
+@dataclass(frozen=True)
+class Classification:
+    """국내 업종 분류 1행 (KRX 업종명 + 시가총액) — 비교군 선정용."""
+    ticker: str
+    industry: str
+    market_cap: Decimal | None
+
+
+@dataclass(frozen=True)
+class ValuationBase:
+    """미국 밸류에이션 기초값: PER·PBR·시가총액·배당수익률을 '기초값 × 종가'로 계산할 때 쓴다."""
+    shares_outstanding: int | None
+    shares_as_of: date | None
+    dps: Decimal | None = None
+    dps_period_end: date | None = None
 
 
 @dataclass
@@ -135,12 +154,22 @@ class MarketBulkProvider(Protocol):
     source: str
     def get_bars_by_date(self, day: date) -> dict[str, Bar]: ...
     def get_valuations_by_date(self, day: date) -> dict[str, Valuation]: ...
+    def get_sector_classifications(self, as_of: date) -> list[Classification]: ...
 
 
 class BatchPriceProvider(Protocol):
     """미국: 여러 종목 일봉을 한 번에(묶음 다운로드)."""
     source: str
     def get_daily_prices_batch(self, stocks: list[StockRef], start: date, end: date) -> dict[str, list[Bar]]: ...
+
+
+# ── [S5-D] 미국 참조 데이터 ──
+class ReferenceDataProvider(Protocol):
+    """미국 참조 데이터(SEC): 시장 전체 발행주식수, 업종 SIC, 밸류에이션 기초값."""
+    source: str
+    def get_shares_frame(self, as_of: date) -> dict[str, int]: ...
+    def get_sic(self, cik: str) -> tuple[int | None, str | None]: ...
+    def get_valuation_base(self, stock: StockRef) -> ValuationBase: ...
 
 
 class ProviderError(Exception):

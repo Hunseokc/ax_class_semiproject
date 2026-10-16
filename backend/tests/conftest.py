@@ -30,6 +30,7 @@ from app.api import deps
 from app.core.config import get_settings
 from app.ingest import jobs
 from app.main import app
+from app.services.hydration import ON_DEMAND
 from tests.fakes import FakeFx, make_providers
 
 # FK 자식 → 부모 순서(TRUNCATE ... CASCADE라 순서는 중요하지 않지만 읽기 쉽게)
@@ -104,10 +105,30 @@ def providers(fake_fx):
     return make_providers(fake_fx)
 
 
+class RecordingHydrator:
+    """상세 데이터 수집 요청만 기록한다(실제 수집은 test_benchmark에서 hydrate를 직접 검증)."""
+
+    def __init__(self):
+        self.requests: list[int] = []
+
+    def request(self, stock_id, coverage, synced_at):
+        if coverage not in ON_DEMAND:
+            return "ready"
+        self.requests.append(stock_id)
+        return "loading"
+
+
 @pytest.fixture
-def client(engine, providers):
+def hydrator():
+    return RecordingHydrator()
+
+
+@pytest.fixture
+def client(engine, providers, hydrator):
     app.dependency_overrides[deps.get_engine_dep] = lambda: engine
     app.dependency_overrides[deps.get_providers] = lambda: providers
+    app.dependency_overrides[deps.get_scorer] = lambda: None
+    app.dependency_overrides[deps.get_hydrator] = lambda: hydrator
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

@@ -128,6 +128,7 @@
 [내 구현]
 1. backend/app/services/market_calendar.py — exchange-calendars 기반 장 상태, /market/indices 응답에 추가
 2. refresh에 섹터·심리 지수 연결(C 요청), sample.py export_sample, ingest/smoke.py
+2-1. B의 상장 목록(listing) 머지 후 benchmark 섹터 계층: `select_benchmark`·`classify_kr`·`classify_us`·`run_benchmark`의 sync_listing을 원본으로 교체(Stage 5에서 미룸 — 원본 선정이 listed를 후보로 씀) → benchmark --reselect → scores
 3. 문서: docs 01~09·ASSUMPTIONS·explain_result·smoke_test_result·07 테스트 결과서·08 최종 결과보고서, README, 스크린샷 재촬영
 4. 최종 확인: diff -r --exclude=.git ../ax_class_semiproject . → 차이 0(또는 문서 표현 차이만)
 5. 새 환경에서 README "5분 시작하기" 그대로 재현 → stage6 → main, 태그 v6.0

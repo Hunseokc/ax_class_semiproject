@@ -57,6 +57,7 @@ class Universe:
     fx_yf_symbol: str
     benchmark: dict                 # [S4-D] 비교군 설정 (per_sector·price_days·fin_years·reselect_days …)
     benchmark_candidates: dict      # [S4-D] 경쟁 그룹 → 국가 → 후보 [{market, ticker, name}]
+    sectors: list                   # [S5-D] 점수 비교 표본의 섹터 [{name, krx, sic}] (app/ingest/sectors.py)
 
 
 @lru_cache
@@ -73,6 +74,7 @@ def load_universe() -> Universe:
         fx_yf_symbol=raw["fx"]["usd_krw"]["yf_symbol"],
         benchmark=raw["benchmark"],
         benchmark_candidates=raw["benchmark_candidates"],
+        sectors=raw["sectors"],
     )
 
 

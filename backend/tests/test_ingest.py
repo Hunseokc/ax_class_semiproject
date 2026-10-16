@@ -222,6 +222,88 @@ def test_yahoo_short_range_without_prices_is_holiday_not_failure(monkeypatch):
         yahoo._history("AAPL", holiday - timedelta(days=30), holiday, "America/New_York")
 
 
+# ── [S3-C] 호출 한도·대량 일봉·밸류에이션 ──
+# 원본 test_benchmark.py·test_freshness.py 중 Stage 3 코드만 검사하는 테스트. 비교군 선정(load_benchmark) 대신 conftest 픽스처
+# (4종목, D까지 3일치 일봉)를 쓰고, 픽스처 종가와 같은 값을 fake에 넣어 수정주가 이벤트로 오인하지 않게 한다.
+from app.providers.http import WindowLimiter
+from tests.conftest import D
+from tests.fakes import FakeKrBulk, FakeUsBatch
+
+TODAY = date.today()
+SEOUL = ZoneInfo("Asia/Seoul")
+
+
+def test_window_limiter_caps_calls_per_minute():
+    now = [0.0]
+    waits = []
+
+    def sleep(sec):
+        waits.append(sec)
+        now[0] += sec
+
+    lim = WindowLimiter(90, 60.0, clock=lambda: now[0], sleep=sleep)
+    for i in range(90):
+        now[0] = i * 0.1                                               # 9초 동안 90회
+        lim.wait()
+    assert waits == []
+    lim.wait()                                                         # 91번째 → 첫 호출이 60초 창을 벗어날 때까지
+    assert waits == [pytest.approx(60.0 - 8.9)]
+    assert len([t for t in lim._calls if t > now[0] - 60]) <= 90
+
+
+def test_kr_bulk_detects_adjusted_price_and_refetches(engine):
+    pv = make_providers()
+    pv.kr_bulk = FakeKrBulk(tickers={"005930", "000660"})
+    pv.kr_bulk.override["000660"] = (Decimal(150000), Decimal(0))     # 픽스처 종가 그대로 — 정상
+    pv.kr_bulk.override["005930"] = (Decimal(35000), Decimal(0))      # 1:2 분할 — 등락률 0인데 종가가 절반
+    before = pv.kr_price.count
+    end = TODAY - timedelta(days=1)                                  # 오늘 봉은 장 마감 전이면 격리되므로 어제까지
+    while end.weekday() >= 5:
+        end -= timedelta(days=1)
+    st = jobs.load_prices_bulk(engine, pv, [1, 2], history_days=400, today=TODAY, end={"KR": end})
+    bars_calls = [c for c in pv.kr_bulk.calls if c[0] == "bars"]
+    assert bars_calls and all(D < c[1] <= end for c in bars_calls)   # 저장된 마지막 날 다음부터, 날짜당 1회
+    refetch = pv.kr_price.calls[before:]
+    assert [(c[0], c[1]) for c in refetch] == [("005930", TODAY - timedelta(days=400))]   # 분할 종목만 수정주가로 전체
+    assert st["005930"] == "SUCCESS" and st["000660"] == "SUCCESS"
+    n = scalar(engine, "SELECT count(*) FROM daily_prices WHERE stock_id = 2 AND trade_date > :d", d=D)
+    assert n == sum(1 for c in bars_calls if c[1].weekday() < 5)                    # 날짜별 조회로 채움
+
+
+def test_us_batch_overlap_detects_split_and_refetches(engine):
+    d0 = D                                                           # 묶음 fake는 평일만 준다 → 마지막 저장일을 평일로
+    while d0.weekday() >= 5:
+        d0 -= timedelta(days=1)
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM daily_prices WHERE stock_id IN (3, 4) AND trade_date > :d"), {"d": d0})
+    close = {s: scalar(engine, "SELECT close FROM daily_prices WHERE stock_id = :s AND trade_date = :d", s=s, d=d0)
+             for s in (3, 4)}
+    pv = make_providers()
+    pv.us_batch_price = FakeUsBatch()
+    pv.us_batch_price.closes["NVDA"] = close[4]                       # 마지막 저장일 종가 그대로 — 정상
+    pv.us_batch_price.closes["AAPL"] = close[3] / 2                   # 마지막 저장일 값이 바뀜 = 분할로 과거 수정
+    before = pv.us_price.count
+    jobs.load_prices_bulk(engine, pv, [3, 4], history_days=400, today=TODAY, end={"US": TODAY})
+    assert [(c[0], c[1]) for c in pv.us_price.calls[before:]] == [("AAPL", TODAY - timedelta(days=400))]
+    last = pv.us_batch_price.calls[-1]
+    assert set(last[0]) == {"AAPL", "NVDA"} and last[1] == d0           # 마지막 저장일부터 겹쳐 받음
+
+
+def test_kr_valuation_requests_only_confirmed_days(engine):
+    pv = make_providers()
+    jobs.load_valuations(engine, pv, stock_ids=[1], full=True)
+    _, _, end = pv.kr_valuation.calls[-1]
+    assert end <= jobs.last_closed_day("KR")                      # KRX 공표 전 당일(0 → 빈 행)은 요청하지 않는다
+
+
+def test_last_closed_day_waits_for_publication_and_skips_weekend():
+    mon_morning = datetime(2026, 10, 12, 8, 0, tzinfo=SEOUL)       # 월요일 오전 → 금요일
+    mon_evening = datetime(2026, 10, 12, 19, 0, tzinfo=SEOUL)
+    assert jobs.last_closed_day("KR", mon_morning) == date(2026, 10, 9)
+    assert jobs.last_closed_day("KR", mon_evening) == date(2026, 10, 12)
+    assert jobs.last_closed_day("US", mon_evening) == date(2026, 10, 9)   # 뉴욕은 아직 월요일 오전
+
+
 # ── [S3-B] 재무·공시 ──
 from app.providers.base import Disclosure, Financial
 from app.providers.dart import DartClient

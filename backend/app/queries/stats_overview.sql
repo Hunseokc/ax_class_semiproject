@@ -1,7 +1,6 @@
 -- 데이터 개요: 테이블별 행 수·데이터 기간·마지막 갱신
--- TODO(연결): Stage 5-D의 peer_groups.kind가 생기면 peer_groups는 테마 그룹(kind = 'theme')만 센다. 지금은 전체 그룹.
 SELECT (SELECT COUNT(*) FROM stocks)                                     AS stocks,
-       (SELECT COUNT(*) FROM peer_groups)                                AS peer_groups,
+       (SELECT COUNT(*) FROM peer_groups WHERE kind = 'theme')           AS peer_groups,
        (SELECT COUNT(*) FROM daily_prices)                               AS daily_prices,
        (SELECT MIN(trade_date) FROM daily_prices)                        AS price_from,
        (SELECT MAX(trade_date) FROM daily_prices)                        AS price_to,
