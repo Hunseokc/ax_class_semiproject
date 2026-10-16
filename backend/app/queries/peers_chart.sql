@@ -1,9 +1,8 @@
 -- 경쟁 그룹 기준일=100 가격 추이: 구간 첫 거래일 종가를 100으로 환산
 -- 구간 끝 = 그룹 구성원 중 가장 최근 거래일, 시작 = 끝 − months 파라미터 개월
--- TODO(연결): D의 stocks.coverage(003_benchmark)가 생기면 구성원을 노출 종목(featured)과 대상 종목(stock_id 파라미터)으로 좁힌다. 지금은 그룹 구성원 전체.
 WITH members AS (
-    SELECT gm.stock_id FROM peer_group_members gm
-    WHERE gm.group_id = :group_id
+    SELECT gm.stock_id FROM peer_group_members gm JOIN stocks st ON st.stock_id = gm.stock_id
+    WHERE gm.group_id = :group_id AND (st.coverage = 'featured' OR st.stock_id = :stock_id)   -- 노출 종목 + 대상
 ),
 bounds AS (
     SELECT MAX(d.trade_date) AS end_date

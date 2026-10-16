@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -14,6 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.api import analysis, deps, health, market, portfolios, stocks, watchlist
 from app.core.config import FRONTEND_DIR, get_settings
@@ -55,6 +57,12 @@ app = FastAPI(
     description="국내·미국 주식 일봉·지수·환율·재무·공시 기반 조회·분석 API. 일봉 기준이며 투자 권유가 아닙니다.",
 )
 install_error_handlers(app)
+
+# ── [S4-D] 게스트 세션 ── (GUEST_SESSION_ENABLED일 때만 deps.get_current_user_id가 쿠키를 읽고 쓴다)
+if get_settings().guest_session_enabled and not get_settings().session_secret:
+    raise RuntimeError("GUEST_SESSION_ENABLED=true면 SESSION_SECRET이 필요합니다")
+app.add_middleware(SessionMiddleware, secret_key=get_settings().session_secret or secrets.token_hex(32),
+                   session_cookie="stockmind_session", max_age=365 * 24 * 3600, same_site="lax", https_only=True)
 
 
 @app.middleware("http")
