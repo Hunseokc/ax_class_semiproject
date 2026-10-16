@@ -6,13 +6,14 @@ SEC 권고(초당 10건 이하)보다 보수적으로 초당 약 4건으로 제�
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime
 from decimal import Decimal
 
 import httpx
 
 from app.core.config import get_settings
-from app.providers.base import Disclosure, Financial, ProviderError, StockRef, ValuationBase
+from app.providers.base import Disclosure, Financial, Listing, ProviderError, StockRef, ValuationBase
 from app.providers.convert import to_dec
 from app.providers.http import Throttle, call_with_retry
 
@@ -34,6 +35,18 @@ CONCEPTS: list[tuple[str, tuple[str, ...], bool]] = [
     ("total_debt", ("Liabilities",), False),
 ]
 ANNUAL_FORMS = {"10-K", "10-K/A"}
+
+# 상장 보통주 목록 필터 (company_tickers_exchange.json)
+EXCHANGES = {"Nasdaq": "NASDAQ", "NYSE": "NYSE"}               # OTC·CBOE 등은 제외
+COMMON_TICKER = re.compile(r"^[A-Z]{1,5}(-[A-OQ-Z])?$")         # BRK-B·MOG-A 허용, 우선주(-P·-PA)·워런트(-WT)·유닛(-UN) 제외
+NASDAQ_5TH_NON_COMMON = set("MNOPQRTUVWXZ")                     # 나스닥 5번째 글자: 우선주·권리·유닛·워런트 등(L·Y·A·B는 보통주)
+NON_COMMON_NAME = re.compile(r"\bETF\b|\bETN\b|\bFUND\b|\bACQUISITION\b", re.I)   # ETF·펀드·스팩
+
+
+def is_common_us(ticker: str, name: str) -> bool:
+    if not COMMON_TICKER.match(ticker) or NON_COMMON_NAME.search(name):
+        return False
+    return not (len(ticker) == 5 and ticker[-1] in NASDAQ_5TH_NON_COMMON)
 
 
 class SecClient:
@@ -77,6 +90,20 @@ class SecClient:
             r.raise_for_status()
             return r.json()
         return call_with_retry(call, throttle=_throttle, what=f"SEC frame {concept} {period}").get("data", [])
+
+    def get_listed_stocks(self, as_of: date) -> list[Listing]:
+        """NASDAQ·NYSE 보통주 목록(SEC 등록 회사, CIK 포함). as_of는 인터페이스 공통 인자(현재 목록만 제공)."""
+        d = self._json("https://www.sec.gov/files/company_tickers_exchange.json")
+        idx = {f: i for i, f in enumerate(d["fields"])}
+        out, seen = [], set()
+        for r in d["data"]:
+            ticker, name, ex = r[idx["ticker"]], r[idx["name"]], r[idx["exchange"]]
+            if ex not in EXCHANGES or not ticker or not name or ticker in seen or not is_common_us(ticker, name):
+                continue
+            seen.add(ticker)
+            out.append(Listing(market=EXCHANGES[ex], ticker=ticker, name=name, name_en=name,
+                               cik=str(r[idx["cik"]]).zfill(10)))
+        return out
 
     def get_shares_frame(self, as_of: date) -> dict[str, int]:
         """CIK → 발행주식수. 끝난 분기부터 3개 분기를 거슬러 가며 표지 기재값(dei)으로 채우고,
