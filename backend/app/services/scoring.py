@@ -7,7 +7,7 @@
 정의·근거는 docs/09_매력도_점수_정의서.md.
 
 TODO(껍데기): C — 계산 단계. 이름·인자·반환 타입은 원본 그대로이고 본문만 비어 있다.
-  - normalize·aggregate·compute_scores: 계산 2·3단계 (지금은 아무것도 쓰지 않고 0 반환)
+  - aggregate·compute_scores: 계산 3단계 (지금은 아무것도 쓰지 않고 0 반환)
   그동안 화면·API용 점수는 seed-demo가 넣는 시드 행(app/ingest/demo.py)이 대신한다.
 """
 from __future__ import annotations
@@ -118,6 +118,8 @@ def insert_metric_values(conn: Connection, as_of: date) -> dict[int, list[str]]:
 
 def normalize(conn: Connection, as_of: date, k: float) -> None:
     """2단계. z_raw(국가 내 로버스트 Z) → z_adj(섹터 중립화)."""
+    conn.execute(sql("score_zscore"), {"as_of": as_of, "negatives": NEGATIVE_METRICS})
+    conn.execute(sql("score_neutralize"), {"as_of": as_of, "k": k})
 
 
 def aggregate(conn: Connection, as_of: date, notes: dict[int, list[str]] | None = None) -> int:
