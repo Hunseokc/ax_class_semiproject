@@ -1,4 +1,4 @@
-# API 서버 이미지(빌드 컨텍스트는 저장소 루트: docker build -f backend/Dockerfile .): FastAPI(uvicorn). 적재 CLI·스케줄러는 이후 단계에서 추가
+# API 서버 이미지(빌드 컨텍스트는 저장소 루트: docker build -f backend/Dockerfile .): FastAPI(uvicorn) + 앱 안 스케줄러 + 적재 CLI(python -m app.ingest)
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
