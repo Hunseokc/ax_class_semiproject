@@ -33,7 +33,7 @@
 파트 1 (1~2번 설정·프리셋) → 볼 것: load_config 결과로 지표 수·프리셋 4개·프리셋별 가중치 합(=1) 출력. 가중치 합이 틀린 설정을 메모리에서만 만들어 validate_presets가 어떤 에러를 내는지 1번. sync_presets 후 psql로 scoring_presets 4행·scoring_weights 행 수.
 파트 2 (3번 지표값 저장) → 볼 것: insert_metric_values 실행 → psql로 005930의 stock_metric_values(지표 이름·원값) 출력, v_stock_metrics의 같은 값과 나란히.
 파트 3 (4~5번 로버스트 Z·섹터 중립화) → 볼 것: 005930 PER 하나를 골라 원값 → Z(중앙값·MAD로 계산한 숫자를 손계산으로도 한 번) → 클리핑 → 중립화 후 값까지 한 줄씩 따라가기. 그룹 평균에 같은 국가 종목만 들어간 것을 psql로 보여 준다.
-파트 4 (6~7번 집계·CLI) → 볼 것: `python -m app.ingest scores` → stock_scores 행 수, `explain` → 삼성전자 팩터별 기여도 읽어 주기. 프리셋(성장·가치)마다 점수가 달라지는 것을 표로 비교.
+파트 4 (6~7번 집계·CLI) → 볼 것: `python -m app.ingest scores` → stock_scores 행 수, psql로 삼성전자 팩터별 점수(value·quality·growth·safety·momentum_score) 읽어 주기, `explain` → docs/explain_result.md(인덱스 전후 실행 계획 비교) 생성. 프리셋(성장·가치)마다 점수가 달라지는 것을 표로 비교.
 파트 5 (8~9번 테스트·정의서) → pytest -v 번역. 정의서는 파트 1~4에서 본 숫자가 문서의 어느 식에 해당하는지 짝지어 준다.
 
 [건드리지 않을 파일] views.sql(B), 마이그레이션·schema(D), refresh.py(D — SCORES 연결은 요청 메모), frontend(A)
@@ -43,8 +43,21 @@
 [이번 단계에서 뺄 것] 비교군 포함 표본 분기(coverage)는 D와 합의한 최소 형태만, 업종 섹터(kind='sector')·fundamental_bases·reference_score(listed)
 [완료 기준]
   docker compose run --rm api python -m app.ingest scores
-  docker compose run --rm api python -m app.ingest explain   → 삼성전자 팩터별 기여도 출력
+  docker compose run --rm api python -m app.ingest explain   → docs/explain_result.md 생성 (인덱스 전후 실행 계획 비교)
   pytest -q tests/test_scoring.py
+[테스트 — CLAUDE.md 3-3, 권유만]  psql = docker compose exec db psql -U stock -d stockdb -c "…"
+1 docker compose run --rm api python -m app.ingest scores
+  → "stock_scores rows: 숫자"        왜? 종목 × 성향 4개만큼 점수가 생김
+2 같은 명령 한 번 더
+  → 1번과 같은 숫자                 왜? 같은 날짜는 지우고 다시 넣어서 두 번 해도 늘어나지 않음
+3 psql "SELECT p.code, SUM(w.weight) FROM scoring_weights w JOIN scoring_presets p USING (preset_id) GROUP BY p.code"
+  → 4줄, 전부 1.000                 왜? 성향마다 중요도를 나눠 가져서 합이 1
+4 psql "SELECT MIN(score), MAX(score) FROM stock_scores"
+  → 0 이상, 100 이하                왜? 마지막에 0~100으로 바꾸는 식(Φ)이라 밖으로 못 나감
+5 psql "SELECT p.code, sc.score FROM stock_scores sc JOIN scoring_presets p USING (preset_id) JOIN stocks s USING (stock_id) WHERE s.ticker = '005930' AND sc.as_of = (SELECT MAX(as_of) FROM stock_scores) ORDER BY p.sort_order"
+  → 4줄, 점수가 서로 다름            왜? 성향마다 중요하게 보는 게 달라서
+6 psql "SELECT COUNT(*) FROM stock_scores WHERE score IS NULL"
+  → 0이 아니어도 정상               왜? 쓸 수 있는 팩터가 3개 미만이면 억지로 점수를 매기지 않음
 
 [선행 작업] 없음 — B의 v_stock_metrics는 D의 껍데기(docs/05 컬럼, PER·PBR 등 일부 값만 채움)가 stage4에 있어 ✅ 그대로 쓴다. 2·6번 scoring.py의 compute_scores 등은 D의 껍데기가 들어 있으니 본문을 원본대로 교체한다. B가 실제 VIEW를 머지하면 같은 코드 그대로 모든 지표 값이 들어온다.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
@@ -67,9 +80,9 @@
 2. backend/app/queries/analysis.sql — v_stock_metrics + stock_scores, 국가 내 RANK·PERCENT_RANK, 주 그룹 평균(peer_average)
 3. backend/app/api/deps.py — [S4-B] get_preset(없으면 422 UNKNOWN_PRESET)
 4. backend/app/api/analysis.py — router: /stocks/{m}/{t}/analysis, /peers, /peers/chart / scoring_router: /scoring/presets
-   + schemas [S4-B] 구역에 이 응답 모델, main.py [S4-B]에 router·scoring_router 등록 (등록해야 바로 curl로 돌려 볼 수 있다)
-5. backend/app/queries/peers.sql(그룹 내 RANK·AVG, 1인 그룹 처리), peers_chart.sql(기준일=100, 합집합 날짜 + 휴장 null) (+ 응답 모델)
-6. backend/app/api/analysis.py stats_router + queries: stats_overview, stats_market_valuation(+stats_market_excluded, HAVING min_samples), stats_peer_group_valuation, stats_disclosure_frequency (+ 응답 모델, main.py에 stats_router 등록)
+   (응답 모델은 원본처럼 analysis.py 안에 있다. 라우터 3개는 D가 main.py [S4]에 등록해 두었다 — 껍데기 본문을 원본대로 교체)
+5. backend/app/queries/peers.sql(그룹 내 RANK·AVG, 1인 그룹 처리), peers_chart.sql(기준일=100, 합집합 날짜 + 휴장 null)
+6. backend/app/api/analysis.py stats_router + queries: stats_overview, stats_market_valuation(+stats_market_excluded, HAVING min_samples), stats_peer_group_valuation, stats_disclosure_frequency
 7. 기존 응답에 매력도 추가 — [S4-B] 구역: stock_list.sql·stock_detail.sql·watchlist.sql에 preset별 score JOIN, /stocks·/watchlist에 preset 파라미터 (포트폴리오 summary 가중 매력도는 C에게 요청 메모)
 8. schemas [S4-B] 구역 남은 정리(공통 모델·필드 설명)
 9. backend/tests/test_analysis.py
@@ -91,6 +104,19 @@
   curl "localhost:8000/api/v1/stocks/KOSPI/005930/analysis?preset=growth" → 원본 3-3 예시 구조
   curl localhost:8000/api/v1/stocks/KOSPI/005930/peers/chart?range=1m → 휴장일 null 포함
   pytest -q tests/test_analysis.py
+[테스트 — CLAUDE.md 3-3, 권유만]  http://localhost:8000/docs → 해당 줄 → [Try it out] → 값 넣기 → [Execute]
+1 GET /stocks/{market}/{ticker}/analysis   KOSPI / 005930 / preset: growth
+  → 200, attractiveness.preset.code "growth", attractiveness.score 0~100   왜? 성장형 기준 점수
+2 같은 곳, preset 칸 비우기
+  → 200, attractiveness.preset.code "balanced"   왜? 안 고르면 균형형이 기본값
+3 같은 곳, preset: hello
+  → 422 UNKNOWN_PRESET, detail.presets에 쓸 수 있는 이름 4개   왜? 없는 성향은 막고 고를 수 있는 걸 알려 줌
+4 같은 곳, ticker: 999999
+  → 404 STOCK_NOT_FOUND             왜? 없는 종목
+5 GET /stocks/{market}/{ticker}/peers/chart   KOSPI / 005930 / range: 1m
+  → 200, series마다 values의 첫 숫자가 100 (null은 그 나라가 쉰 날)   왜? 시작일을 100으로 맞춰야 비교가 공평
+6 GET /statistics/market-valuation   min_samples: 25
+  → 200, excluded에 종목 수가 25개보다 적은 시장이 들어감   왜? 종목이 너무 적으면 평균이 믿을 만하지 않아서 빼 둠
 
 [선행 작업] 없음 — ①은 파트가 끝나는 대로 넘긴다(빨리 머지될수록 C가 실제 지표 값으로 확인할 수 있다). ②는 ① 머지와 상관없이 origin/stage4에서 갈라져 시작한다(VIEW 껍데기가 stage4에 있다). C의 stock_scores는 D의 시드 행이 있어 ✅ 그대로 쓰고, 테스트는 픽스처로 행을 직접 넣는다. 4~6번 analysis.py 엔드포인트는 D의 껍데기가 들어 있으니 본문을 원본대로 교체한다.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).
@@ -126,6 +152,7 @@
 [이번 단계에서 뺄 것] 비교군 '상세 데이터 수집 중' 배지(D 작업 후 Stage 4 통합 때 D가 요청하면 추가), 월별 요약, 순위표, 상장 목록 참고 점수 안내
 [완료 기준]
   프리셋 바꾸면 상세·리스트·홈 점수가 같이 바뀜 / 1인 그룹은 '비교 대상 없음' / 점수 없는 종목은 빈 상태 / 콘솔 에러 0
+[둘러보기 — CLAUDE.md 3-3, 권유만] 대표 화면: 종목 상세(/stocks/KOSPI/005930)의 매력도·분석 영역
 
 [선행 작업] 없음 — B의 analysis·peers·presets API는 D의 껍데기가 stage4에 있어 ✅ 그대로 쓴다. MOCK을 따로 만들지 않는다. 껍데기 동안은 docs/06 3-3 예시 값이라 프리셋을 바꿔도 점수가 같다 — Network 탭에서 preset 값이 바뀐 요청이 나가는 것으로 확인하고, B가 본문을 교체하면 같은 코드 그대로 점수가 바뀐다.
 [시작] ① CLAUDE.md 10절대로 최신 코드부터 받는다: git fetch → [브랜치]로 이동(없으면 origin/stage4에서 새로 만듦) → origin/stage4 합치기. 이동한 뒤 CLAUDE.md를 다시 읽고 그 규칙을 따른다(설명은 9절 입문자 기준, 다른 팀원 파일이 없으면 11절대로 묻지 않고 진행).

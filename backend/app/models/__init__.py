@@ -1,7 +1,9 @@
 """SQLAlchemy ORM 모델 — db/schema.sql과 1:1 매핑 (DDL의 원본은 schema.sql).
 
 Stage 1 테이블 10개 + Stage 2 테이블 4개(users·watchlist_items·portfolios·portfolio_items)
-+ Stage 3 테이블 2개(financial_statements·disclosures). 이후 단계 테이블은 D가 단계 시작 시 schema.sql과 함께 추가한다.
++ Stage 3 테이블 2개(financial_statements·disclosures)
++ Stage 4 테이블 4개(scoring_presets·scoring_weights·stock_metric_values·stock_scores)
++ Stage 5-D 테이블 2개(data_freshness·fundamental_bases). 이후 단계 테이블은 D가 단계 시작 시 schema.sql과 함께 추가한다.
 """
 from __future__ import annotations
 
@@ -10,6 +12,7 @@ from decimal import Decimal
 
 from sqlalchemy import (CHAR, BigInteger, Boolean, CheckConstraint, Computed, Date, DateTime, ForeignKey, Integer,
                         Numeric, SmallInteger, String, Text, UniqueConstraint, func)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -39,8 +42,14 @@ class Stock(Base):
     corp_code: Mapped[str | None] = mapped_column(String(16))
     cik: Mapped[str | None] = mapped_column(String(10))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    coverage: Mapped[str] = mapped_column(String(10), server_default="featured")
+    detail_synced_at: Mapped[datetime | None] = mapped_column()
+    industry: Mapped[str | None] = mapped_column(String(64))
+    sic: Mapped[int | None] = mapped_column(SmallInteger)
+    sector: Mapped[str | None] = mapped_column(String(32))
+    industry_checked_at: Mapped[datetime | None] = mapped_column()
     market: Mapped[Market] = relationship(lazy="joined")
-    __table_args__ = (UniqueConstraint("market_id", "ticker"),)
+    __table_args__ = (UniqueConstraint("market_id", "ticker"), CheckConstraint("coverage IN ('featured','benchmark')"))
 
 
 class PeerGroup(Base):
@@ -48,12 +57,15 @@ class PeerGroup(Base):
     group_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True)
     description: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(10), server_default="theme")
+    __table_args__ = (CheckConstraint("kind IN ('theme','sector')"),)
 
 
 class PeerGroupMember(Base):
     __tablename__ = "peer_group_members"
     group_id: Mapped[int] = mapped_column(ForeignKey("peer_groups.group_id", ondelete="CASCADE"), primary_key=True)
     stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
 
 # ------------------------------------------------------------------ 종목별 사실
@@ -141,7 +153,11 @@ class WatchlistItem(Base):
     stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
     sort_order: Mapped[int] = mapped_column(Integer, server_default="0")
     added_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    memo: Mapped[str | None] = mapped_column(String(200))
+    target_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))          # 종목 통화
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())       # 트리거가 갱신
     stock: Mapped[Stock] = relationship(lazy="joined")
+    __table_args__ = (CheckConstraint("target_price > 0"),)
 
 
 class Portfolio(Base):
@@ -207,3 +223,76 @@ class Disclosure(Base):
     filed_at: Mapped[datetime] = mapped_column()
     url: Mapped[str | None] = mapped_column(Text)
     data_source: Mapped[str] = mapped_column(String(20))
+
+
+# ── [S4-D] 매력도 설정·파생 결과 ──
+FACTOR_CHECK = "factor IN ('value','quality','growth','safety','momentum')"
+
+
+class ScoringPreset(Base):
+    __tablename__ = "scoring_presets"
+    preset_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True)
+    name: Mapped[str] = mapped_column(String(50))
+    description: Mapped[str | None] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(SmallInteger, server_default="0")
+
+
+class ScoringWeight(Base):
+    __tablename__ = "scoring_weights"
+    preset_id: Mapped[int] = mapped_column(ForeignKey("scoring_presets.preset_id", ondelete="CASCADE"),
+                                           primary_key=True)
+    factor: Mapped[str] = mapped_column(String(12), primary_key=True)
+    weight: Mapped[Decimal] = mapped_column(Numeric(4, 3))
+    __table_args__ = (CheckConstraint(FACTOR_CHECK), CheckConstraint("weight >= 0 AND weight <= 1"))
+
+
+class StockMetricValue(Base):
+    __tablename__ = "stock_metric_values"
+    stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
+    as_of: Mapped[date] = mapped_column(Date, primary_key=True)
+    metric: Mapped[str] = mapped_column(String(24), primary_key=True)
+    factor: Mapped[str] = mapped_column(String(12))
+    raw_value: Mapped[Decimal | None] = mapped_column(Numeric)
+    z_raw: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    z_adj: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    __table_args__ = (CheckConstraint(FACTOR_CHECK),)
+
+
+class StockScore(Base):
+    __tablename__ = "stock_scores"
+    stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
+    as_of: Mapped[date] = mapped_column(Date, primary_key=True)
+    preset_id: Mapped[int] = mapped_column(ForeignKey("scoring_presets.preset_id"), primary_key=True)
+    value_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    quality_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    growth_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    safety_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    momentum_score: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    composite: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    factor_coverage: Mapped[int] = mapped_column(SmallInteger)
+    data_quality: Mapped[dict] = mapped_column(JSONB, server_default="{}")
+    __table_args__ = (CheckConstraint("score BETWEEN 0 AND 100"), CheckConstraint("factor_coverage BETWEEN 0 AND 5"))
+
+
+# ── [S5-D] 데이터 유효기간·밸류에이션 기초값 ──
+class DataFreshness(Base):
+    __tablename__ = "data_freshness"
+    stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    fetched_at: Mapped[datetime] = mapped_column()
+    valid_until: Mapped[datetime] = mapped_column()
+    status: Mapped[str] = mapped_column(String(10))
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class FundamentalBase(Base):
+    __tablename__ = "fundamental_bases"
+    stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
+    shares_outstanding: Mapped[int | None] = mapped_column(BigInteger)
+    shares_as_of: Mapped[date | None] = mapped_column(Date)
+    dps: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    dps_period_end: Mapped[date | None] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(20))
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())

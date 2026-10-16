@@ -1,4 +1,4 @@
-"""DB 설계(Stage 1 테이블 10개 + Stage 2 테이블 4개 + Stage 3 테이블 2개): ORM ↔ schema.sql 일치, 제약조건(CHECK/UNIQUE/FK/CASCADE) 방어.
+"""DB 설계(Stage 1 테이블 10개 + Stage 2 테이블 4개 + Stage 3 테이블 2개 + Stage 4 테이블 4개 + Stage 5 테이블 2개): ORM ↔ schema.sql 일치, 제약조건(CHECK/UNIQUE/FK/CASCADE) 방어.
 
 이후 단계 테이블이 추가되면 담당 단계에서 테이블 수와 제약 케이스를 늘린다.
 """
@@ -15,6 +15,9 @@ STAGE1_TABLES = {"markets", "stocks", "peer_groups", "peer_group_members", "dail
                  "indices", "index_daily_prices", "fx_rates", "ingestion_logs"}
 STAGE2_TABLES = {"users", "watchlist_items", "portfolios", "portfolio_items"}
 STAGE3_TABLES = {"financial_statements", "disclosures"}
+STAGE4_TABLES = {"scoring_presets", "scoring_weights", "stock_metric_values", "stock_scores"}
+STAGE5_TABLES = {"data_freshness", "fundamental_bases"}
+ALL_TABLES = STAGE1_TABLES | STAGE2_TABLES | STAGE3_TABLES | STAGE4_TABLES | STAGE5_TABLES
 
 
 def test_orm_matches_schema(engine):
@@ -35,9 +38,9 @@ def test_orm_matches_schema(engine):
     assert diffs == []
 
 
-def test_tables_are_stage1_to_3_only(engine):
-    assert set(Base.metadata.tables) == STAGE1_TABLES | STAGE2_TABLES | STAGE3_TABLES
-    assert set(inspect(engine).get_table_names()) == STAGE1_TABLES | STAGE2_TABLES | STAGE3_TABLES
+def test_tables_are_stage1_to_5_only(engine):
+    assert set(Base.metadata.tables) == ALL_TABLES
+    assert set(inspect(engine).get_table_names()) == ALL_TABLES
 
 
 @pytest.mark.parametrize("label, sql", [
@@ -86,6 +89,24 @@ def test_tables_are_stage1_to_3_only(engine):
                       "VALUES (1, 'R1', 't', now(), 'DART'), (2, 'R1', 't', now(), 'DART')"),
     ("잘못된 공시 source", "INSERT INTO disclosures (stock_id, rcept_no, title, filed_at, data_source) "
                        "VALUES (1, 'R2', 't', now(), 'YFINANCE')"),
+    # ── Stage 4 ── (프리셋은 테스트 안에서 만든다 — FK가 아니라 CHECK·UNIQUE에 걸리는지 보려고)
+    ("점수 101", "WITH p AS (INSERT INTO scoring_presets (code, name) VALUES ('t', 't') RETURNING preset_id) "
+                "INSERT INTO stock_scores (stock_id, as_of, preset_id, score, factor_coverage) SELECT 1, '2030-01-01', preset_id, 101, 5 FROM p"),
+    ("유효 팩터 6개", "WITH p AS (INSERT INTO scoring_presets (code, name) VALUES ('t', 't') RETURNING preset_id) "
+                   "INSERT INTO stock_scores (stock_id, as_of, preset_id, factor_coverage) SELECT 1, '2030-01-01', preset_id, 6 FROM p"),
+    ("가중치 1 초과", "WITH p AS (INSERT INTO scoring_presets (code, name) VALUES ('t', 't') RETURNING preset_id) "
+                    "INSERT INTO scoring_weights SELECT preset_id, 'value', 1.5 FROM p"),
+    ("없는 팩터", "INSERT INTO stock_metric_values (stock_id, as_of, metric, factor) VALUES (1, '2030-01-01', 'x', 'size')"),
+    ("프리셋 code 중복", "INSERT INTO scoring_presets (code, name) VALUES ('t', 't'), ('t', 'u')"),
+    ("종목당 주 그룹 2개", "UPDATE peer_group_members SET is_primary = true WHERE stock_id = 1;"
+                       "INSERT INTO peer_group_members (group_id, stock_id, is_primary) VALUES (2, 1, true)"),
+    # ── Stage 5 ── (004_watchlist_memo)
+    ("목표가 0", "INSERT INTO watchlist_items (user_id, stock_id, target_price) VALUES (1, 1, 0)"),
+    # ── Stage 5-D ── (006_sector_freshness)
+    ("잘못된 그룹 kind", "INSERT INTO peer_groups (name, kind) VALUES ('x', 'etc')"),
+    ("유효기간 < 시도 시각", "INSERT INTO data_freshness VALUES (1, 'financials', now(), now() - interval '1 day', 'SUCCESS')"),
+    ("잘못된 유효기간 kind", "INSERT INTO data_freshness VALUES (1, 'scores', now(), now(), 'SUCCESS')"),
+    ("발행주식수 0", "INSERT INTO fundamental_bases (stock_id, shares_outstanding, source) VALUES (1, 0, 'SEC')"),
 ])
 def test_constraints_reject_bad_rows(engine, label, sql):
     with pytest.raises(IntegrityError):
@@ -94,7 +115,8 @@ def test_constraints_reject_bad_rows(engine, label, sql):
 
 
 def test_delete_cascades(engine):
-    """종목 삭제 → 일봉·밸류·그룹 소속·재무·공시 CASCADE, 로그의 stock_id는 SET NULL. 그룹 삭제 → 소속 CASCADE."""
+    """종목 삭제 → 일봉·밸류·그룹 소속·재무·공시·지표값·점수 CASCADE, 로그의 stock_id는 SET NULL. 그룹 삭제 → 소속 CASCADE.
+    프리셋 삭제 → 가중치 CASCADE."""
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO ingestion_logs (source, job_type, stock_id, status, started_at) "
                           "VALUES ('DART', 'FINANCIALS', 1, 'SUCCESS', now())"))
@@ -102,16 +124,25 @@ def test_delete_cascades(engine):
                           "VALUES (1, '2030-12-31', 'FY', 'DART')"))
         conn.execute(text("INSERT INTO disclosures (stock_id, rcept_no, title, filed_at, data_source) "
                           "VALUES (1, 'R1', 't', now(), 'DART')"))
+        pid = conn.execute(text("INSERT INTO scoring_presets (code, name) VALUES ('t', 't') RETURNING preset_id")).scalar()
+        conn.execute(text("INSERT INTO scoring_weights VALUES (:p, 'value', 1)"), {"p": pid})
+        conn.execute(text("INSERT INTO stock_metric_values (stock_id, as_of, metric, factor) VALUES (1, '2030-01-01', 'roe', 'quality')"))
+        conn.execute(text("INSERT INTO stock_scores (stock_id, as_of, preset_id, factor_coverage) VALUES (1, '2030-01-01', :p, 0)"),
+                     {"p": pid})
         conn.execute(text("DELETE FROM stocks WHERE stock_id = 1"))
         left = conn.execute(text("""SELECT (SELECT count(*) FROM daily_prices WHERE stock_id = 1),
                                            (SELECT count(*) FROM valuation_snapshots WHERE stock_id = 1),
                                            (SELECT count(*) FROM peer_group_members WHERE stock_id = 1),
                                            (SELECT count(*) FROM financial_statements WHERE stock_id = 1),
                                            (SELECT count(*) FROM disclosures WHERE stock_id = 1),
+                                           (SELECT count(*) FROM stock_metric_values WHERE stock_id = 1),
+                                           (SELECT count(*) FROM stock_scores WHERE stock_id = 1),
                                            (SELECT stock_id FROM ingestion_logs)""")).one()
-        assert tuple(left) == (0, 0, 0, 0, 0, None)
+        assert tuple(left) == (0, 0, 0, 0, 0, 0, 0, None)
         conn.execute(text("DELETE FROM peer_groups WHERE group_id = 1"))
         assert conn.execute(text("SELECT count(*) FROM peer_group_members WHERE group_id = 1")).scalar() == 0
+        conn.execute(text("DELETE FROM scoring_presets WHERE preset_id = :p"), {"p": pid})
+        assert conn.execute(text("SELECT count(*) FROM scoring_weights WHERE preset_id = :p"), {"p": pid}).scalar() == 0
 
 
 def test_user_delete_cascades_and_updated_at_trigger(engine):
@@ -127,6 +158,10 @@ def test_user_delete_cascades_and_updated_at_trigger(engine):
                           "updated_at = updated_at - interval '1 day' WHERE portfolio_id = 1"))
         conn.execute(text("UPDATE portfolios SET name = 'Q' WHERE portfolio_id = 1"))
         assert conn.execute(text("SELECT updated_at > created_at + interval '12 hours' FROM portfolios")).scalar()
+        conn.execute(text("UPDATE watchlist_items SET added_at = added_at - interval '1 day', "
+                          "updated_at = updated_at - interval '1 day'"))
+        conn.execute(text("UPDATE watchlist_items SET memo = 'm'"))      # 관심종목도 같은 트리거 (Stage 5, migration 004)
+        assert conn.execute(text("SELECT updated_at > added_at + interval '12 hours' FROM watchlist_items")).scalar()
         conn.execute(text("DELETE FROM users WHERE user_id = 1"))
         left = conn.execute(text("""SELECT (SELECT count(*) FROM watchlist_items), (SELECT count(*) FROM portfolios),
                                            (SELECT count(*) FROM portfolio_items)""")).one()

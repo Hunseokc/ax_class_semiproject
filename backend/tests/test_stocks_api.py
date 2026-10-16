@@ -11,7 +11,7 @@ from tests.conftest import D, DAYS
 
 API = "/api/v1"
 LIST_KEYS = {"rank", "stock_id", "market", "country", "currency", "ticker", "name", "name_en", "as_of",
-             "close", "change", "change_rate", "volume", "market_cap", "market_cap_krw", "is_watched"}
+             "close", "change", "change_rate", "volume", "market_cap", "market_cap_krw", "score", "is_watched"}
 
 
 def get(client, path):
@@ -33,7 +33,7 @@ def test_list_kr_sorted_by_volume(client):
     assert r.status_code == 200
     assert tickers(b) == ["000660", "005930"]                       # 거래량 3000 > 1000
     assert [i["rank"] for i in b["items"]] == [1, 2] and b["total"] == 2
-    assert set(b) == {"total", "limit", "offset", "sort", "order", "fx_rate_at", "items"}
+    assert set(b) == {"total", "limit", "offset", "sort", "order", "preset", "fx_rate_at", "items"}
     assert b["sort"] == "volume" and b["order"] == "desc" and b["limit"] == 2 and b["offset"] == 0
 
 
@@ -64,7 +64,7 @@ def test_list_ascending(client):
 def test_list_item_shape_and_change_rate(client):
     r, b = get(client, "/stocks?country=KR&sort=volume&order=asc&limit=1")
     item = b["items"][0]                                             # 거래량 오름차순 첫 줄 = 삼성전자
-    assert set(item) == LIST_KEYS                                    # 매력도(score) 칸은 아직 없다
+    assert set(item) == LIST_KEYS
     assert item["ticker"] == "005930" and item["close"] == 70000 and item["change"] == 1000
     assert item["change_rate"] == pytest.approx(0.014493)            # 1000 / 69000
     assert item["as_of"] == D.isoformat() and item["name_en"] == "Samsung Electronics"
@@ -167,7 +167,8 @@ def test_detail_krw_stock(client):
     assert b["market_cap_krw"] == 400_000_000_000_000 and b["close_krw"] == 70000
     assert b["fx_rate"] is None and b["fx_rate_at"] is None and b["fx_stale"] is False
     assert b["groups"] == [{"group_id": 1, "name": "반도체"}]
-    assert "score" not in b and "preset" not in b and b["is_watched"] is False
+    assert b["score"] is None and b["score_as_of"] is None and b["preset"] == "balanced"   # 테스트 DB에는 점수 행이 없다
+    assert b["is_watched"] is False
 
 
 def test_detail_usd_stock_converts_to_krw(client):

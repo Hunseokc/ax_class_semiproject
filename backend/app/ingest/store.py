@@ -38,6 +38,7 @@ def upsert(conn: Connection, table: str, rows: list[dict], conflict: list[str],
 
 # ── [S3-D] advisory lock ──
 DART_LOCK_KEY = 7_301_010       # DART 호출 작업(재무·공시)은 프로세스가 여러 개여도 한 번에 하나만 → 분당 호출 제한 보호
+BENCHMARK_LOCK_KEY = 7_301_011  # 비교군 갱신
 
 
 @contextmanager

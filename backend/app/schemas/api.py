@@ -9,7 +9,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from app.schemas.common import INT_MAX, MONEY_MAX, Market, Num, Schema, Ticker
 
@@ -37,8 +37,8 @@ class HealthDbOut(Schema):
 
 # ── [S1-B] stocks·market ──────────────────────────────────────────
 # (시장 지수·환율, 종목 목록·상세·candles·peer-groups 응답)
-# Stage 1에서 뺀 칸: 지수·환율의 52주 범위·장 상태, 리스트·상세의 매력도(score·preset)·비교군(coverage·detail_status)·업종(sector·industry)
-# Stage 2에서 넣은 칸: 리스트·상세의 관심(is_watched)
+# Stage 1에서 뺀 칸: 지수·환율의 52주 범위·장 상태, 리스트·상세의 비교군(coverage·detail_status)·업종(sector·industry)
+# Stage 2에서 넣은 칸: 리스트·상세의 관심(is_watched) / Stage 4: 리스트·상세의 매력도(score·preset), 상세의 score_as_of
 
 # ------------------------------------------------------------------ 시장
 class SparkPoint(Schema):
@@ -100,6 +100,7 @@ class StockRow(Schema):
     volume: int | None
     market_cap: Num | None
     market_cap_krw: Num | None
+    score: Num | None
     is_watched: bool
 
 
@@ -109,6 +110,7 @@ class StockListOut(Schema):
     offset: int
     sort: str
     order: str
+    preset: str
     fx_rate_at: datetime | None
     items: list[StockRow]
 
@@ -147,6 +149,9 @@ class StockDetailOut(Schema):
     market_cap: Num | None
     market_cap_krw: Num | None
     shares_outstanding: int | None
+    score: Num | None
+    score_as_of: date | None
+    preset: str
     groups: list[GroupRef]                   # 소속 경쟁 그룹(없으면 빈 목록)
     is_watched: bool
 
@@ -170,7 +175,7 @@ class CandlesOut(Schema):
 
 # ── [S2-B] watchlist ──────────────────────────────────────────────
 # (관심종목 추가·순서 변경 요청, 카드·목록 응답. 요청에는 user_id를 받지 않는다 — 사용자는 get_current_user_id가 정한다)
-# Stage 2에서 뺀 칸: 카드의 매력도(score)·메모·목표가·괴리율(target_gap)·updated_at, 목록의 preset, 메모·목표가 수정 요청(PUT)
+# Stage 2에서 뺀 칸: 카드의 메모·목표가·괴리율(target_gap)·updated_at, 메모·목표가 수정 요청(PUT) / Stage 4: 카드의 매력도(score), 목록의 preset
 
 # ------------------------------------------------------------------ 관심종목
 class WatchlistCreate(Schema):
@@ -201,10 +206,16 @@ class WatchlistCard(Schema):
     close: Num | None
     change: Num | None
     change_rate: Num | None
+    score: Num | None
+    memo: str | None = None                  # [S5] migration 004 — 메모·목표가는 PUT /watchlist/{market}/{ticker}로 수정
+    target_price: Num | None = None          # 종목 통화(currency) 기준
+    target_gap: Num | None = None            # (목표가 − 현재가) / 현재가
+    updated_at: datetime | None = None
 
 
 class WatchlistOut(Schema):
     user_id: int
+    preset: str
     count: int
     items: list[WatchlistCard]
 
@@ -412,3 +423,80 @@ class RefreshOut(Schema):
 # ── [S4-B] 비교군·분석 ────────────────────────────────────────────
 
 # ── [S5] 메모·통계·검색·홈 위젯 ───────────────────────────────────
+# (관심종목 수정 요청·균등 배분 미리보기 — 요청·응답 모양은 D가 껍데기와 함께 원본 그대로 넣었다. B·C는 이 클래스를 그대로 쓴다)
+class WatchlistUpdate(Schema):
+    """보낸 필드만 바꾼다. null을 보내면 그 값을 지운다(A-116)."""
+    memo: str | None = Field(default=None, max_length=200, description="메모(200자). 앞뒤 공백 제거, 빈 문자열은 지움")
+    target_price: Decimal | None = Field(default=None, gt=0, max_digits=20, decimal_places=4,
+                                         description="목표가(종목 통화 — KRW 종목은 원, USD 종목은 달러). 0 이하는 422")
+
+    @field_validator("memo")
+    @classmethod
+    def _blank_memo_is_none(cls, v: str | None) -> str | None:
+        return (v.strip() or None) if v is not None else None
+
+    @model_validator(mode="after")
+    def _at_least_one(self):
+        if not self.model_fields_set & {"memo", "target_price"}:
+            raise ValueError("memo 또는 target_price 중 하나 이상을 보내야 합니다")
+        return self
+
+
+class StockKey(Schema):
+    market: Market
+    ticker: Ticker
+
+
+class EqualWeightRequest(Schema):
+    stocks: list[StockKey] | None = Field(default=None, min_length=1, max_length=100,
+                                          description="대상 종목. 생략하면 내 관심종목 전체")
+    budget_krw: Decimal | None = Field(default=None, gt=0, le=MONEY_MAX, max_digits=20, decimal_places=0,
+                                       description="배분할 금액(원). 생략하면 포트폴리오 잔여 시드, 잔여 시드 초과는 409")
+
+    @field_validator("stocks")
+    @classmethod
+    def _no_duplicates(cls, v: list[StockKey] | None):
+        if v is not None and len({(x.market.upper(), x.ticker.upper()) for x in v}) != len(v):
+            raise ValueError("같은 종목이 두 번 들어 있습니다")
+        return v
+
+
+class EqualWeightItem(Schema):
+    market: str
+    ticker: str
+    name: str
+    currency: str
+    price: Num                       # 종목 통화 최신 종가
+    price_date: date
+    fx_rate: Num                     # KRW 종목은 1
+    unit_cost_krw: Num               # 1주 원가(원)
+    quantity: int                    # 균등 몫 ÷ 1주 원가 내림
+    cost_krw: Num
+    weight: Num | None               # 실제 배분 비중 = cost / total_cost
+
+
+class EqualWeightSkipped(Schema):
+    market: str
+    ticker: str
+    name: str
+    reason: Literal["ALREADY_IN_PORTFOLIO", "NO_PRICE", "PRICE_ABOVE_SHARE"]
+    message: str
+    unit_cost_krw: Num | None = None
+    share_krw: Num | None = None
+
+
+class EqualWeightOut(Schema):
+    portfolio_id: int
+    seed_krw: Num
+    used_krw: Num
+    remaining_krw: Num
+    budget_krw: Num
+    target_count: int                # 균등 몫을 나눈 종목 수(이미 담은·시세 없는 종목 제외)
+    share_krw: Num                   # 종목당 균등 몫
+    items: list[EqualWeightItem]
+    total_cost_krw: Num
+    leftover_krw: Num                # 예산 − 총 사용 금액
+    skipped: list[EqualWeightSkipped]
+    fx_rate: Num | None
+    fx_rate_at: datetime | None
+    saved: bool = False              # 계산 전용 — 저장하려면 담기 API를 종목별로 호출

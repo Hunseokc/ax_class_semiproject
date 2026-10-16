@@ -1,11 +1,11 @@
 """시장 데이터 갱신 (POST /market/refresh, python -m app.ingest refresh).
 
-작업: FX(SNAPSHOT + DAILY 증분) → INDICES → PRICES(증분) → VALUATION
+작업: FX(SNAPSHOT + DAILY 증분) → INDICES → PRICES(증분) → VALUATION → SCORES
 - 작업 단위 결과를 ingestion_logs에 source='REFRESH' 1행으로 남기고, 그 마지막 성공 시각이 TTL 이내면 외부 호출 없이 SKIPPED
-  (종목 단위 행은 CLI 수집도 남기므로 TTL 판단에 쓰지 않는다)
+  (종목 단위 행은 비교군 갱신·상세 수집도 남기므로 TTL 판단에 쓰지 않는다)
 - 일부 대상만 실패한 작업은 RETRY_AFTER(30분) 뒤 실패한 종목만 다시 받는다 → 성공한 종목은 TTL당 1회 유지
 - 동시에 여러 갱신 요청이 와도 advisory lock으로 직렬화 → 뒤 요청은 앞 요청 결과를 보고 SKIPPED
-- 대상 종목: 활성 종목 전체
+- 대상 종목: 노출 종목 + 관심종목·포트폴리오에 담긴 종목(매력도 비교군은 app/ingest/benchmark.py가 1일 1회)
 - 주기 실행: 앱 안 스케줄러(app/services/scheduler.py) 또는 cron의 python -m app.ingest refresh
 """
 from __future__ import annotations
@@ -18,14 +18,14 @@ from datetime import datetime, timedelta
 from sqlalchemy import Connection, Engine, text
 
 from app.ingest import jobs
+from app.ingest.universe import FREQUENT_SQL
 from app.providers.factory import Providers
 from app.services.fx import FxService, utcnow
 
 log = logging.getLogger(__name__)
 
 REFRESH_LOCK_KEY = 7_301_002
-# Stage 4: 매력도 점수 계산(SCORES)을 VALUATION 다음에 추가한다
-JOB_TYPES = ("FX", "INDICES", "PRICES", "VALUATION")
+JOB_TYPES = ("FX", "INDICES", "PRICES", "VALUATION", "SCORES")
 JOB_SOURCE = "REFRESH"                 # 작업 단위 결과 행의 source
 RETRY_AFTER = timedelta(minutes=30)    # 실패한 작업을 다시 시도하기까지 최소 간격(갱신 버튼 연타 방지)
 PER_STOCK_JOBS = ("PRICES", "VALUATION")
@@ -66,11 +66,12 @@ def _summarize(statuses: dict[str, str]) -> tuple[str, dict[str, int]]:
 
 class RefreshService:
     def __init__(self, engine: Engine, providers: Providers, fx: FxService, ttl_hours: float,
-                 clock: Callable[[], datetime] = utcnow):
+                 scorer: Callable[[Engine], int] | None = None, clock: Callable[[], datetime] = utcnow):
         self.engine = engine
         self.providers = providers
         self.fx = fx
         self.ttl = timedelta(hours=ttl_hours)
+        self.scorer = scorer
         self.clock = clock
 
     @staticmethod
@@ -102,8 +103,8 @@ class RefreshService:
 
     @property
     def job_types(self) -> tuple[str, ...]:
-        """실제로 실행 가능한 작업."""
-        return JOB_TYPES
+        """실제로 실행 가능한 작업 (점수 계산기가 없으면 SCORES 제외)."""
+        return tuple(j for j in JOB_TYPES if not (j == "SCORES" and self.scorer is None))
 
     def next_available(self) -> datetime:
         """가장 먼저 다시 실행할 수 있는 작업의 시각."""
@@ -122,14 +123,14 @@ class RefreshService:
         return RefreshResult(refreshed_at=refreshed, next_refresh_available_at=self.next_available(), jobs=jobs_)
 
     def _retry_targets(self, job_type: str, failed: FailedRun | None, now: datetime) -> list[int] | None:
-        """TTL 안의 부분 실패 뒤 재시도면 그 실행에서 실패한 종목만. 그 밖에는 None(전체)."""
+        """TTL 안의 부분 실패 뒤 재시도면 그 실행에서 실패한 종목(갱신 대상 범위)만. 그 밖에는 None(전체)."""
         if job_type not in PER_STOCK_JOBS or failed is None or now - failed.finished_at >= self.ttl:
             return None
         with self.engine.connect() as conn:
-            ids = conn.execute(text("""
+            ids = conn.execute(text(f"""
                 SELECT DISTINCT l.stock_id FROM ingestion_logs l JOIN stocks s ON s.stock_id = l.stock_id
                 WHERE l.job_type = :job AND l.status = 'FAILED' AND l.source <> :src
-                  AND l.started_at >= :start AND l.finished_at <= :end AND s.is_active"""),
+                  AND l.started_at >= :start AND l.finished_at <= :end AND s.is_active AND {FREQUENT_SQL}"""),
                 {"job": job_type, "src": JOB_SOURCE, "start": failed.started_at, "end": failed.finished_at}).scalars().all()
         return sorted(ids) or None
 
@@ -145,6 +146,9 @@ class RefreshService:
             return (*_summarize(jobs.load_prices(self.engine, self.providers, stock_ids=stock_ids)), None)
         if job_type == "VALUATION":
             return (*_summarize(jobs.load_valuations(self.engine, self.providers, stock_ids=stock_ids)), None)
+        if job_type == "SCORES":
+            n = self.scorer(self.engine)
+            return "SUCCESS", {"rows": n}, None
         raise ValueError(job_type)
 
     def refresh(self) -> RefreshResult:
@@ -154,6 +158,10 @@ class RefreshService:
             lock_conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": REFRESH_LOCK_KEY})
             try:
                 for job_type in JOB_TYPES:
+                    if job_type not in self.job_types:
+                        if job_type == "SCORES":
+                            outcomes.append(JobOutcome(job_type, "SKIPPED", "점수 계산기 미연결"))
+                        continue
                     with self.engine.connect() as conn:
                         last = self.last_success(conn).get(job_type)
                         failed = self.last_failure(conn).get(job_type)

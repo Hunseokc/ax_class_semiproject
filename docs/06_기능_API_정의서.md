@@ -11,7 +11,7 @@
 | 항목 | 내용 |
 |---|---|
 | Base URL | `/api/v1` (헬스체크 `/health`·`/health/db`만 루트) |
-| 인증 | 없음 — 로컬·시연 전용 단일 사용자(데모) 모드. 요청 사용자는 `get_current_user_id`(설정 `DEFAULT_USER_ID`, 기본 1 = demo)가 정하고 요청 본문의 `user_id`는 받지 않는다. 다른 사용자의 포트폴리오·항목·관심종목은 존재 여부를 드러내지 않고 404 |
+| 인증 | 없음 — 요청 사용자는 `get_current_user_id`가 정하고 요청 본문의 `user_id`는 받지 않는다. 로컬은 단일 사용자(데모) 모드(설정 `DEFAULT_USER_ID`, 기본 1 = demo). 배포(`GUEST_SESSION_ENABLED=true`)는 세션 쿠키 `stockmind_session`(서명·HttpOnly·Secure·SameSite=Lax)으로 브라우저마다 게스트를 나눈다 — 쿠키가 없으면 조회는 demo, 첫 쓰기(POST·PUT·PATCH·DELETE)에서 demo 데이터를 복사한 게스트를 만들고 응답에 `Set-Cookie`를 싣는다. 같은 출처라 화면(fetch)은 쿠키를 따로 다루지 않는다. 다른 사용자의 포트폴리오·항목·관심종목은 존재 여부를 드러내지 않고 404 |
 | 오류 형식 | `{"error": {"code", "message", "detail"}}` — 404 NOT_FOUND 계열, 409 CONFLICT 계열, 422 VALIDATION_ERROR, 503, 500 INTERNAL_ERROR. 코드 전체는 [5절](#5-에러-코드) |
 | 500 처리 | 예상하지 못한 예외는 500 `INTERNAL_ERROR`와 고정 메시지만 응답한다(예외 메시지·스택·SQL·내부 경로는 응답에 넣지 않음). 스택은 서버 로그에 요청 ID와 함께 남고, 응답에도 `X-Request-ID` 헤더가 붙는다 |
 | 입력 형식 | 형식·범위가 틀리면 DB 조회 전에 422 `VALIDATION_ERROR`(`detail`에 위치·사유). `market` 영문 2~10자, `ticker` 영숫자로 시작하는 영숫자·`.`·`-` 1~16자, `limit`·`offset`·`range`는 엔드포인트별 범위·허용 값(Swagger) |
@@ -514,7 +514,7 @@
 | `DB_UNAVAILABLE` | 503 | `SELECT 1` 실패(연결 거부·시간 초과 등). 접속 정보는 응답에 넣지 않고 로그에만 | `GET /health/db` | DB에 연결할 수 없습니다 | 0 |
 | `STOCK_NOT_FOUND` | 404 | (시장, 티커) 종목 없음 | `/stocks/{market}/{ticker}`·하위(`candles`·`financials`·`disclosures`), `/watchlist`(POST·PATCH·DELETE), 담기 | 종목 KOSPI/999999을(를) 찾을 수 없습니다 | 1-B, 2-B, 2-C, 3-B |
 | `VOLUME_SORT_REQUIRES_MARKET` | 422 | 전체 탭(country 없음)에서 거래량 정렬 — 시장마다 거래량 단위가 다름 | `GET /stocks` | 시장마다 거래량 단위가 달라 '전체'에서는 거래량 정렬을 할 수 없습니다 | 1-B |
-| `USER_NOT_FOUND` | 404 | 요청 사용자(`DEFAULT_USER_ID`)가 DB에 없음 | `/watchlist`, `/portfolios` | 사용자(ID 99)를 찾을 수 없습니다 | 2-B, 2-C |
+| `USER_NOT_FOUND` | 404 | 요청 사용자(`DEFAULT_USER_ID`)가 DB에 없음 (게스트 쿠키가 없는 사용자를 가리키면 이 오류 대신 demo로 처리) | `/watchlist`, `/portfolios` | 사용자(ID 99)를 찾을 수 없습니다 | 2-B, 2-C |
 | `WATCHLIST_ITEM_NOT_FOUND` | 404 | 요청 사용자의 관심종목에 없는 종목 | `DELETE /watchlist/{market}/{ticker}`, `PATCH /watchlist/order` | 관심종목에 KOSPI/005930이(가) 없습니다 | 2-B |
 | `DUPLICATE_WATCHLIST` | 409 | 이미 관심종목에 있는 종목 추가 | `POST /watchlist` | 이미 관심종목에 있습니다 | 2-B |
 | `PORTFOLIO_NOT_FOUND` | 404 | 포트폴리오 없음 또는 다른 사용자 소유 | `/portfolios/{portfolio_id}`·하위 | 포트폴리오(ID 7)를 찾을 수 없습니다 | 2-C |

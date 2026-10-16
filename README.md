@@ -4,7 +4,7 @@
 
 - 흩어진 원천 데이터(pykrx·yfinance·OpenDART·SEC EDGAR)를 수집·전처리해 PostgreSQL 정규화 스키마에 적재하고, 서버가 떠 있는 동안 4시간 주기로 갱신합니다.
 - FastAPI 조회 API와 바닐라 HTML/CSS/JS 화면으로 보여 줍니다. 조회 API는 외부 소스를 직접 부르지 않고 DB 값만 씁니다.
-- 4인 팀(시니어 1 · 주니어 3)이 6단계로 나눠 만들고 있으며, 현재 **Stage 3(실데이터 — 재무·공시 포함 4개 소스 수집, 주기적 갱신, v3.0)** 까지 완료됐습니다.
+- 4인 팀(시니어 1 · 주니어 3)이 6단계로 나눠 만들고 있으며, 현재 **Stage 5(고도화 — 메모·목표가·통계 확장, v5.0)** 까지 완료됐습니다.
 
 > 시세는 일봉 기준이며 장중 실시간이 아닙니다. 이 프로젝트의 어떤 정보도 투자 권유가 아닙니다.
 
@@ -127,6 +127,8 @@ docker compose run --rm api python -m app.ingest disclosures         # 최근 1�
 | `SCHEDULER_ENABLED` | 선택 | 앱 안 스케줄러 사용 여부 (기본 true — 4시간 갱신) |
 | `SCHEDULER_CHECK_MINUTES` | 선택 | 스케줄러가 할 일을 확인하는 간격(분, 기본 5) |
 | `EXTRA_CA_DIR` | 선택 (compose) | 추가 CA 인증서 폴더(아래 TLS 검사 환경) |
+| `GUEST_SESSION_ENABLED` | 선택 (배포) | 브라우저별 게스트 세션 사용 여부 (기본 false = 단일 데모 사용자). 쿠키가 HTTPS 전용이라 로컬 http에서는 false |
+| `SESSION_SECRET` | **필수**(`GUEST_SESSION_ENABLED=true`일 때) | 세션 쿠키 서명 키 — 인스턴스끼리 같아야 하므로 Cloud Run에서는 Secret Manager로 주입. 생성: `python -c "import secrets; print(secrets.token_hex(32))"` |
 
 - **TLS 검사(백신·사내 프록시) 환경**: 호스트에서 HTTPS가 가로채져 인증서 오류가 나면, 그 루트 인증서(`*.pem`·`*.crt`)를 `certs/`에 두거나 `.env`에 `EXTRA_CA_DIR=<폴더>`를 지정합니다. entrypoint가 시스템 CA 번들에 합쳐 requests·curl_cffi(yfinance)·ssl 모두에 적용합니다. 예) Norton: `C:/ProgramData/Norton/Antivirus/wscert.pem`
 
@@ -212,8 +214,8 @@ ax_stockmind/
 | Stage 1 | MVP — 지수·환율·주요 종목 홈, 주식 리스트, 종목 상세, 시세 수집 | ✅ v1.0.1 |
 | Stage 2 | 사용자 기능 — 관심종목·모의 포트폴리오 | ✅ v2.0 |
 | Stage 3 | 실데이터 — 재무·공시 포함 4개 소스 수집, 주기적 갱신 | ✅ v3.0 |
-| Stage 4 | 분석 — 매력도·경쟁 비교·통계 | |
-| Stage 5 | 고도화 — 메모·목표가·통계 확장 | |
+| Stage 4 | 분석 — 매력도·경쟁 비교·통계 | ✅ v4.0 |
+| Stage 5 | 고도화 — 메모·목표가·통계 확장 | ✅ v5.0 |
 | Stage 6 | 홈 대시보드 개편·상단 검색·최종 문서 | |
 
 팀 작업 방식(브랜치·PR 규칙, Claude Code 사용법)은 [team/00_팀_작업_가이드.md](team/00_팀_작업_가이드.md)를 보세요.

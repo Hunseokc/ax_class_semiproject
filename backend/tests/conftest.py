@@ -2,17 +2,15 @@
 
 고정 픽스처 (today 기준 상대 날짜, 기준일 D = today - 4일):
   시장  KOSPI(KR/KRW), NASDAQ(US/USD)
-  종목  1 삼성전자 005930  종가 68,000 → 69,000 → 70,000   거래량 1,000
-        2 SK하이닉스 000660 종가 150,000 (3일)              거래량 3,000
-        3 AAPL                종가 195 → 198 → 200          거래량 500
-        4 NVDA                종가 100 → 105 → 110          거래량 800
-  그룹  반도체(1,2,4), 빅테크(3)
+  종목  1 삼성전자 005930  종가 68,000 → 69,000 → 70,000   거래량 1,000   시총 400조원
+        2 SK하이닉스 000660 종가 150,000 (3일)              거래량 3,000   시총 100조원
+        3 AAPL                종가 195 → 198 → 200          거래량 500     시총 3조 달러
+        4 NVDA                종가 100 → 105 → 110          거래량 800     시총 1조 달러
+  그룹  반도체(1,2,4), 빅테크(3) — 모두 주 그룹
+  프리셋 init_db가 config/scoring.yaml로 적재(테스트마다 비우지 않음)
   환율  DAILY 1,300 (3일), SNAPSHOT 1,300 (지금 → TTL 이내)
   지수  KOSPI 3일
-
-  사용자  demo(1), other(2)
-
-Stage 3 이후 테이블이 생기면 TABLES와 load_fixture에 해당 단계 담당자가 추가한다.
+  사용자 demo(1), other(2)
 """
 from __future__ import annotations
 
@@ -24,15 +22,15 @@ from datetime import date, timedelta  # noqa: E402
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import create_engine, text
 
 from app.api import deps
 from app.core.config import get_settings
-from app.ingest import jobs
+from app.ingest.jobs import init_db
 from app.main import app
+from app.services.hydration import ON_DEMAND
 from tests.fakes import FakeFx, make_providers
 
-# FK 자식 → 부모 순서(TRUNCATE ... CASCADE라 순서는 중요하지 않지만 읽기 쉽게)
 TABLES = ["portfolio_items", "portfolios", "watchlist_items", "users", "ingestion_logs", "fx_rates", "index_daily_prices", "indices", "valuation_snapshots",
           "daily_prices", "peer_group_members", "peer_groups", "stocks", "markets"]
 
@@ -41,35 +39,30 @@ D = TODAY - timedelta(days=4)            # 픽스처 마지막 거래일
 DAYS = [D - timedelta(days=2), D - timedelta(days=1), D]
 
 
-def apply_schema(engine: Engine, reset: bool = False) -> None:
-    """db/schema.sql → indexes.sql → views.sql(있을 때만) 적용. CLI init-db와 같은 경로(app.ingest.jobs.init_db)를 쓴다."""
-    jobs.init_db(engine, reset=reset)
-
-
 @pytest.fixture(scope="session")
 def engine():
     url = get_settings().test_database_url
     assert "test" in url, "테스트는 반드시 테스트 DB에서 실행한다"
     eng = create_engine(url, pool_size=10, max_overflow=10)
-    apply_schema(eng, reset=True)
+    init_db(eng, reset=True)
     yield eng
     eng.dispose()
 
 
 def load_fixture(conn) -> None:
     conn.execute(text("""
-        INSERT INTO users (user_id, nickname) VALUES (1, 'demo'), (2, 'other');
         INSERT INTO markets (market_id, code, country, currency, timezone) VALUES
           (1, 'KOSPI', 'KR', 'KRW', 'Asia/Seoul'), (2, 'NASDAQ', 'US', 'USD', 'America/New_York');
         INSERT INTO stocks (stock_id, market_id, ticker, name, name_en) VALUES
           (1, 1, '005930', '삼성전자', 'Samsung Electronics'), (2, 1, '000660', 'SK하이닉스', 'SK hynix'),
           (3, 2, 'AAPL', 'Apple', 'Apple'), (4, 2, 'NVDA', 'NVIDIA', 'NVIDIA');
         INSERT INTO peer_groups (group_id, name) VALUES (1, '반도체'), (2, '빅테크');
-        INSERT INTO peer_group_members VALUES (1, 1), (1, 2), (1, 4), (2, 3);
+        INSERT INTO peer_group_members VALUES (1, 1, true), (1, 2, true), (1, 4, true), (2, 3, true);
+        INSERT INTO users (user_id, nickname) VALUES (1, 'demo'), (2, 'other');
         INSERT INTO indices (index_id, code, name, market_id, source_symbol, display_order)
           VALUES (1, 'KOSPI', 'KOSPI', 1, '1001', 1);
         SELECT setval('stocks_stock_id_seq', 4), setval('peer_groups_group_id_seq', 2),
-               setval('indices_index_id_seq', 1), setval('markets_market_id_seq', 2), setval('users_user_id_seq', 2);
+               setval('users_user_id_seq', 2), setval('indices_index_id_seq', 1), setval('markets_market_id_seq', 2);
     """))
     closes = {1: [68000, 69000, 70000], 2: [150000] * 3, 3: [195, 198, 200], 4: [100, 105, 110]}
     volumes = {1: 1000, 2: 3000, 3: 500, 4: 800}
@@ -104,10 +97,30 @@ def providers(fake_fx):
     return make_providers(fake_fx)
 
 
+class RecordingHydrator:
+    """상세 데이터 수집 요청만 기록한다(실제 수집은 test_benchmark에서 hydrate를 직접 검증)."""
+
+    def __init__(self):
+        self.requests: list[int] = []
+
+    def request(self, stock_id, coverage, synced_at):
+        if coverage not in ON_DEMAND:
+            return "ready"
+        self.requests.append(stock_id)
+        return "loading"
+
+
 @pytest.fixture
-def client(engine, providers):
+def hydrator():
+    return RecordingHydrator()
+
+
+@pytest.fixture
+def client(engine, providers, hydrator):
     app.dependency_overrides[deps.get_engine_dep] = lambda: engine
     app.dependency_overrides[deps.get_providers] = lambda: providers
+    app.dependency_overrides[deps.get_scorer] = lambda: None
+    app.dependency_overrides[deps.get_hydrator] = lambda: hydrator
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

@@ -3,10 +3,16 @@
 -- 실행 순서: schema.sql → indexes.sql → views.sql
 -- 금액·가격은 모두 NUMERIC (float 사용 안 함)
 --
--- Stage 1 테이블 10개 + Stage 2 테이블 4개 + Stage 3 테이블 2개. 이후 단계 테이블·컬럼은 D가 단계 시작 시 추가해 "계약"으로 배포한다.
---   Stage 2: users, watchlist_items(memo·target_price는 Stage 5), portfolios, portfolio_items (+ updated_at 트리거)
+-- Stage 1 테이블 10개 + Stage 2 테이블 4개 + Stage 3 테이블 2개 + Stage 4 테이블 4개. 이후 단계 테이블·컬럼은 D가 단계 시작 시 추가해 "계약"으로 배포한다.
+--   Stage 2: users, watchlist_items, portfolios, portfolio_items (+ updated_at 트리거)
 --   Stage 3: financial_statements, disclosures (+ ingestion_logs.job_type에 FINANCIALS·DISCLOSURES)
---   Stage 4+: 매력도·비교군·섹터 관련 테이블/컬럼
+--   Stage 4: scoring_presets, scoring_weights, stock_metric_values, stock_scores, peer_group_members.is_primary
+--            (+ ingestion_logs.job_type에 SCORES) — 기존 DB는 db/migrations/001_scoring_v2 → 002_presets
+--   Stage 4-D: stocks.coverage·detail_synced_at (+ ingestion_logs.job_type에 BENCHMARK·HYDRATE) — 기존 DB는 003_benchmark
+--   Stage 5: watchlist_items.memo·target_price·updated_at (+ 트리거) — 기존 DB는 004_watchlist_memo
+--   Stage 5-D: stocks.industry·sic·sector·industry_checked_at, peer_groups.kind, data_freshness, fundamental_bases
+--              — 기존 DB는 006_sector_freshness
+--   Stage 6: listed·dps(005)·홈 위젯(007)·SECTORS_*는 그 작업 때 추가
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -32,22 +38,36 @@ CREATE TABLE stocks (
   corp_code VARCHAR(16),                                         -- OpenDART 고유번호 (KR)
   cik       VARCHAR(10),                                         -- SEC CIK 10자리 (US)
   is_active BOOLEAN      NOT NULL DEFAULT true,                  -- false: 수집·점수 계산 대상에서 제외(데이터는 보존)
+  -- featured: 화면에 노출하는 종목(4시간 갱신) / benchmark: 매력도 비교군(1일 갱신, 필수 데이터만 저장)
+  coverage  VARCHAR(10)  NOT NULL DEFAULT 'featured' CHECK (coverage IN ('featured','benchmark')),
+  detail_synced_at TIMESTAMPTZ,                                  -- benchmark 종목의 상세(공시·2년 일봉·5개년 재무)를 마지막으로 받은 시각
+  -- 업종 (migration 006): 국내 KRX 업종명 / 미국 SEC SIC 설명. sector는 config/universe.yaml sectors 매핑 결과(점수 비교 표본의 섹터)
+  industry  VARCHAR(64),
+  sic       SMALLINT,                                            -- 미국 SEC SIC 코드
+  sector    VARCHAR(32),                                         -- NULL: 매핑 없음·금융 등 제외 업종
+  industry_checked_at TIMESTAMPTZ,                               -- 업종을 마지막으로 확인한 시각(미국 SIC는 1년마다 다시 확인)
   UNIQUE (market_id, ticker)
 );
 
 -- 경쟁 그룹
+-- kind (migration 006): theme = 화면 경쟁 비교용 테마 그룹(universe.yaml peer_groups)
+--                       sector = 매력도 섹터 중립화용 업종 그룹(universe.yaml sectors, 비교군 선정 때 구성)
 CREATE TABLE peer_groups (
   group_id    SERIAL PRIMARY KEY,
   name        VARCHAR(64) NOT NULL UNIQUE,
-  description TEXT
+  description TEXT,
+  kind        VARCHAR(10) NOT NULL DEFAULT 'theme' CHECK (kind IN ('theme','sector'))
 );
 
 -- 종목 ↔ 경쟁 그룹 N:M 교차 테이블 (국내·해외 종목 혼합 가능)
+-- is_primary: 매력도 섹터 중립화에 쓰는 주 그룹. 종목당 최대 1개(부분 UNIQUE 인덱스) — Stage 4 (migration 001)
 CREATE TABLE peer_group_members (
-  group_id   INT NOT NULL REFERENCES peer_groups ON DELETE CASCADE,
-  stock_id   INT NOT NULL REFERENCES stocks      ON DELETE CASCADE,
+  group_id   INT     NOT NULL REFERENCES peer_groups ON DELETE CASCADE,
+  stock_id   INT     NOT NULL REFERENCES stocks      ON DELETE CASCADE,
+  is_primary BOOLEAN NOT NULL DEFAULT false,
   PRIMARY KEY (group_id, stock_id)
 );
+CREATE UNIQUE INDEX ux_pgm_primary ON peer_group_members (stock_id) WHERE is_primary;
 
 -- ---------------------------------------------------------------------
 -- 2. 종목별 시계열
@@ -119,12 +139,12 @@ CREATE TABLE fx_rates (
 -- ---------------------------------------------------------------------
 
 -- 수집·갱신 작업 로그. 갱신 TTL 판단(작업별 마지막 성공 시각)에도 사용
--- job_type은 Stage 3까지의 작업만 허용한다. 이후 단계에서 SCORES·BENCHMARK 등을 추가한다.
+-- job_type은 Stage 4 매력도(SCORES)까지의 작업만 허용한다. BENCHMARK·HYDRATE(Stage 4-D 비교군)·SECTORS_*는 그 작업 때 추가한다.
 CREATE TABLE ingestion_logs (
   log_id      SERIAL PRIMARY KEY,
   source      VARCHAR(20) NOT NULL,                              -- PYKRX / YFINANCE / DART / SEC / INTERNAL
   job_type    VARCHAR(30) NOT NULL CHECK (job_type IN
-                ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','MASTER')),
+                ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','SCORES','MASTER','BENCHMARK','HYDRATE')),
   stock_id    INT         REFERENCES stocks ON DELETE SET NULL,  -- 종목 단위 작업일 때만
   status      VARCHAR(10) NOT NULL CHECK (status IN ('SUCCESS','FAILED','SKIPPED')),
   rows_loaded INT         NOT NULL DEFAULT 0 CHECK (rows_loaded >= 0),
@@ -157,14 +177,19 @@ CREATE TABLE users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 관심종목: 사용자 ↔ 종목 N:M 교차 테이블 + 정렬 순서. 메모·목표가는 Stage 5에서 컬럼 추가
+-- 관심종목: 사용자 ↔ 종목 N:M 교차 테이블 + 정렬 순서·메모·목표가
 CREATE TABLE watchlist_items (
   user_id    INT         NOT NULL REFERENCES users  ON DELETE CASCADE,
   stock_id   INT         NOT NULL REFERENCES stocks ON DELETE CASCADE,
   sort_order INT         NOT NULL DEFAULT 0,                       -- 작을수록 먼저 (PATCH /watchlist/order가 다시 매김)
   added_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  memo         VARCHAR(200),                                                  -- 사용자 메모 (migration 004)
+  target_price NUMERIC(20,4) CHECK (target_price > 0),                        -- 목표가(종목 통화)
+  updated_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),                          -- 트리거가 갱신
   PRIMARY KEY (user_id, stock_id)                                  -- 같은 종목 중복 담기 금지 → 409 DUPLICATE_WATCHLIST
 );
+CREATE TRIGGER trg_watchlist_items_updated_at BEFORE UPDATE ON watchlist_items
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- 모의 포트폴리오: "시드 안에서 담아보는 계산기 겸 장바구니" (거래 원장 아님)
 CREATE TABLE portfolios (
@@ -235,4 +260,91 @@ CREATE TABLE disclosures (
   filed_at      TIMESTAMPTZ  NOT NULL,
   url           TEXT,
   data_source   VARCHAR(20)  NOT NULL CHECK (data_source IN ('DART','SEC'))
+);
+
+-- =====================================================================
+-- Stage 4 — 매력도 (D가 단계 시작 시 배포한 계약, 원본 migration 001_scoring_v2·002_presets)
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 7. 매력도 설정·파생 결과
+-- ---------------------------------------------------------------------
+
+-- 매력도 가중치 프리셋 (config/scoring.yaml에서 적재). "프리셋별 가중치 합 = 1"은 행 간 제약이라
+--   CHECK로 걸 수 없다 → 적재 시 검증(app/services/scoring.py)하고 테스트로 보장한다.
+CREATE TABLE scoring_presets (
+  preset_id   SMALLSERIAL PRIMARY KEY,
+  code        VARCHAR(20) NOT NULL UNIQUE,                       -- aggressive / growth / balanced / value
+  name        VARCHAR(50) NOT NULL,
+  description TEXT,
+  sort_order  SMALLINT    NOT NULL DEFAULT 0                     -- 화면 표시 순서 (위험 → 성장 → 균형 → 가치)
+);
+
+CREATE TABLE scoring_weights (
+  preset_id SMALLINT     NOT NULL REFERENCES scoring_presets ON DELETE CASCADE,
+  factor    VARCHAR(12)  NOT NULL CHECK (factor IN ('value','quality','growth','safety','momentum')),
+  weight    NUMERIC(4,3) NOT NULL CHECK (weight >= 0 AND weight <= 1),
+  PRIMARY KEY (preset_id, factor)
+);
+
+-- [의도적 비정규화 2] 매력도 계산 결과를 as_of별로 저장하는 재생성 가능한 파생 테이블 2개.
+--   국가별 중앙값·MAD·그룹 평균을 화면 요청마다 다시 계산하지 않고, 점수의 근거(지표 원값·Z)를 설명하기 위해 저장한다.
+--   같은 as_of는 DELETE 후 INSERT로 재생성한다(python -m app.ingest scores, POST /market/refresh).
+-- 지표별 원값과 Z — 프리셋과 무관하므로 as_of당 한 번만 계산
+CREATE TABLE stock_metric_values (
+  stock_id  INT          NOT NULL REFERENCES stocks ON DELETE CASCADE,
+  as_of     DATE         NOT NULL,
+  metric    VARCHAR(24)  NOT NULL,                                -- earnings_yield, book_yield, roe …
+  factor    VARCHAR(12)  NOT NULL CHECK (factor IN ('value','quality','growth','safety','momentum')),
+  raw_value NUMERIC,                                              -- 계산 불가면 NULL
+  z_raw     NUMERIC(8,4),                                         -- 국가 내 로버스트 Z(방향 반영, ±3 클리핑)
+  z_adj     NUMERIC(8,4),                                         -- 주 그룹 축소 추정으로 섹터 중립화한 Z
+  PRIMARY KEY (stock_id, as_of, metric)
+);
+
+-- 프리셋별 팩터 점수·종합 점수
+CREATE TABLE stock_scores (
+  stock_id        INT          NOT NULL REFERENCES stocks ON DELETE CASCADE,
+  as_of           DATE         NOT NULL,
+  preset_id       SMALLINT     NOT NULL REFERENCES scoring_presets,
+  value_score     NUMERIC(8,4),                                   -- 팩터 점수 = 유효 지표 z_adj 평균 (Z 단위)
+  quality_score   NUMERIC(8,4),
+  growth_score    NUMERIC(8,4),
+  safety_score    NUMERIC(8,4),
+  momentum_score  NUMERIC(8,4),
+  composite       NUMERIC(8,4),                                   -- 유효 팩터 가중 평균(가중치 재정규화), 유효 팩터 < 3이면 NULL
+  score           NUMERIC(5,2) CHECK (score BETWEEN 0 AND 100),   -- 100·Φ(국가 내 표준화한 composite)
+  factor_coverage SMALLINT     NOT NULL CHECK (factor_coverage BETWEEN 0 AND 5),
+  data_quality    JSONB        NOT NULL DEFAULT '{}',             -- 계산 불가 지표·팩터와 사유
+  PRIMARY KEY (stock_id, as_of, preset_id)
+);
+
+-- =====================================================================
+-- Stage 5-D — 데이터 유효기간·밸류에이션 기초값 (원본 migration 006_sector_freshness)
+-- =====================================================================
+
+-- 데이터 유효기간 (migration 006): 가격 외 데이터를 종목·종류별로 언제 다시 받을지
+--   kind: financials(FY 재무 + 미국 기초값) / disclosures(공시) / price_history(2년 일봉 백필)
+--   valid_until이 지나기 전에는 요청이 와도 다시 받지 않는다(일봉은 이 표와 관계없이 항상 빠진 날짜만 증분)
+CREATE TABLE data_freshness (
+  stock_id    INT          NOT NULL REFERENCES stocks ON DELETE CASCADE,
+  kind        VARCHAR(16)  NOT NULL CHECK (kind IN ('financials','disclosures','price_history')),
+  fetched_at  TIMESTAMPTZ  NOT NULL,                             -- 마지막 시도 시각
+  valid_until TIMESTAMPTZ  NOT NULL,
+  status      VARCHAR(10)  NOT NULL CHECK (status IN ('SUCCESS','FAILED')),
+  error       TEXT,
+  PRIMARY KEY (stock_id, kind),
+  CHECK (valid_until >= fetched_at)
+);
+
+-- 밸류에이션 기초값 (migration 006): 미국 종목 PER·PBR·시가총액을 '기초값 × 종가'로 직접 계산할 때 쓰는 값
+--   SEC companyfacts에서 재무와 같은 호출로 받는다(유효기간은 data_freshness.financials)
+CREATE TABLE fundamental_bases (
+  stock_id           INT           PRIMARY KEY REFERENCES stocks ON DELETE CASCADE,
+  shares_outstanding BIGINT        CHECK (shares_outstanding > 0),
+  shares_as_of       DATE,
+  dps                NUMERIC(18,4) CHECK (dps >= 0),             -- 최근 FY 주당 배당(선언 기준), NULL = 공시값 없음
+  dps_period_end     DATE,
+  source             VARCHAR(20)   NOT NULL,
+  updated_at         TIMESTAMPTZ   NOT NULL DEFAULT now()
 );

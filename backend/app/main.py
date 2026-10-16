@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -14,8 +15,9 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import deps, health, market, portfolios, stocks, watchlist
+from app.api import analysis, deps, health, market, portfolios, stocks, watchlist
 from app.core.config import FRONTEND_DIR, get_settings
 from app.core.db import get_engine
 from app.core.errors import NotFound, install_error_handlers, internal_error_response
@@ -31,16 +33,16 @@ WEB_DIR = FRONTEND_DIR
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """SCHEDULER_ENABLED면 앱 안 스케줄러(4시간 갱신)를 백그라운드로 돌린다."""
+    """SCHEDULER_ENABLED면 앱 안 스케줄러(4시간 갱신·비교군 1일 갱신)를 백그라운드로 돌린다."""
     task = None
     if get_settings().scheduler_enabled:
         engine, ttl = get_engine(), get_settings().refresh_ttl_hours
 
         def refresh_service():
             pv = deps.get_providers()
-            return deps.RefreshService(engine, pv, FxService(engine, pv.fx, ttl), ttl)
+            return deps.RefreshService(engine, pv, FxService(engine, pv.fx, ttl), ttl, scorer=deps.get_scorer())
 
-        task = asyncio.create_task(Scheduler(engine, refresh_service).run_forever())
+        task = asyncio.create_task(Scheduler(engine, refresh_service, deps.get_providers, deps.get_scorer()).run_forever())
     yield
     if task:
         task.cancel()
@@ -55,6 +57,12 @@ app = FastAPI(
     description="국내·미국 주식 일봉·지수·환율·재무·공시 기반 조회·분석 API. 일봉 기준이며 투자 권유가 아닙니다.",
 )
 install_error_handlers(app)
+
+# ── [S4-D] 게스트 세션 ── (GUEST_SESSION_ENABLED일 때만 deps.get_current_user_id가 쿠키를 읽고 쓴다)
+if get_settings().guest_session_enabled and not get_settings().session_secret:
+    raise RuntimeError("GUEST_SESSION_ENABLED=true면 SESSION_SECRET이 필요합니다")
+app.add_middleware(SessionMiddleware, secret_key=get_settings().session_secret or secrets.token_hex(32),
+                   session_cookie="stockmind_session", max_age=365 * 24 * 3600, same_site="lax", https_only=True)
 
 
 @app.middleware("http")
@@ -96,6 +104,8 @@ api.include_router(portfolios.router)
 # ── [S3-B] financials·disclosures ──
 
 # ── [S4] 매력도·비교군·분석 ──
+for r in (analysis.router, analysis.stats_router, analysis.scoring_router):
+    api.include_router(r)
 
 # ── [S5] 홈 위젯·통계·검색 ──
 

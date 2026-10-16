@@ -16,9 +16,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import Conflict, NotFound, Unprocessable
-from app.models import Market, Portfolio, PortfolioItem, Stock, User
+from app.models import Market, Portfolio, PortfolioItem, Stock, User, WatchlistItem
 from app.queries import sql
 from app.services.fx import FxQuote, FxService
+from app.services.scoring import default_preset
 
 CENT = Decimal("0.01")
 WON = Decimal("1")
@@ -220,7 +221,7 @@ class PortfolioService:
         return self._valued_items(portfolio_id)
 
     def _valued_items(self, portfolio_id: int) -> tuple[list[dict], FxQuote | None]:
-        rows = self.db.execute(sql("portfolio_items_valued"), {"pid": portfolio_id}).mappings().all()
+        rows = self.db.execute(sql("portfolio_items_valued"), {"pid": portfolio_id, "preset": default_preset()}).mappings().all()
         fx = self.fx.get_current_rate() if any(r["currency"] == "USD" for r in rows) else None
         out = []
         for r in rows:
@@ -232,8 +233,7 @@ class PortfolioService:
             local_ret = close / ref_p - 1 if close is not None else None
             out.append({
                 **{k: r[k] for k in ("item_id", "stock_id", "market", "ticker", "name", "currency", "country",
-                                     "quantity", "ref_price", "ref_fx_rate", "ref_date", "memo")},
-                "score": None,                     # 매력도는 Stage 4에서 채운다(응답 필드는 유지)
+                                     "quantity", "ref_price", "ref_fx_rate", "ref_date", "memo", "score")},
                 "cost_krw": cost,
                 "current_price": close, "price_date": r["trade_date"], "current_fx_rate": fx_now,
                 "value_krw": value, "pnl_krw": q(pnl, WON) if pnl is not None else None,
@@ -265,6 +265,8 @@ class PortfolioService:
             by_market[i["country"]] = by_market.get(i["country"], Decimal(0)) + i["cost_krw"]
             for g in i["groups"]:                  # 여러 그룹 소속이면 각 그룹에 모두 반영
                 by_group[g] = by_group.get(g, Decimal(0)) + i["cost_krw"]
+        scored = [i for i in items if i["score"] is not None]
+        scored_cost = sum((i["cost_krw"] for i in scored), Decimal(0))
         valued = [i for i in items if i["value_krw"] is not None]
         total_value = sum((i["value_krw"] for i in valued), Decimal(0))
         valued_cost = sum((i["cost_krw"] for i in valued), Decimal(0))
@@ -276,7 +278,8 @@ class PortfolioService:
             "market_weights": [{"country": k, "cost_krw": v, "weight": ratio(v, used)} for k, v in sorted(by_market.items())],
             "group_weights": [{"group": k, "cost_krw": v, "weight": ratio(v, used)}
                               for k, v in sorted(by_group.items(), key=lambda kv: -kv[1])],
-            "weighted_score": None,                # 가중 매력도는 Stage 4에서 계산한다
+            "weighted_score": q(sum((i["cost_krw"] * i["score"] for i in scored), Decimal(0)) / scored_cost)
+                              if scored_cost else None,
             "total_value_krw": total_value, "total_pnl_krw": q(total_pnl, WON),
             "total_pnl_rate": ratio(total_pnl, valued_cost),
             "price_effect_krw": sum((i["price_effect_krw"] for i in valued), Decimal(0)),
@@ -288,6 +291,65 @@ class PortfolioService:
         }
 
     # ------------------------------------------------------------ 내부
+    # ------------------------------------------------------------ 관심종목 균등 배분 미리보기 (저장하지 않음)
+    def preview_equal_weight(self, portfolio_id: int, targets: list[tuple[str, str]] | None,
+                             budget: Decimal | None) -> dict:
+        """예산을 대상 종목 수로 똑같이 나눈 몫으로 정수 수량을 계산한다(담기 금액 모드와 같은 내림 환산).
+        이미 담은 종목·시세 없는 종목·1주가 몫보다 비싼 종목은 사유와 함께 skipped. DB에는 쓰지 않는다."""
+        pf = self.get(portfolio_id)
+        used = self.used_krw(portfolio_id)
+        remaining = pf.seed_krw - used
+        budget = remaining if budget is None else budget
+        if budget <= 0 or budget > remaining:
+            raise Conflict("잔여 시드가 없습니다" if budget <= 0 else "예산이 잔여 시드를 넘습니다",
+                           detail={"seed_krw": pf.seed_krw, "used_krw": used, "remaining_krw": remaining,
+                                   "budget_krw": budget}, code="SEED_EXCEEDED")
+        if targets is None:
+            stocks = list(self.db.execute(
+                select(Stock).join(WatchlistItem, WatchlistItem.stock_id == Stock.stock_id)
+                .where(WatchlistItem.user_id == self.user_id)
+                .order_by(WatchlistItem.sort_order, WatchlistItem.added_at)).scalars())
+            if not stocks:
+                raise Unprocessable("관심종목이 없습니다. 종목을 지정하거나 관심종목을 추가하세요", code="EMPTY_WATCHLIST")
+        else:
+            stocks = [self.find_stock(m, t) for m, t in targets]
+        held = set(self.db.execute(select(PortfolioItem.stock_id)
+                                   .where(PortfolioItem.portfolio_id == portfolio_id)).scalars())
+
+        def skip(s: Stock, reason: str, message: str, **extra) -> dict:
+            return {"market": s.market.code, "ticker": s.ticker, "name": s.name, "reason": reason, "message": message, **extra}
+
+        skipped, quotes = [], []
+        for s in stocks:
+            if s.stock_id in held:
+                skipped.append(skip(s, "ALREADY_IN_PORTFOLIO", "이미 담은 종목입니다(수량 변경은 담은 종목 수정)"))
+                continue
+            try:
+                quotes.append(self.ref_quote(s))
+            except Unprocessable:
+                skipped.append(skip(s, "NO_PRICE", "시세가 없습니다"))
+        share = budget / len(quotes) if quotes else Decimal(0)        # 균등 몫(원)
+        items, fx = [], None
+        for qt in quotes:
+            unit = qt.unit_cost_krw
+            qty = quantity_for("amount", share, pf.seed_krw, unit)
+            if qty <= 0:
+                skipped.append(skip(qt.stock, "PRICE_ABOVE_SHARE", "1주 원가가 균등 몫보다 큽니다",
+                                    unit_cost_krw=q(unit), share_krw=q(share)))
+                continue
+            fx = fx or qt.fx
+            items.append({"market": qt.stock.market.code, "ticker": qt.stock.ticker, "name": qt.stock.name,
+                          "currency": qt.stock.market.currency, "price": qt.price, "price_date": qt.price_date,
+                          "fx_rate": qt.fx_rate, "unit_cost_krw": q(unit), "quantity": qty,
+                          "cost_krw": q(qty * qt.price * qt.fx_rate)})
+        total = sum((i["cost_krw"] for i in items), Decimal(0))
+        for i in items:
+            i["weight"] = q(i["cost_krw"] / total, Decimal("0.000001")) if total else None
+        return {"portfolio_id": portfolio_id, "seed_krw": pf.seed_krw, "used_krw": used, "remaining_krw": remaining,
+                "budget_krw": budget, "target_count": len(quotes), "share_krw": q(share), "items": items,
+                "total_cost_krw": total, "leftover_krw": budget - total, "skipped": skipped,
+                "fx_rate": fx.usd_krw if fx else None, "fx_rate_at": fx.rate_at if fx else None, "saved": False}
+
     def _commit_unique(self, message: str, code: str) -> None:
         try:
             self.db.commit()

@@ -16,8 +16,10 @@ from app.core.config import ROOT_DIR
 from app.ingest.preprocess import Quarantined, clean_bars, clean_fx
 from app.ingest.store import DART_LOCK_KEY, advisory_lock, job_log, upsert
 from app.ingest.universe import index_refs, load_universe, stock_refs
-from app.providers.base import Financial, ProviderError
+from app.providers.base import Financial, ProviderError, StockRef
 from app.providers.factory import Providers
+from app.services import freshness
+from app.services.scoring import sync_presets
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +39,19 @@ def init_db(engine: Engine, reset: bool = False) -> None:
                 continue
             raw.execute(path.read_text(encoding="utf-8"))
             log.info("적용: db/%s", name)
+        sync_presets(conn)
+
+
+# ── [S4-D] 마이그레이션 ──
+def migrate(engine: Engine, name: str) -> None:
+    """마이그레이션 파일 → views.sql 재적용(CREATE OR REPLACE라 멱등, 뷰에 붙인 열을 반영) → 프리셋 동기화."""
+    path = ROOT_DIR / "db" / "migrations" / f"{name}.sql"
+    with engine.begin() as conn:
+        raw = conn.connection.driver_connection
+        raw.execute(path.read_text(encoding="utf-8"))
+        raw.execute((ROOT_DIR / "db" / "views.sql").read_text(encoding="utf-8"))
+        sync_presets(conn)
+    log.info("적용: %s", path.relative_to(ROOT_DIR))
 
 
 # ---------------------------------------------------------------- 마스터
@@ -72,9 +87,17 @@ def load_master(engine: Engine, offline: bool = False) -> None:
             gid = dict(conn.execute(text("SELECT name, group_id FROM peer_groups")).all())
             sid = {(m, t): i for i, m, t in conn.execute(text(
                 "SELECT s.stock_id, m.code, s.ticker FROM stocks s JOIN markets m USING (market_id)")).all()}
-            res.rows += upsert(conn, "peer_group_members", [
-                {"group_id": gid[g.name], "stock_id": sid[(market_of[t], t)]}
-                for g in u.peer_groups for t in g.members], ["group_id", "stock_id"])
+            # [S4-D] 주 그룹(섹터 중립화·비교군 선정 기준) = universe.yaml에서 종목이 처음 나오는 그룹
+            seen: set[int] = set()
+            members = []
+            for g in u.peer_groups:
+                for t in g.members:
+                    s_id = sid[(market_of[t], t)]
+                    members.append({"group_id": gid[g.name], "stock_id": s_id, "is_primary": s_id not in seen})
+                    seen.add(s_id)
+            conn.execute(text("UPDATE peer_group_members SET is_primary = false WHERE is_primary AND stock_id = ANY(:ids)"),
+                         {"ids": list(seen)})      # 노출 종목만 다시 정한다(비교군 종목의 주 그룹은 그대로)
+            res.rows += upsert(conn, "peer_group_members", members, ["group_id", "stock_id"], update=["is_primary"])
             # ── [S2-D] 기본 사용자(demo) — get_current_user_id가 돌려주는 DEFAULT_USER_ID(=1)의 행 ──
             conn.execute(text("INSERT INTO users (nickname) VALUES ('demo') ON CONFLICT (nickname) DO NOTHING"))
     if offline:
@@ -376,10 +399,49 @@ ON CONFLICT (stock_id, as_of) DO UPDATE SET
 """
 
 
+# ── [S5-D] 미국 밸류에이션 = 기초값(SEC 발행주식수·FY 순이익·자본) × 최신 종가 — 외부 호출 없음(A-123) ──
+# (fundamental_bases.dps → valuation_snapshots.dps는 Stage 6 migration 005에서 이 SQL에 붙인다)
+DERIVED_US_SQL = """
+INSERT INTO valuation_snapshots (stock_id, as_of, per, pbr, eps, bps, market_cap, shares_outstanding, source)
+SELECT lp.stock_id, lp.trade_date,
+       CASE WHEN f.net_income > 0 THEN ROUND(lp.close / (f.net_income / b.shares_outstanding), 4) END,
+       CASE WHEN f.total_equity > 0 THEN ROUND(lp.close / (f.total_equity / b.shares_outstanding), 4) END,
+       ROUND(f.net_income / b.shares_outstanding, 4),
+       ROUND(f.total_equity / b.shares_outstanding, 4),
+       ROUND(lp.close * b.shares_outstanding, 0),
+       b.shares_outstanding, 'DERIVED'
+FROM fundamental_bases b
+JOIN v_latest_price lp ON lp.stock_id = b.stock_id
+LEFT JOIN LATERAL (SELECT fs.net_income, fs.total_equity FROM financial_statements fs
+                   WHERE fs.stock_id = b.stock_id AND fs.period_type = 'FY'
+                   ORDER BY fs.period_end DESC LIMIT 1) f ON true
+WHERE b.stock_id = ANY(:ids) AND b.shares_outstanding > 0
+ON CONFLICT (stock_id, as_of) DO UPDATE SET
+  per = EXCLUDED.per, pbr = EXCLUDED.pbr, eps = EXCLUDED.eps, bps = EXCLUDED.bps, market_cap = EXCLUDED.market_cap,
+  shares_outstanding = EXCLUDED.shares_outstanding, source = EXCLUDED.source
+"""
+
+
+def derive_us_valuations(engine: Engine, stock_ids: list[int]) -> int:
+    if not stock_ids:
+        return 0
+    with engine.begin() as conn:
+        return conn.execute(text(DERIVED_US_SQL), {"ids": stock_ids}).rowcount
+
+
+def _has_base(engine: Engine, stock_ids: list[int]) -> set[int]:
+    if not stock_ids:
+        return set()
+    with engine.connect() as conn:
+        return set(conn.execute(text("""SELECT stock_id FROM fundamental_bases
+                                        WHERE stock_id = ANY(:ids) AND shares_outstanding > 0"""),
+                                {"ids": stock_ids}).scalars())
+
+
 def load_valuations_bulk(engine: Engine, providers: Providers, stock_ids: list[int], *,
                          today: date | None = None, day: date | None = None) -> dict[str, str]:
     """국내: 확정된 최근 거래일 하루치 전 종목 밸류에이션(호출 2회)에서 대상만 저장.
-    미국: 종목별 수집(yfinance 스냅샷)으로 넘긴다. (기초값 × 종가 계산은 Stage 5 fundamental_bases와 함께)"""
+    미국: 기초값 × 종가로 계산(호출 없음). 기초값이 아직 없는 종목은 종목별 수집으로 넘긴다."""
     with engine.connect() as conn:
         refs = stock_refs(conn, stock_ids=stock_ids)
     statuses: dict[str, str] = {}
@@ -404,7 +466,13 @@ def load_valuations_bulk(engine: Engine, providers: Providers, stock_ids: list[i
         statuses.update({r.ticker: "SUCCESS" if r.stock_id in got else "FAILED" for r in kr})
     else:
         rest += [r.stock_id for r in kr]
-    rest += [r.stock_id for r in refs if r.country == "US"]
+    us = [r for r in refs if r.country == "US"]
+    based = _has_base(engine, [r.stock_id for r in us])
+    if based:
+        with job_log(engine, source="INTERNAL", job_type="VALUATION", label=f"기초값×종가 {len(based)}종목") as res:
+            res.rows = derive_us_valuations(engine, sorted(based))
+        statuses.update({r.ticker: res.status for r in us if r.stock_id in based})
+    rest += [r.stock_id for r in us if r.stock_id not in based]
     if rest:
         statuses.update(load_valuations(engine, providers, stock_ids=rest, history_days=10, today=today))
     return statuses
@@ -422,10 +490,17 @@ def load_valuations(engine: Engine, providers: Providers, *, full: bool = False,
         last = dict(conn.execute(text(
             "SELECT stock_id, MAX(as_of) FROM valuation_snapshots WHERE source <> 'DERIVED' GROUP BY stock_id")).all())
         last_trade = dict(conn.execute(text("SELECT stock_id, MAX(trade_date) FROM daily_prices GROUP BY stock_id")).all())
+    based = _has_base(engine, [r.stock_id for r in refs if r.country == "US"])
     kr_end = min(today, last_closed_day("KR"))       # KRX 공표 전 당일 값(0 → 빈 행)을 받지 않는다
     for ref in refs:
         p = providers.valuation(ref.country)
         source = p.source if p else "DERIVED"
+        if ref.stock_id in based:                     # 미국: 기초값이 있으면 기초값 × 종가 (외부 호출 없음)
+            with job_log(engine, source="INTERNAL", job_type="VALUATION", stock_id=ref.stock_id, label=ref.ticker) as res:
+                res.rows = derive_us_valuations(engine, [ref.stock_id])
+                res.notes.append("기초값 × 종가")
+            statuses[ref.ticker] = res.status
+            continue
         with job_log(engine, source=source if source != "DERIVED" else "INTERNAL", job_type="VALUATION",
                      stock_id=ref.stock_id, label=ref.ticker) as res:
             if ref.country == "US":
@@ -534,8 +609,33 @@ def _load_financials(engine: Engine, providers: Providers, refs: list, years: in
                     res.notes.append(f"{f.period_end.year}: " + ", ".join(f.notes + [f"{m} 없음" for m in missing]))
             if len(fins) < years:
                 res.notes.append(f"FY {len(fins)}/{years}개")
+            if ref.country == "US" and ref.cik and providers.us_reference is not None:
+                _load_valuation_base(engine, providers, ref, res.notes)
+        # ── [S5-D] 재무 유효기간 ──
+        with engine.begin() as conn:
+            until = freshness.mark(conn, "financials", ref.stock_id, res.status == "SUCCESS", country=ref.country,
+                                   error=None if res.status == "SUCCESS" else "재무 수집 실패")
+        log.debug("재무 유효기간 %s → %s", ref.ticker, until)
         statuses[ref.ticker] = res.status
     return statuses
+
+
+def _load_valuation_base(engine: Engine, providers: Providers, ref: StockRef, notes: list[str]) -> None:
+    """미국 기초값(발행주식수·주당 배당)을 재무와 같은 SEC 응답에서 꺼내 저장하고, 기초값 × 종가 밸류에이션을 만든다."""
+    try:
+        base = providers.us_reference.get_valuation_base(ref)
+    except ProviderError as e:
+        notes.append(f"기초값 실패: {e}")
+        return
+    if base.shares_outstanding is None and base.dps is None:
+        notes.append("기초값 없음")
+        return
+    with engine.begin() as conn:
+        upsert(conn, "fundamental_bases", [{
+            "stock_id": ref.stock_id, "shares_outstanding": base.shares_outstanding, "shares_as_of": base.shares_as_of,
+            "dps": base.dps, "dps_period_end": base.dps_period_end, "source": providers.us_reference.source,
+            "updated_at": datetime.now(timezone.utc)}], ["stock_id"])
+    derive_us_valuations(engine, [ref.stock_id])
 
 
 def load_disclosures(engine: Engine, providers: Providers, *, days: int = DISCLOSURE_DAYS,
@@ -562,6 +662,11 @@ def _load_disclosures(engine: Engine, providers: Providers, refs: list, days: in
                 res.rows = upsert(conn, "disclosures", [
                     {"stock_id": ref.stock_id, "rcept_no": d.rcept_no, "title": d.title, "report_type": d.report_type,
                      "filed_at": d.filed_at, "url": d.url, "data_source": source} for d in items], ["rcept_no"])
+                # ── [S5-D] 받아 둔 재무 뒤에 사업보고서·10-K가 새로 올라왔으면 재무 유효기간을 바로 끝낸다 ──
+                if freshness.invalidate_on_annual_report(conn, ref.stock_id):
+                    res.notes.append("새 사업보고서 → 재무 유효기간 만료")
+        with engine.begin() as conn:
+            freshness.mark(conn, "disclosures", ref.stock_id, res.status == "SUCCESS")
         statuses[ref.ticker] = res.status
     return statuses
 
