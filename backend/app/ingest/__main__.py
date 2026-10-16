@@ -13,6 +13,7 @@
     python -m app.ingest all                 # master → prices → indices → fx → financials → valuation → disclosures
     python -m app.ingest seed-demo           # demo 관심종목 8건 + 모의 포트폴리오 2개
     python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용)
+    python -m app.ingest benchmark [--reselect]   # 매력도 비교군: 선정(30일마다/강제) → 평시 데이터 → 점수
 """
 from __future__ import annotations
 
@@ -56,6 +57,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tickers", nargs="*")
     sub.add_parser("all")
     # ── [S4-C] 매력도 ──
+    # ── [S4-D] 비교군 ──
+    sub.add_parser("benchmark").add_argument("--reselect", action="store_true", help="시가총액 순위로 지금 다시 고른다")
     args = ap.parse_args(argv)
 
     setup_logging(get_settings().log_level)
@@ -116,6 +119,18 @@ def main(argv: list[str] | None = None) -> int:
         jobs.load_valuations(engine, pv)
         jobs.load_disclosures(engine, pv)
     # ── [S4-C] 매력도 ──
+    # ── [S4-D] 비교군 ──
+    elif args.cmd == "benchmark":
+        from app.ingest.benchmark import run_benchmark
+        from app.services.scoring import compute_scores
+        out = run_benchmark(engine, providers(), compute_scores, reselect=args.reselect)
+        if out is None:
+            print("다른 프로세스가 비교군 갱신 중 — 건너뜀")
+        else:
+            if "select" in out:
+                print("선정:", out["select"]["by_group"])
+                print("시가총액 없음(제외):", out["select"]["no_market_cap"] or "-")
+            print({k: v for k, v in out.items() if k in ("stocks", "pruned", "scores")})
     print(f"[{args.cmd}] 완료 {time.monotonic() - t0:.1f}s")
     return 0
 
