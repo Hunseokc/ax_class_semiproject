@@ -33,7 +33,7 @@ def test_first_refresh_runs_every_job_once(engine):
     p = make_providers()
     result = service(engine, p).refresh()
     assert {j.job_type: j.status for j in result.jobs} == {
-        "FX": "SUCCESS", "INDICES": "SUCCESS", "PRICES": "SUCCESS", "VALUATION": "SUCCESS"}
+        "FX": "SUCCESS", "INDICES": "SUCCESS", "PRICES": "SUCCESS", "VALUATION": "SUCCESS", "SCORES": "SKIPPED"}
     assert call_counts(p) == EXPECTED_ONE_RUN
 
 
@@ -165,7 +165,7 @@ def test_refresh_api(client, engine):
     assert r.status_code == 200
     body = r.json()
     jobs = {j["job_type"]: j["status"] for j in body["jobs"]}
-    assert jobs == dict.fromkeys(("FX", "INDICES", "PRICES", "VALUATION"), "SUCCESS")
+    assert jobs == {**dict.fromkeys(("FX", "INDICES", "PRICES", "VALUATION"), "SUCCESS"), "SCORES": "SKIPPED"}
     assert body["ttl_hours"] == 4 and body["next_refresh_available_at"]
     status = {j["job_type"]: j["status"] for j in client.get("/api/v1/market/refresh/status").json()["jobs"]}
     assert all(v == "FRESH" for v in status.values())
