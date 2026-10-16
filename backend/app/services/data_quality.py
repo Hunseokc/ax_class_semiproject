@@ -20,7 +20,6 @@ def data_quality(conn: Connection, *, days: int, ttl_hours: float, now: datetime
     now = now or datetime.now(timezone.utc)
     since = now - timedelta(days=days)
     stale_after = timedelta(hours=ttl_hours * 2)
-    # TODO(연결): B의 queries/stats_data_quality.sql — B가 머지하기 전에는 이 줄에서 '쿼리 파일 없음' 오류가 난다
     rows = [dict(r) for r in conn.execute(sql("stats_data_quality"), {"since": since}).mappings()]
     jobs, stale = [], []
     for r in rows:

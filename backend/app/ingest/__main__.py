@@ -14,7 +14,7 @@
     python -m app.ingest scores              # 매력도 점수 재생성 (오늘 as_of, DELETE 후 INSERT)
     python -m app.ingest explain             # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
     python -m app.ingest seed-demo           # demo 관심종목 8건 + 모의 포트폴리오 2개
-    python -m app.ingest status              # 테이블별 행 수·기간·최근 실패 + 데이터 품질(최근 7일)
+    python -m app.ingest status              # 테이블별 행 수·기간·최근 실패
     python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용)
     python -m app.ingest benchmark [--reselect]   # 매력도 비교군: 선정(30일마다/강제) → 평시 데이터 → 점수
     python -m app.ingest hydrate 042700      # 비교군 종목 상세(공시·2년 일봉·5개년 재무) 받기
@@ -208,7 +208,8 @@ def main(argv: list[str] | None = None) -> int:
     # ── [S5-C] 데이터 상태 ──
     elif args.cmd == "status":
         status(engine)
-    print(f"[{args.cmd}] 완료 {time.monotonic() - t0:.1f}s")
+    if args.cmd not in ("status",):
+        print(f"[{args.cmd}] 완료 {time.monotonic() - t0:.1f}s")
     return 0
 
 
