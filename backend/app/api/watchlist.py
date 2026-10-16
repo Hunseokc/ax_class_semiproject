@@ -9,11 +9,12 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, resolve_stock
+from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, get_hydrator, resolve_stock
 from app.core.errors import Conflict, NotFound
-from app.models import User, WatchlistItem
+from app.models import Stock, User, WatchlistItem
 from app.queries import sql
 from app.schemas.api import WatchlistCard, WatchlistCreate, WatchlistOrder, WatchlistOut
+from app.services.hydration import Hydrator
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 
@@ -35,7 +36,8 @@ def list_watchlist(user_id: int = Depends(get_current_user_id), db: Session = De
 
 
 @router.post("", response_model=WatchlistCard, status_code=201, summary="관심종목 추가")
-def add_watchlist(body: WatchlistCreate, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def add_watchlist(body: WatchlistCreate, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db),
+                  hydrator: Hydrator = Depends(get_hydrator)):
     _require_user(db, user_id)
     s = resolve_stock(db, body.market, body.ticker)
     next_order = db.execute(select(func.coalesce(func.max(WatchlistItem.sort_order), 0) + 1)
@@ -47,6 +49,9 @@ def add_watchlist(body: WatchlistCreate, user_id: int = Depends(get_current_user
         db.rollback()
         raise Conflict("이미 관심종목에 있습니다", detail={"market": s["market"], "ticker": s["ticker"]},
                        code="DUPLICATE_WATCHLIST") from e
+    # 매력도 비교군 종목을 관심종목에 담으면 상세 데이터를 받고, 이후 4시간 갱신 대상이 된다
+    st = db.execute(select(Stock.coverage, Stock.detail_synced_at).where(Stock.stock_id == s["stock_id"])).one()
+    hydrator.request(s["stock_id"], st.coverage, st.detail_synced_at)
     return next(c for c in _cards(db, user_id) if c["stock_id"] == s["stock_id"])
 
 

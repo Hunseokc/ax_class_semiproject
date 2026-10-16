@@ -12,10 +12,12 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.db import get_engine, session_factory
 from app.core.errors import NotFound, Unprocessable
+from app.ingest.benchmark import config as benchmark_config
 from app.providers.factory import Providers, default_providers
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN
 from app.services.fx import FxService
 from app.services.guest import create_guest, user_exists
+from app.services.hydration import Hydrator
 from app.services.portfolio import PortfolioService
 from app.services.refresh import RefreshService
 from app.services.scoring import default_preset
@@ -99,9 +101,22 @@ def get_portfolio_service(db: Session = Depends(get_db), fx: FxService = Depends
 
 
 # ── [S3-D] 갱신 서비스 ──
+def get_scorer():
+    """매력도 점수 계산기 (갱신 SCORES 작업·비교군 갱신에서 쓴다)."""
+    from app.services.scoring import compute_scores
+    return compute_scores
+
+
 def get_refresh_service(engine: Engine = Depends(get_engine_dep), providers: Providers = Depends(get_providers),
-                        fx: FxService = Depends(get_fx_service)) -> RefreshService:
-    return RefreshService(engine, providers, fx, get_settings().refresh_ttl_hours)
+                        fx: FxService = Depends(get_fx_service), scorer=Depends(get_scorer)) -> RefreshService:
+    return RefreshService(engine, providers, fx, get_settings().refresh_ttl_hours, scorer=scorer)
+
+
+# ── [S4-D] 비교군 상세 데이터 요청 시 수집 ──
+@lru_cache
+def get_hydrator() -> Hydrator:
+    """비교군 종목 상세 데이터를 요청 시 받는 작업자 (프로세스당 1개)."""
+    return Hydrator(get_engine, _providers, benchmark_config()["detail_ttl_hours"])
 
 
 # ── [S4-B] 투자 성향 프리셋 ──
