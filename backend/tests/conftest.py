@@ -30,6 +30,7 @@ from app.api import deps
 from app.core.config import get_settings
 from app.ingest import jobs
 from app.main import app
+from app.services.hydration import ON_DEMAND
 from tests.fakes import FakeFx, make_providers
 
 # FK 자식 → 부모 순서(TRUNCATE ... CASCADE라 순서는 중요하지 않지만 읽기 쉽게)
@@ -111,7 +112,7 @@ class RecordingHydrator:
         self.requests: list[int] = []
 
     def request(self, stock_id, coverage, synced_at):
-        if coverage != "benchmark":
+        if coverage not in ON_DEMAND:
             return "ready"
         self.requests.append(stock_id)
         return "loading"

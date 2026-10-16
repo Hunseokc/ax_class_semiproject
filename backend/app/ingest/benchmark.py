@@ -3,9 +3,9 @@
 - 선정: 국가·경쟁 그룹마다 노출 종목 + 후보(config/universe.yaml benchmark_candidates) 중 시가총액 상위
   (per_sector − 노출 종목 수)개. reselect_days(30일)마다 다시 고르고, 빠진 종목은 is_active = false
   (관심종목·포트폴리오에 있으면 계속 활성)
-- 평시 데이터(1일 1회): 일봉은 국내 날짜별 전 종목·미국 묶음 다운로드로 증분, 최신 밸류에이션, FY fin_years(3)개년 —
-  재무는 새 결산기가 나왔을 법할 때만 확인한다(DART 호출 절약). 상세 화면을 열지 않은 지 30일이 지나면 그 밖의 데이터는 정리
-- 공시·2년 일봉·5개년 재무는 상세 화면을 열거나 관심종목에 추가할 때만 받는다(app/services/hydration.py)
+- 평시 데이터(1일 1회): 일봉은 국내 날짜별 전 종목·미국 묶음 다운로드로 증분, 최신 밸류에이션,
+  재무는 유효기간(data_freshness — 공시 일정 기반 + 90일 상한)이 지난 종목만. 상세 화면을 열지 않은 지 30일이 지나면 그 밖의 데이터는 정리
+- 공시·2년 일봉·5개년 재무는 상세 화면을 열거나 관심종목에 추가할 때 유효기간이 지난 것만 받는다(app/services/hydration.py)
 """
 from __future__ import annotations
 
@@ -21,9 +21,11 @@ from app.ingest.store import BENCHMARK_LOCK_KEY, advisory_lock, job_log, upsert
 from app.ingest.universe import FREQUENT_SQL, load_universe, stock_refs, yf_symbol
 from app.providers.base import ProviderError, StockRef
 from app.providers.factory import Providers
+from app.services import freshness
 
 log = logging.getLogger(__name__)
 PRUNE_AFTER_DAYS = 30           # 상세를 마지막으로 받은 뒤 이 기간이 지나면 평시 데이터만 남긴다
+FEATURED_FIN_YEARS = jobs.FIN_YEARS
 
 
 def config() -> dict:
@@ -163,36 +165,23 @@ def selection_due(engine: Engine, now: datetime | None = None) -> bool:
 
 
 # ---------------------------------------------------------------- 평시 데이터
-def financials_due(engine: Engine, stock_ids: list[int], today: date, now: datetime | None = None) -> list[int]:
-    """최신 FY가 없거나 오래돼 새 사업보고서가 나왔을 법하고, 최근 fin_retry_days 안에 확인하지 않은 종목.
-    (공시 일정 기반 유효기간 data_freshness는 Stage 5)"""
-    cfg, now = config(), now or datetime.now(timezone.utc)
-    if not stock_ids:
-        return []
-    with engine.connect() as conn:
-        rows = conn.execute(text("""
-            SELECT s.stock_id,
-                   (SELECT MAX(f.period_end) FROM financial_statements f
-                     WHERE f.stock_id = s.stock_id AND f.period_type = 'FY') AS latest,
-                   (SELECT MAX(l.finished_at) FROM ingestion_logs l
-                     WHERE l.stock_id = s.stock_id AND l.job_type = 'FINANCIALS') AS tried
-            FROM stocks s WHERE s.stock_id = ANY(:ids)"""), {"ids": stock_ids}).all()
-    stale = timedelta(days=cfg["fin_refresh_days"])
-    retry = timedelta(days=cfg["fin_retry_days"])
-    return [r.stock_id for r in rows
-            if (r.latest is None or today - r.latest > stale) and (r.tried is None or now - r.tried > retry)]
-
-
 def load_benchmark(engine: Engine, providers: Providers, *, today: date | None = None) -> dict:
-    """비교군 평시 데이터: 일봉 증분(대량), 최신 밸류에이션(대량), 새 결산기가 나왔을 법한 종목의 재무만."""
+    """비교군 평시 데이터: 일봉 증분(대량), 최신 밸류에이션(대량), 유효기간이 지난 재무만.
+    재무는 노출·관심·포트폴리오 종목(5개년)도 함께 유효기간을 확인한다(4시간 갱신에는 재무가 없다)."""
     cfg, today = config(), today or date.today()
     with engine.connect() as conn:
         ids = [r.stock_id for r in stock_refs(conn, scope="benchmark")]
+        frequent = [r.stock_id for r in stock_refs(conn, scope="frequent")]
+        due_bench = freshness.due(conn, "financials", ids)
+        due_freq = freshness.due(conn, "financials", frequent)
     out: dict = {"stocks": len(ids)}
     out["prices"] = jobs.load_prices_bulk(engine, providers, ids, history_days=cfg["price_days"], today=today)
     out["valuation"] = jobs.load_valuations_bulk(engine, providers, ids, today=today)
-    due = financials_due(engine, ids, today)
-    out["financials"] = jobs.load_financials(engine, providers, years=cfg["fin_years"], stock_ids=due) if due else {}
+    out["financials"] = {}
+    if due_bench:
+        out["financials"].update(jobs.load_financials(engine, providers, years=cfg["fin_years"], stock_ids=due_bench))
+    if due_freq:
+        out["financials"].update(jobs.load_financials(engine, providers, years=FEATURED_FIN_YEARS, stock_ids=due_freq))
     out["pruned"] = prune_benchmark(engine, today)
     return out
 

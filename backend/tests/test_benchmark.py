@@ -1,4 +1,4 @@
-"""매력도 비교군: 갱신 범위 분리, 요청 시 상세 수집, 스케줄러 판단, 잠금, 마이그레이션.
+"""매력도 비교군: 갱신 범위 분리, 요청 시 상세 수집(유효기간이 지난 것만), 스케줄러 판단, 잠금, 마이그레이션.
 
 선정(시가총액 상위)·평시 데이터·정리는 fake provider에 시가총액(caps)·고유번호 매핑이 들어오면 원본 test_benchmark에서 옮긴다.
 """
@@ -48,10 +48,10 @@ def test_frequent_refresh_excludes_benchmark_unless_watched(engine, pv):
 
 
 # ------------------------------------------------------------------ 요청 시 상세 수집
-def test_hydrate_fetches_details_and_marks_synced(engine, pv):
+def test_hydrate_fetches_only_expired_data(engine, pv):
     sid = add_benchmark(engine)["100001"]
     hydrate(engine, pv, sid)
-    assert pv.kr_price.calls[-1][1] == TODAY - timedelta(days=730)      # 2년 일봉
+    assert pv.kr_price.calls[-1][1] == TODAY - timedelta(days=730)      # 2년 일봉 백필
     assert pv.kr_financial.calls[-1] == ("100001", 5)                  # 5개년 재무
     assert pv.kr_disclosure.calls[-1][0] == "100001"
     with engine.connect() as conn:
@@ -61,6 +61,12 @@ def test_hydrate_fetches_details_and_marks_synced(engine, pv):
     assert h.status(sid, "benchmark", synced) == "ready"
     assert h.status(sid, "benchmark", synced - timedelta(hours=25)) == "stale"
     assert h.status(1, "featured", None) == "ready"
+    # 다시 열면: 재무·공시·밸류에이션은 유효기간 안 → 일봉 증분만(백필 없음)
+    counts = (pv.kr_financial.count, pv.kr_disclosure.count, pv.kr_valuation.count)
+    out = hydrate(engine, pv, sid)
+    assert (pv.kr_financial.count, pv.kr_disclosure.count, pv.kr_valuation.count) == counts
+    assert out["financials"] == out["disclosures"] == out["valuation"] == "FRESH"
+    assert pv.kr_price.calls[-1][1] != TODAY - timedelta(days=730)      # 증분
 
 
 class CapturingExecutor:

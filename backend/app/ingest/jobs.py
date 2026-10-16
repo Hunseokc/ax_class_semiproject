@@ -18,6 +18,7 @@ from app.ingest.store import DART_LOCK_KEY, advisory_lock, job_log, upsert
 from app.ingest.universe import index_refs, load_universe, stock_refs
 from app.providers.base import Financial, ProviderError
 from app.providers.factory import Providers
+from app.services import freshness
 from app.services.scoring import sync_presets
 
 log = logging.getLogger(__name__)
@@ -556,6 +557,11 @@ def _load_financials(engine: Engine, providers: Providers, refs: list, years: in
                     res.notes.append(f"{f.period_end.year}: " + ", ".join(f.notes + [f"{m} 없음" for m in missing]))
             if len(fins) < years:
                 res.notes.append(f"FY {len(fins)}/{years}개")
+        # ── [S5-D] 재무 유효기간 ──
+        with engine.begin() as conn:
+            until = freshness.mark(conn, "financials", ref.stock_id, res.status == "SUCCESS", country=ref.country,
+                                   error=None if res.status == "SUCCESS" else "재무 수집 실패")
+        log.debug("재무 유효기간 %s → %s", ref.ticker, until)
         statuses[ref.ticker] = res.status
     return statuses
 
@@ -584,6 +590,11 @@ def _load_disclosures(engine: Engine, providers: Providers, refs: list, days: in
                 res.rows = upsert(conn, "disclosures", [
                     {"stock_id": ref.stock_id, "rcept_no": d.rcept_no, "title": d.title, "report_type": d.report_type,
                      "filed_at": d.filed_at, "url": d.url, "data_source": source} for d in items], ["rcept_no"])
+                # ── [S5-D] 받아 둔 재무 뒤에 사업보고서·10-K가 새로 올라왔으면 재무 유효기간을 바로 끝낸다 ──
+                if freshness.invalidate_on_annual_report(conn, ref.stock_id):
+                    res.notes.append("새 사업보고서 → 재무 유효기간 만료")
+        with engine.begin() as conn:
+            freshness.mark(conn, "disclosures", ref.stock_id, res.status == "SUCCESS")
         statuses[ref.ticker] = res.status
     return statuses
 
