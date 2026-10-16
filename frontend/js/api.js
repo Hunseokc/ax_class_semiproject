@@ -48,8 +48,8 @@ export const api = {
 // 화면에서 쓰는 호출 모음 ----------------------------------------------------------
 // ── [S1-A] Market · Stocks ──
 // group 은 경쟁 그룹 '이름'(예: "반도체"), q 는 이름·티커 검색어 — 원본 stocks.js 와 같은 방식
-export const getStocks = ({ country, sort = "market_cap", order = "desc", group, q, limit = 100, offset = 0 } = {}) =>
-  api.get("/stocks", { country, sort, order, group, q, limit, offset });
+export const getStocks = ({ country, sort = "market_cap", order = "desc", group, q, limit = 100, offset = 0, preset = getPreset() } = {}) =>   // [S4-A] preset
+  getWithPreset("/stocks", { country, sort, order, group, q, limit, offset, preset });
 
 export const getStock = (market, ticker) => api.get(`/stocks/${market}/${ticker}`);
 
@@ -62,7 +62,7 @@ export const getFx = () => api.get("/market/fx");
 
 // ── [S2-A] Watchlist · Portfolios ──
 // 관심종목 -------------------------------------------------------------------------
-export const getWatchlist = () => api.get("/watchlist");
+export const getWatchlist = (preset = getPreset()) => getWithPreset("/watchlist", { preset });   // [S4-A] preset
 export const addWatch = (market, ticker) => api.post("/watchlist", { market, ticker });
 export const removeWatch = (market, ticker) => api.del(`/watchlist/${market}/${ticker}`);
 // items: [{market, ticker, sort_order}] — 바꿀 종목만 보내도 된다
@@ -91,5 +91,56 @@ export const getRefreshStatus = () => api.get("/market/refresh/status");
 export const postRefresh = () => api.post("/market/refresh");
 
 // ── [S4-A] 매력도 프리셋 · 분석 ──
+// 투자 성향(매력도 프리셋) — 대시보드·리스트·상세가 같은 값을 쓴다.
+// 우선순위: URL ?preset= → 브라우저 저장값 → balanced. 바꾸면 저장값·URL을 갱신하고 preset-change 이벤트를 보낸다.
+const PRESET_KEY = "scorePreset";
+const LEGACY_PRESETS = { quality: "balanced" };      // 없어진 프리셋 → 대체값
+export const DEFAULT_PRESET = "balanced";
+export const PRESET_EVENT = "preset-change";
+
+const normalizePreset = (code) => LEGACY_PRESETS[code] || code || DEFAULT_PRESET;
+function storedPreset() {
+  try { return localStorage.getItem(PRESET_KEY); } catch { return null; }
+}
+
+export function getPreset() {
+  return normalizePreset(new URLSearchParams(location.search).get("preset") || storedPreset());
+}
+
+export function setPreset(code, { silent = false } = {}) {
+  try { localStorage.setItem(PRESET_KEY, code); } catch { /* 저장 불가(사생활 보호 모드 등)면 URL로만 유지 */ }
+  const url = new URL(location.href);
+  url.searchParams.set("preset", code);
+  history.replaceState(history.state, "", url);
+  if (!silent) document.dispatchEvent(new CustomEvent(PRESET_EVENT, { detail: { preset: code } }));
+}
+
+// 링크로 받은 값은 저장해 두고, 옛 값(quality)은 대체값으로 바꿔 둔다
+{
+  const current = getPreset();
+  if (storedPreset() !== current) {
+    try { localStorage.setItem(PRESET_KEY, current); } catch { /* 저장 불가 */ }
+  }
+  const inUrl = new URLSearchParams(location.search).get("preset");
+  if (inUrl && inUrl !== current) setPreset(current, { silent: true });
+}
+
+// 기억해 둔 프리셋이 서버에서 없어졌으면(422 UNKNOWN_PRESET) 기본값으로 한 번만 다시 요청한다
+async function getWithPreset(path, params) {
+  try {
+    return await request("GET", path, { params });
+  } catch (e) {
+    if (e.code !== "UNKNOWN_PRESET" || !params?.preset || params.preset === DEFAULT_PRESET) throw e;
+    setPreset(DEFAULT_PRESET, { silent: true });
+    return request("GET", path, { params: { ...params, preset: DEFAULT_PRESET } });
+  }
+}
+
+export const getAnalysis = (market, ticker, preset = getPreset()) =>
+  getWithPreset(`/stocks/${market}/${ticker}/analysis`, { preset });
+export const getPresets = () => api.get("/scoring/presets");
+export const getPeers = (market, ticker) => api.get(`/stocks/${market}/${ticker}/peers`);
+export const getPeersChart = (market, ticker, range, groupId) =>
+  api.get(`/stocks/${market}/${ticker}/peers/chart`, { range, group_id: groupId });
 
 // ── [S5] 홈 · 통계 · 검색 ──
