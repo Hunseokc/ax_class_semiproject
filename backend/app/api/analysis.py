@@ -354,8 +354,6 @@ class MonthlyOut(Schema):
     items: list[MonthlyItem]
 
 
-# TODO(껍데기): B — 본문을 원본대로 교체(queries/stats_monthly.sql: date_trunc + GROUP BY, FIRST_VALUE/LAST_VALUE, is_partial).
-#   주소·인자·응답 모델은 원본 그대로다. 지금은 없는 종목만 404로 막고, items는 docs/06 3-6 예시 값(2개월)을 돌려준다.
 @stats_router.get("/monthly", response_model=MonthlyOut,
                   summary="종목 월별 집계: 거래일 수·평균 종가·최고/최저·월초 대비 월말 수익률·거래량 (진행 중인 달은 is_partial)")
 def stats_monthly(market: str = Query(pattern=MARKET_PATTERN, examples=["KOSPI"]),
@@ -365,16 +363,9 @@ def stats_monthly(market: str = Query(pattern=MARKET_PATTERN, examples=["KOSPI"]
     s = resolve_stock(db, market, ticker)
     tz = db.execute(text("SELECT timezone FROM markets WHERE code = :m"), {"m": s["market"]}).scalar_one()
     today = datetime.now(ZoneInfo(tz)).date()
-    items = [
-        {"month": "2026-09", "trading_days": 20, "first_date": date(2026, 9, 1), "last_date": date(2026, 9, 30),
-         "avg_close": 263825, "max_high": 286500, "min_low": 243000, "first_close": 261000, "last_close": 269500,
-         "monthly_return": Decimal("0.032567"), "total_volume": 337498673, "avg_volume": 16874934, "is_partial": False},
-        {"month": "2026-10", "trading_days": 4, "first_date": date(2026, 10, 1), "last_date": date(2026, 10, 7),
-         "avg_close": 273125, "max_high": 279500, "min_low": 264500, "first_close": 274500, "last_close": 269000,
-         "monthly_return": Decimal("-0.020036"), "total_volume": 54551646, "avg_volume": 13637912, "is_partial": True},
-    ]
+    rows = db.execute(sql("stats_monthly"), {"stock_id": s["stock_id"], "today": today, "months": months}).mappings().all()
     return {"market": s["market"], "ticker": s["ticker"], "name": s["name"], "currency": s["currency"],
-            "months": months, "today": today, "items": items}
+            "months": months, "today": today, "items": [dict(r) for r in rows]}
 
 
 RankingMetric = Literal["return_1m", "return_3m", "return_1y", "volume", "market_cap_krw"]
