@@ -5,6 +5,7 @@ import { color, destroyCharts, scoreGauge, sparkline } from "../components/chart
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
 import { emptyState, h, load, segmented, skeleton, toast } from "../components/ui.js";
 import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";   // [S4-A]
+import { FX_CODE, DEFAULT_METRICS, metricPicker, storedMetrics } from "../components/metric-picker.js";   // [S5-A]
 import { openWatchNote } from "../components/watch-note.js";   // [S5-A]
 import { icons } from "../components/icons.js";   // [S5-A]
 
@@ -13,8 +14,7 @@ const $ = (sel) => document.querySelector(sel);
 // 등락 색은 시장과 무관하게 상승 --up(빨강)·하락 --down(파랑)
 const trendColor = (rate) => (!rate ? color("--text-2") : color(rate > 0 ? "--up" : "--down"));
 
-// 화면에 보여줄 카드 (서버는 지수 10개를 주지만 이번 단계는 5개 + 환율)
-const SHOWN = ["KOSPI", "KOSDAQ", "SPX", "IXIC", "DJI"];
+// [S5-A] 화면에 보여줄 카드는 사용자가 metric-picker로 고른다(저장값 → 없으면 기본 5개 지수 + 환율)
 
 // ---------------------------------------------------------------- 지수·환율
 // 스파크라인 기간 — API는 1년치를 주고 화면에서 자른다(일봉 기준이라 '1일'은 없음). 기본 1개월
@@ -75,15 +75,19 @@ function fxCard(fx) {
   return el;
 }
 
+// 마지막 응답 — 표시 지표를 바꿀 때는 다시 요청하지 않고 이 값으로 다시 그린다
 let market = { indices: null, fx: null, error: null };
+let shown = [];   // [S5-A]
 
 function renderMarketRow() {
   const box = $("#market");
   destroyCharts(box);                                    // 카드를 갈아엎기 전에 이전 차트 정리
   const row = h('<div class="metric-row"></div>');
   const byCode = new Map((market.indices || []).map((i) => [i.code, i]));
-  for (const code of SHOWN) if (byCode.has(code)) row.append(indexCard(byCode.get(code)));
-  if (market.fx) row.append(fxCard(market.fx));
+  for (const code of shown) {   // [S5-A] 고른 순서대로(환율 포함)
+    if (code === FX_CODE) { if (market.fx) row.append(fxCard(market.fx)); }
+    else if (byCode.has(code)) row.append(indexCard(byCode.get(code)));
+  }
   if (market.error) {
     const card = h(`<div class="state state--error" role="alert"><p class="state__title">일부 지표를 불러오지 못했습니다</p>
       <p>${esc(market.error.message)}</p><button class="btn btn--sm" type="button">다시 시도</button></div>`);
@@ -96,7 +100,7 @@ function renderMarketRow() {
 async function loadMarket() {
   const box = $("#market");
   destroyCharts(box);
-  const sk = skeleton("card", SHOWN.length + 1);
+  const sk = skeleton("card", shown.length || DEFAULT_METRICS.length);
   sk.className = "metric-row";
   box.replaceChildren(sk);
   // 둘 중 하나가 실패해도 나머지는 보여준다
@@ -107,11 +111,54 @@ async function loadMarket() {
     error: ix.status === "rejected" ? ix.reason : fx.status === "rejected" ? fx.reason : null,
   };
   if (market.indices) $("#as-of").textContent = `일봉 기준 · 기준일 ${date(ix.value.as_of)}`;
+  mountPicker();   // [S5-A] 고를 수 있는 지표가 정해졌으니 선택 상자를 만든다
   renderMarketRow();
 }
 
 $("#spark-range").append(segmented(SPARK_RANGES, sparkRange,
   (v) => { sparkRange = v; if (market.indices || market.fx) renderMarketRow(); }, { label: "스파크라인 기간" }));
+
+// ── [S5-A] 표시 지표 선택 ──
+// index.html은 A의 담당 파일이 아니라서, 이 파일이 버튼과 상자 자리를 만들어 붙인다
+const editBtn = h('<button id="market-edit" class="btn btn--sm" type="button" aria-expanded="false" aria-controls="market-picker" disabled>표시 지표</button>');
+$("#spark-range").before(editBtn);
+$("#market").before(h('<div id="market-picker-slot"></div>'));
+editBtn.addEventListener("click", () => togglePicker(editBtn.getAttribute("aria-expanded") !== "true"));
+
+const availableMetrics = () => [...(market.indices || []).map((i) => i.code), FX_CODE];
+
+function metricGroups() {
+  const by = (country) => market.indices.filter((i) => i.country === country).map((i) => ({ code: i.code, name: i.name }));
+  return [{ label: "국내", items: by("KR") }, { label: "미국", items: by("US") },
+    { label: "환율", items: [{ code: FX_CODE, name: "USD/KRW" }] }].filter((g) => g.items.length);
+}
+
+function togglePicker(open, { focus = true } = {}) {
+  const panel = $("#market-picker");
+  if (!panel) return;
+  panel.hidden = !open;
+  editBtn.setAttribute("aria-expanded", String(open));
+  if (focus) (open ? panel.querySelector(".chip:not(:disabled)") : editBtn)?.focus();
+}
+
+function mountPicker() {
+  const wasOpen = editBtn.getAttribute("aria-expanded") === "true";
+  shown = storedMetrics(availableMetrics());
+  // 지수 목록을 못 받으면 고를 수 없다(저장된 선택을 덮어쓰지 않도록 설정을 막음)
+  if (!market.indices) {
+    $("#market-picker-slot").replaceChildren();
+    editBtn.disabled = true;
+    editBtn.setAttribute("aria-expanded", "false");
+    return;
+  }
+  $("#market-picker-slot").replaceChildren(metricPicker({
+    id: "market-picker", groups: metricGroups(), selected: shown,
+    onChange: (codes) => { shown = codes; renderMarketRow(); },
+    onClose: () => togglePicker(false),
+  }));
+  editBtn.disabled = false;
+  togglePicker(wasOpen, { focus: false });
+}
 
 loadMarket();
 
