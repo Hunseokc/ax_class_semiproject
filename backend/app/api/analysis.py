@@ -448,8 +448,6 @@ class DataQualityOut(Schema):
     stale_jobs: list[StaleJob]
 
 
-# TODO(껍데기): B — 주소·인자·응답 모델·본문은 원본 그대로다(C의 data_quality 서비스 호출, 지금은 C의 껍데기라 예시 값).
-#   B는 queries/stats_data_quality.sql을 만들고 이 주석을 지운다.
 @stats_router.get("/data-quality", response_model=DataQualityOut,
                   summary="데이터 품질 현황: 작업 종류별 마지막 성공·실패(사유), 최근 N일 상태별 건수·격리 행 수, 오래된 갱신 작업(TTL×2 초과)")
 def stats_data_quality(days: int = Query(7, ge=1, le=90, description="건수를 셀 최근 일수"),
