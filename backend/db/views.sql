@@ -168,7 +168,10 @@ SELECT l.stock_id, l.market, l.country, l.currency, l.as_of, l.close, l.change_r
        ROUND(fn.roe, 6)                  AS roe,
        ROUND(fn.debt_ratio, 6)           AS debt_ratio,
        ROUND(fn.revenue_yoy, 6)          AS revenue_yoy,
-       ROUND(fn.operating_income_yoy, 6) AS operating_income_yoy
+       ROUND(fn.operating_income_yoy, 6) AS operating_income_yoy,
+       -- 배당(마이그레이션 005에서 추가 — CREATE OR REPLACE VIEW는 끝에 붙인 열만 허용): 주당배당금 / 최신 종가
+       v.dps,
+       ROUND(v.dps / NULLIF(l.close, 0), 6) AS dividend_yield
 FROM latest l
 LEFT JOIN LATERAL (SELECT d.close FROM daily_prices d
                    WHERE d.stock_id = l.stock_id AND d.trade_date <= l.as_of - 7
@@ -189,7 +192,7 @@ LEFT JOIN risk      rk  ON rk.stock_id  = l.stock_id
 LEFT JOIN mdd       md  ON md.stock_id  = l.stock_id
 LEFT JOIN ma            ON ma.stock_id  = l.stock_id
 LEFT JOIN range_52w r52 ON r52.stock_id = l.stock_id
-LEFT JOIN LATERAL (SELECT vs.as_of, vs.per, vs.pbr, vs.eps, vs.bps, vs.market_cap
+LEFT JOIN LATERAL (SELECT vs.as_of, vs.per, vs.pbr, vs.eps, vs.bps, vs.market_cap, vs.dps
                    FROM valuation_snapshots vs
                    WHERE vs.stock_id = l.stock_id
                    ORDER BY vs.as_of DESC LIMIT 1) v ON true
