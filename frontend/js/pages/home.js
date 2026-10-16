@@ -1,9 +1,9 @@
 // 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
-import { PRESET_EVENT, getFx, getIndices, getPreset, getWatchlist, reorderWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset
-import { changeHtml, date, dateTime, esc, num, pct, price, shortDate, stockUrl, usd } from "../format.js";   // [S5-A] pct
+import { PRESET_EVENT, getFx, getIndices, getPreset, getRanking, getWatchlist, reorderWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S5-A] getRanking
+import { changeHtml, date, dateTime, esc, num, pct, price, shortDate, stockUrl, usd, volume } from "../format.js";   // [S5-A] pct·volume
 import { color, destroyCharts, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
-import { emptyState, h, load, segmented, skeleton, toast } from "../components/ui.js";
+import { emptyState, h, load, marketBadge, segmented, skeleton, toast } from "../components/ui.js";   // [S5-A] marketBadge
 import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";   // [S4-A]
 import { FX_CODE, DEFAULT_METRICS, metricPicker, storedMetrics } from "../components/metric-picker.js";   // [S5-A]
 import { openWatchNote } from "../components/watch-note.js";   // [S5-A]
@@ -238,7 +238,7 @@ function loadWatchlist() {
 loadWatchlist();
 
 // ── [S3-A] 사이드바 새로고침이 끝나면 지수·환율·관심종목을 새 값으로 다시 불러온다 ──
-document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); });
+document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); loadRanking(); });   // [S5-A] loadRanking
 
 // ── [S4-A] 투자 성향: 관심종목 카드의 매력도 게이지가 따르는 값 ──
 // index.html은 A의 담당 파일 목록에 없어서, 이 파일이 성향 메뉴 자리를 '내 관심종목' 제목줄에 만들어 붙인다
@@ -255,3 +255,54 @@ loadPresets().then(({ presets }) => {
 });
 mountPresetMenu(presetBox);
 document.addEventListener(PRESET_EVENT, loadWatchlist);   // 지수·환율은 성향과 무관해서 관심종목만 다시 조회
+
+// ── [S5-A] 순위 상위 5 (GET /statistics/ranking) ──
+// index.html은 A의 담당 파일이 아니라서, 이 파일이 관심종목 아래에 칸을 만들어 붙인다.
+// 행 = 순위 · 종목명(티커·시장 배지) · 그 탭의 순위 근거 값 하나. 거래량은 시장을 정해야 해서 국내/미국 탭이 항상 하나 선택돼 있다
+const RANK_METRICS = [
+  { value: "volume", label: "거래량" },
+  { value: "return_1m", label: "1개월 수익률" },
+  { value: "return_1y", label: "1년 수익률" },
+];
+let rankMetric = "volume";
+let rankCountry = "KR";
+
+const rankSection = h(`<section class="section" aria-labelledby="h-rank">
+    <div class="section__head"><h2 id="h-rank">순위 상위 5 <span class="section__meta">일봉 기준</span></h2>
+      <div class="section__tools"><div id="rank-metric"></div><div id="rank-country"></div></div></div>
+    <div id="rank-list"></div></section>`);
+$("#watchlist").closest("section").after(rankSection);
+
+function rankValue(i) {
+  const text = rankMetric === "volume" ? volume(i.value) : pct(i.value, { sign: true, digits: 1 });
+  const cls = rankMetric === "volume" ? "" : i.value > 0 ? " chg--up" : i.value < 0 ? " chg--down" : "";
+  return `<span class="row__value num${cls}" title="기준일 ${esc(shortDate(i.as_of))}">${text}</span>`;
+}
+
+function rankRow(i) {
+  return h(`<li><a class="row" href="${stockUrl(i.market, i.ticker)}">
+      <span class="rank">${i.rank}</span>
+      <span class="row__main"><span class="row__title">${esc(i.name)}</span>
+        <span class="row__sub">${esc(i.ticker)} ${marketBadge(i.market, i.country)}</span></span>
+      ${rankValue(i)}
+    </a></li>`);
+}
+
+function loadRanking() {
+  return load($("#rank-list"), {
+    skeleton: skeleton("row", 5),
+    fetch: async () => (await getRanking(rankMetric, rankCountry, 5)).items,
+    render: (items) => {
+      const ul = h('<ul class="list card card--flush"></ul>');
+      ul.append(...items.map(rankRow));
+      return ul;
+    },
+    empty: emptyState({ title: "순위를 매길 종목이 없습니다", body: "데이터 적재 후 다시 확인해 주세요." }),
+  });
+}
+
+$("#rank-metric").append(segmented(RANK_METRICS, rankMetric,
+  (v) => { rankMetric = v; loadRanking(); }, { label: "순위 기준 선택" }));
+$("#rank-country").append(segmented([{ value: "KR", label: "국내" }, { value: "US", label: "미국" }], rankCountry,
+  (v) => { rankCountry = v; loadRanking(); }, { label: "순위 시장 선택" }));
+loadRanking();
