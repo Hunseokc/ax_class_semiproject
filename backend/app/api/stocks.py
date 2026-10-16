@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, get_preset, resolve_stock
 from app.core.errors import NotFound, Unprocessable
 from app.queries import raw, sql
-from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, StockDetailOut, StockListOut
+from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, SearchOut, StockDetailOut, StockListOut
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -44,6 +44,20 @@ def list_stocks(
     fx_at = db.execute(text("SELECT rate_at FROM v_fx_latest")).scalar()
     return {"total": total_row["total"] if total_row else 0, "limit": limit, "offset": offset, "sort": sort, "order": order,
             "preset": preset["code"], "fx_rate_at": fx_at, "items": [dict(r) for r in rows]}
+
+
+# ── [S6-B] 상단 검색 ──
+# TODO(껍데기): B — 본문을 원본대로 교체(like_escape + queries/stock_search.sql: 이름·영문명·티커 부분 일치, 정렬 규칙,
+#   비활성 제외). 주소·인자·응답 모델은 원본 그대로다. 지금은 q가 비면 빈 목록, 아니면 예시 값(삼성전자)을 돌려준다.
+@router.get("/search", response_model=SearchOut, summary="상단 검색 자동완성 (상장 보통주 전체 · 이름·영문명·티커)")
+def search_stocks(q: str = Query(min_length=1, max_length=50, description="이름·영문명·티커 일부"),
+                  limit: int = Query(8, ge=1, le=20), db: Session = Depends(get_db)):
+    q = q.strip()
+    if not q:
+        return {"q": q, "items": []}
+    items = [{"stock_id": 1, "market": "KOSPI", "country": "KR", "currency": "KRW", "ticker": "005930",
+              "name": "삼성전자", "name_en": "Samsung Electronics", "coverage": "featured"}][:limit]
+    return {"q": q, "items": items}
 
 
 @router.get("/{market}/{ticker}", response_model=StockDetailOut, summary="종목 기본 정보 + 최신 시세·밸류에이션")

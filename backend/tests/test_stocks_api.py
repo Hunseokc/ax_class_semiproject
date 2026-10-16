@@ -267,7 +267,8 @@ def test_indices(client):
     assert kospi["change_rate"] == pytest.approx(0.003984)           # 10 / 2510
     assert kospi["sparkline"] == [{"date": d.isoformat(), "close": 2500 + i * 10} for i, d in enumerate(DAYS)]
     assert set(kospi) == {"code", "name", "country", "currency", "as_of", "close", "prev_close", "change",
-                          "change_rate", "sparkline"}                # 52주 범위·장 상태는 Stage 1에 없다
+                          "change_rate", "sparkline",
+                          "high_52w", "low_52w", "position_52w", "session_status"}   # 52주 범위·장 상태는 Stage 6
 
 
 def test_index_without_prices_keeps_card(client, engine):

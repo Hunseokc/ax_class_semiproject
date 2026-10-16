@@ -20,7 +20,9 @@ SEOUL = ZoneInfo("Asia/Seoul")
 @router.get("/indices", response_model=IndicesOut, summary="지수별 최신값·등락·최근 1년 스파크라인")
 def indices(db: Session = Depends(get_db)):
     rows = db.execute(sql("market_indices")).mappings().all()
-    items = [{**r, "sparkline": r["sparkline"] or []} for r in rows]
+    # TODO(껍데기): D — services/market_calendar.py session_status(r["country"], r["as_of"])로 교체(거래소 휴장 달력).
+    #   지금은 docs/06 예시 값 previous_session. 52주 범위(high_52w·low_52w·position_52w)는 market_indices.sql을 원본으로 바꿀 때 채운다(지금 null).
+    items = [{**r, "sparkline": r["sparkline"] or [], "session_status": "previous_session"} for r in rows]
     return {"as_of": max((r["as_of"] for r in rows if r["as_of"]), default=None), "indices": items}
 
 
