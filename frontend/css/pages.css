@@ -129,15 +129,6 @@
 /* 스파크라인 기간 라벨 + 장 상태 배지(휴장·직전 거래일) */
 .metric-card__meta { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); min-height: 20px; font-size: 11px; color: var(--text-3); white-space: nowrap; }
 
-/* 홈 내 관심종목 카드 [S2-A] */
-.wl-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-4); }
-.wl-card { background: var(--card); border-radius: var(--r-card-sm); display: flex; flex-direction: column; min-width: 0; }
-.wl-card__link { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-5) var(--sp-5) var(--sp-3); color: inherit; text-decoration: none; flex: 1; }
-.wl-card__head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
-.wl-card__price { font-size: var(--fs-xl); font-weight: var(--fw-extra); letter-spacing: -0.02em; line-height: 1.15; margin-top: var(--sp-2); }
-.wl-card__chg { font-weight: var(--fw-semibold); }
-.wl-card__move { display: flex; gap: var(--sp-1); justify-content: flex-end; padding: 0 var(--sp-3) var(--sp-3); }
-
 /* ── [S3-A] 사이드바 갱신 상태 ── */
 .sidebar__foot [data-jobs] { display: flex; flex-direction: column; gap: var(--sp-1); }
 .sidebar__foot .job { display: flex; align-items: center; gap: var(--sp-2); }
@@ -310,3 +301,176 @@
   .modal .table th, .modal .table td { padding: var(--sp-2) 6px; }
   .modal .table td:first-child { white-space: normal; }   /* 종목명·1주 원가는 두 줄로 */
 }
+
+/* ── [S6-A] 홈 대시보드 개편 · 상단 검색 ──
+   원본은 아래 중 .wl-*·.r52·.topbar·.gsearch* 가 components.css(공통, D 소유)에 있다. 공통 css는 고치지 않으므로 A 소유인 이 파일에 둔다
+   (pages.css가 components.css 뒤에 로드되어 같은 결과). 필요하면 D가 components.css로 옮긴다. */
+
+/* 관심종목 카드 — 파스텔 카드 + 컴팩트 행 */
+
+/* 관심종목 카드 (레퍼런스의 파스텔 카드) — 항상 2줄: 2열→3열→4열→5열 */
+.wl-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-4); }
+@media (min-width: 768px)  { .wl-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 1024px) { .wl-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 1440px) { .wl-grid { grid-template-columns: repeat(5, 1fr); } }
+/* 위에서 아래로: 게이지(가운데) → 티커 → 가격(등락률) → 종목명 */
+.wl-card { display: flex; flex-direction: column; gap: var(--sp-2); min-height: 196px; padding: var(--sp-5) var(--sp-6) var(--sp-6); border-radius: var(--r-card); }
+.wl-card__gauge { display: flex; justify-content: center; margin-bottom: var(--sp-2); }
+.wl-card__ticker { font-size: calc(var(--fs-xs) - 1pt); font-weight: var(--fw-semibold); letter-spacing: .06em; text-transform: uppercase; color: var(--text-on-pastel-2); }
+/* 가격·등락률은 보조 정보 — 매력도 게이지가 카드의 주인공 */
+.wl-card__price { font-size: var(--fs-lg); font-weight: var(--fw-bold); letter-spacing: .01em; }
+.wl-card__price .pwc__chg { font-size: var(--fs-xs); }
+.wl-card__name { font-weight: var(--fw-bold); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wl-card__foot { margin-top: auto; display: flex; align-items: center; min-width: 0; }
+/* 관심종목 메모·목표가: 카드 링크 바깥 형제 버튼(링크 안 버튼 금지), 카드 위 오른쪽에 겹쳐 둔다 */
+.wl-item { position: relative; min-width: 0; }
+.wl-item > .wl-card { height: 100%; }
+.wl-card__note { font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--text-on-pastel-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wl-card__edit {
+  position: absolute; top: var(--sp-3); right: var(--sp-3); width: 32px; height: 32px;
+  display: grid; place-items: center; border: 0; border-radius: 50%;
+  background: rgba(20, 20, 20, .08); color: var(--text-on-pastel);
+  transition: background .15s var(--ease);
+}
+.wl-card__edit:hover { background: rgba(20, 20, 20, .16); }
+
+/* 관심종목 컴팩트 보기: 종목명 | 소형 게이지·점수·라벨 | 현재가 | 등락률 | 편집 — 열 폭을 고정해 종목명과 게이지가 벌어지지 않게 */
+.wl-crow { display: grid; grid-template-columns: minmax(0, 1fr) 36px; align-items: center; gap: var(--sp-1); }
+.wl-compact .row { grid-template-columns: minmax(96px, 168px) 168px minmax(0, 1fr) 84px; gap: var(--sp-3); padding-block: var(--sp-2); }
+.wl-compact .wl-card__edit { position: static; background: transparent; color: var(--text-2); }
+.wl-compact .wl-card__edit:hover { background: var(--card-active); color: var(--text); }
+.wl-compact__score .gauge-mini { width: auto; flex-direction: row; gap: var(--sp-2); }
+.wl-compact__score .gauge-mini svg { width: 48px; height: 28px; }
+.wl-compact__score .gauge-mini__value { margin-top: 0; }
+.wl-compact__score .gauge-mini__value strong { font-size: var(--fs-md); }
+.wl-compact__score .gauge-mini__band { color: var(--text-2); }
+.wl-compact__score .gauge-mini__ticks { stroke: var(--text-3); }
+.wl-compact__score .gauge-mini__needle line { stroke: var(--text); }
+.wl-compact__score .gauge-mini__needle circle { fill: var(--text); }
+.wl-compact__score .gauge-mini__ring { border-color: var(--text-3); }
+.wl-compact__price { text-align: right; font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+.wl-compact__chg { text-align: right; font-size: var(--fs-sm); }
+/* 홈 카드 보기: 3열 × 2줄(좁은 화면 2열), 행은 영역 높이에 맞춰 늘어난다 */
+.wl-grid--home { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; grid-auto-rows: 1fr; }
+.wl-grid--home .wl-card { min-height: 0; padding: var(--sp-4) var(--sp-4) var(--sp-5); }
+@media (max-width: 599px) { .wl-grid--home { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+@media (max-width: 767px) {
+  .wl-compact .row { grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
+  .wl-compact__score { grid-column: 1; grid-row: 2; }
+  .wl-compact__chg { grid-column: 2; grid-row: 2; }
+}
+
+/* 지수 카드: 52주 위치·메모 */
+/* 52주 저점~고점 사이 현재 위치 */
+.r52 { display: flex; align-items: center; gap: var(--sp-2); height: 14px; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; }
+.r52__lbl { flex: none; }
+.r52__track { position: relative; flex: 1; height: 4px; border-radius: var(--r-pill); background: var(--card-active); }
+.r52__dot { position: absolute; top: 50%; width: 8px; height: 8px; border-radius: 50%; background: var(--text); translate: -50% -50%; }
+.metric-card__note { font-size: 11px; line-height: 1.4; color: var(--text-2); }
+
+/* 상단 검색 */
+/* ---------------------------------------------------------------- 상단 검색 (모든 페이지) */
+.topbar { display: flex; justify-content: flex-end; margin-bottom: calc(-1 * var(--sp-4)); }
+.gsearch { position: relative; width: min(440px, 100%); }
+.gsearch .input { padding-right: 44px; }
+.gsearch__key {
+  position: absolute; right: 14px; top: 50%; translate: 0 -50%; pointer-events: none;
+  min-width: 22px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line);
+  color: var(--text-3); font: inherit; font-size: var(--fs-xs); text-align: center;
+}
+.gsearch input:focus ~ .gsearch__key, .gsearch:focus-within .gsearch__key { display: none; }
+.gsearch__panel {
+  position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 40;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card-sm);
+  padding: var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-1);
+}
+.gsearch__list { list-style: none; margin: 0; padding: 0; max-height: min(420px, 60vh); overflow-y: auto; }
+.gsearch__item {
+  display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--r-row); cursor: pointer;
+}
+.gsearch__item[aria-selected="true"] { background: var(--card-active); }
+.gsearch__name { display: flex; flex-direction: column; min-width: 0; }
+.gsearch__name strong, .gsearch__name .subtle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gsearch__meta { display: flex; align-items: center; gap: var(--sp-2); flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.gsearch__note { font-size: 11px; color: var(--text-3); }
+.gsearch__status { padding: var(--sp-1) var(--sp-3); }
+.gsearch__status:empty { display: none; }
+@media (max-width: 767px) {
+  .topbar { margin-bottom: 0; }
+  .gsearch { width: 100%; }
+  .gsearch__key { display: none; }
+  .gsearch__note { display: none; }
+}
+
+/* 홈 2열 · 위젯 · 시장 요약 · 히트맵 · 심리 지수 */
+.topbar--home { justify-content: space-between; align-items: center; gap: var(--sp-4); margin-bottom: 0; }
+.topbar--home { flex-wrap: wrap; }
+.topbar--home .gsearch { flex: 1 1 260px; width: auto; }       /* 좁은 화면에서는 검색이 한 줄을 다 쓰고 투자 성향이 아래 줄로 */
+.section__meta { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-sm); font-weight: var(--fw-regular); }
+/* 2열: 관심종목(약 60%) · 섹터 히트맵 + 시장 심리 지수(약 40%), 두 열 높이를 맞춘다 */
+.home-split { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--sp-5); align-items: stretch; }
+.home-watch { min-width: 0; }
+.home-watch__body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.home-watch__body > * { flex: 1; }
+.home-watch__more { align-self: flex-end; }
+.home-side { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.home-side > :last-child { flex: 1; }                 /* 좌측이 더 길면 아래 위젯이 남는 높이를 채운다 */
+.home-widget { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-5); }
+.home-widget__body { min-width: 0; }
+.home-widget__foot { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
+.home-widget__foot:empty { display: none; }
+@media (max-width: 1100px) { .home-split { grid-template-columns: 1fr; } }
+
+/* 한 줄 시장 요약 + 관심종목 연결 요약 (규칙 기반 문장) */
+.market-brief { display: flex; flex-direction: column; gap: 2px; margin-top: calc(-1 * var(--sp-2)); }
+.market-brief p { margin: 0; color: var(--text-2); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.market-brief__date { color: var(--text-3); font-weight: var(--fw-regular); }
+.market-brief__sep { color: var(--text-3); }
+/* 시장 주목 종목: 관심종목 ★, 매력도 점수·라벨, 탭 하단 안내 */
+.top-star { color: #ffd166; font-size: var(--fs-sm); margin-left: 2px; }
+.top-score { display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; }
+.top-score strong { font-size: var(--fs-md); font-weight: var(--fw-extra); }
+.top-note { color: var(--text-3); font-size: var(--fs-xs); margin: calc(-1 * var(--sp-2)) 0 0; }
+
+/* 섹터 히트맵: 가중치 비율로 늘어나는 타일(정교한 트리맵 아님). 진한 색은 흰 글자 대비 4.5:1 이상인 --*-on-pastel */
+.heat { display: flex; flex-wrap: wrap; gap: 4px; }
+.heat__tile {
+  min-width: 76px; height: 54px; padding: 6px 8px; border-radius: 10px;
+  display: flex; flex-direction: column; justify-content: center; gap: 2px; overflow: hidden;
+  color: var(--text);
+}
+.heat__name { font-size: var(--fs-xs); font-weight: var(--fw-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.heat__chg { font-size: var(--fs-sm); font-weight: var(--fw-extra); }
+.heat-skeleton { height: 172px; border-radius: var(--r-row); }
+
+/* 시장 심리 지수: 매력도 게이지를 크게 + 5구간 라벨 + 구성요소 툴팁 */
+.senti { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-3) var(--sp-4); align-items: center; }
+.senti__gauge { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); border-radius: var(--r-row); outline: none; }
+.senti__gauge:focus-visible { box-shadow: var(--focus); }
+.senti .gauge-mini { width: auto; }
+.senti .gauge-mini svg { width: 184px; height: 108px; }
+.senti .gauge-mini__value strong { font-size: var(--fs-2xl); }
+.senti .gauge-mini__band { font-size: var(--fs-sm); color: var(--text-2); }
+.senti .gauge-mini__ticks { stroke: var(--text-3); }
+.senti .gauge-mini__needle line { stroke: var(--text); }
+.senti .gauge-mini__needle circle { fill: var(--text); }
+.senti__scale { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px var(--sp-2); margin: 0; padding: 0; list-style: none; font-size: 11px; color: var(--text-3); }
+.senti__scale li { display: inline-flex; align-items: center; gap: 4px; }
+.senti__scale i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+.senti__scale .is-current { color: var(--text); font-weight: var(--fw-bold); }
+.senti__tip {
+  position: absolute; left: 50%; top: 100%; translate: -50% 6px; z-index: 20; width: max-content; max-width: 260px;
+  display: none; grid-template-columns: 1fr auto; gap: 4px var(--sp-4);
+  padding: var(--sp-3) var(--sp-4); border-radius: 12px; background: #ffffff; color: var(--text-on-pastel);
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+}
+.senti__tip strong { grid-column: 1 / -1; }
+.senti__gauge:hover .senti__tip, .senti__gauge:focus-visible .senti__tip { display: grid; }
+.senti__hist { display: flex; flex-direction: column; gap: var(--sp-3); margin: 0; }
+.senti__hist-item dt { color: var(--text-3); font-size: var(--fs-xs); }
+.senti__hist-item dd { margin: 0; font-size: var(--fs-sm); color: var(--text-2); white-space: nowrap; }
+.senti__hist-item strong { color: var(--text); font-size: var(--fs-md); }
+.senti__foot { grid-column: 1 / -1; }
+.senti-skeleton { height: 200px; border-radius: var(--r-row); }
+@media (max-width: 420px) { .senti { grid-template-columns: 1fr; } .senti__hist { flex-direction: row; justify-content: center; gap: var(--sp-6); } }
