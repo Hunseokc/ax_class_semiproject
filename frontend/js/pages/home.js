@@ -1,9 +1,9 @@
 // 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
-import { PRESET_EVENT, getFx, getIndices, getPreset, getRanking, getWatchlist, reorderWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S5-A] getRanking
-import { changeHtml, date, dateTime, esc, num, pct, price, shortDate, stockUrl, usd, volume } from "../format.js";   // [S5-A] pct·volume
-import { color, destroyCharts, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
+import { PRESET_EVENT, getFx, getIndices, getPreset, getRanking, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S5-A] getRanking
+import { changeHtml, changeLabel, date, dateTime, esc, num, pct, price, shortDate, stockUrl, usd, volume } from "../format.js";   // [S5-A] pct·volume
+import { color, destroyCharts, scoreBand, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
-import { emptyState, h, load, marketBadge, segmented, skeleton, toast } from "../components/ui.js";   // [S5-A] marketBadge
+import { emptyState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";   // [S5-A] marketBadge
 import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";   // [S4-A]
 import { FX_CODE, DEFAULT_METRICS, metricPicker, storedMetrics } from "../components/metric-picker.js";   // [S5-A]
 import { openWatchNote } from "../components/watch-note.js";   // [S5-A]
@@ -162,77 +162,128 @@ function mountPicker() {
 loadMarket();
 
 // ---------------------------------------------------------------- 내 관심종목 [S2-A]
-let watchItems = [];
+// [S6-A] 기본은 컴팩트 한 줄 목록, 카드 보기로 바꿀 수 있다. 순서 바꾸기(▲▼)는 홈에서 뺐다(주식 리스트에서 한다)
+let watchItems = null;
 
 // [S5-A] 목표가 줄 — 괴리율(target_gap)은 서버가 계산한 값을 그대로 쓴다
 const watchTarget = (w) => (w.target_price != null
   ? `목표 ${price(w.target_price, w.currency)} (${w.target_gap != null ? pct(w.target_gap, { sign: true, digits: 1 }) : "–"})` : "");
 
-function watchCard(w, i) {
-  const us = w.currency === "USD";
-  const target = watchTarget(w);   // [S5-A]
-  const el = h(`<li class="wl-card">
-      <a class="wl-card__link card--link" href="${stockUrl(w.market, w.ticker)}?preset=${encodeURIComponent(getPreset())}" aria-label="${esc(w.name)} 상세 보기">
-        <div class="wl-card__gauge">${scoreGauge(w.score)}</div>
-        <div class="wl-card__head"><strong>${esc(w.name)}</strong>
-          <span class="badge ${us ? "badge--us" : "badge--kr"}">${esc(w.market)}</span></div>
-        <div class="subtle">${esc(w.ticker)} · ${shortDate(w.as_of)} 종가</div>
-        <div class="wl-card__price num">${price(w.close, w.currency)}</div>
-        <div class="wl-card__chg num">${changeHtml(w.change_rate, w.country)}</div>
-        ${target ? `<div class="subtle num">${esc(target)}</div>` : ""}
-        ${w.memo ? `<div class="subtle" title="${esc(w.memo)}">${esc(w.memo)}</div>` : ""}
-      </a>
-      <div class="wl-card__move">
-        <button class="btn btn--sm" type="button" data-edit aria-label="${esc(w.name)} 메모·목표가 편집" title="메모·목표가">${icons.edit}</button>
-        <button class="btn btn--sm" type="button" data-dir="-1" aria-label="${esc(w.name)} 위로" ${i === 0 ? "disabled" : ""}>▲</button>
-        <button class="btn btn--sm" type="button" data-dir="1" aria-label="${esc(w.name)} 아래로" ${i === watchItems.length - 1 ? "disabled" : ""}>▼</button>
-      </div>
-    </li>`);
-  el.querySelector("[data-edit]").addEventListener("click", () => openWatchNote(w, () => loadWatchlist()));   // [S5-A]
-  el.querySelectorAll("[data-dir]").forEach((b) => b.addEventListener("click", () => moveWatch(i, Number(b.dataset.dir))));
+function watchLabel(w) {
+  const band = scoreBand(w.score);
+  const target = watchTarget(w);
+  return `${w.name}, ${price(w.close, w.currency)}, ${changeLabel(w.change_rate)}, `
+    + (band ? `매력도 ${Math.round(w.score)}점 ${band.label}` : "매력도 데이터 부족")
+    + (target ? `, ${target}` : "") + (w.memo ? `, 메모 ${w.memo}` : "");
+}
+
+// 상세 화면이 같은 투자 성향 탭이 선택된 상태로 열리도록 preset을 링크에 싣는다
+const watchHref = (w) => `${stockUrl(w.market, w.ticker)}?preset=${encodeURIComponent(getPreset())}`;
+
+// 편집 버튼(메모·목표가) — 링크 안에 버튼을 넣지 않도록 행·카드 링크의 형제로 둔다
+function editButton(w) {
+  const b = h(`<button class="wl-card__edit" type="button" aria-label="${esc(w.name)} 메모·목표가 편집" title="메모·목표가">${icons.edit}</button>`);
+  b.addEventListener("click", () => openWatchNote(w, () => loadWatchlist()));   // [S5-A]
+  return b;
+}
+
+function watchCard(w) {
+  const target = watchTarget(w);
+  const el = h(`<div class="wl-item"><a class="wl-card card--link card--ice"
+        href="${watchHref(w)}" aria-label="${esc(watchLabel(w))}">
+      <div class="wl-card__gauge">${scoreGauge(w.score)}</div>
+      <div class="wl-card__ticker">${esc(w.ticker)} · ${esc(w.market)}</div>
+      <div class="wl-card__price num">${price(w.close, w.currency)}</div>
+      <div class="wl-card__chg num">${changeHtml(w.change_rate, w.country)}</div>
+      ${target ? `<div class="wl-card__note">${esc(target)}</div>` : ""}
+      ${w.memo ? `<div class="wl-card__note wl-card__memo" title="${esc(w.memo)}">${esc(w.memo)}</div>` : ""}
+      <div class="wl-card__foot"><span class="wl-card__name">${esc(w.name)}</span></div>
+    </a></div>`);
+  el.append(editButton(w));
   return el;
 }
 
+// 컴팩트 보기 한 줄: 종목명(코드·시장) | 소형 매력도 게이지 | 현재가 | 등락률 | 편집
+function watchRow(w) {
+  const el = h(`<li class="wl-crow"><a class="row" href="${watchHref(w)}" aria-label="${esc(watchLabel(w))}">
+      <span class="row__main"><span class="row__title">${esc(w.name)}</span>
+        <span class="row__sub">${esc(w.ticker)} ${marketBadge(w.market, w.country)}</span></span>
+      <span class="wl-compact__score">${scoreGauge(w.score)}</span>
+      <span class="wl-compact__price num">${price(w.close, w.currency)}</span>
+      <span class="wl-compact__chg num">${changeHtml(w.change_rate, w.country)}</span>
+    </a></li>`);
+  el.append(editButton(w));
+  return el;
+}
+
+// 모드별 표시 한도 — 컴팩트 최대 8행, 카드 3열×2줄(좁은 화면 2열×2줄). 넘으면 정렬 순서대로 자르고 '+N개 더'
+const COMPACT_LIMIT = 8;
+const cardCols = () => (window.innerWidth < 600 ? 2 : 3);       // .wl-grid--home 미디어 쿼리와 맞춤
+const watchLimit = () => (watchView === "compact" ? COMPACT_LIMIT : cardCols() * 2);
+
+// 보기 방식은 브라우저에 저장 — 기본은 컴팩트. 이전 키(watchView)의 값이 새 기본값을 덮지 않도록 새 키를 쓴다
+const WATCH_VIEW_KEY = "watchViewHome";
+function storedWatchView() {
+  try { return localStorage.getItem(WATCH_VIEW_KEY) === "card" ? "card" : "compact"; } catch { return "compact"; }
+}
+let watchView = storedWatchView();
+
+function renderWatchMore(items) {
+  const more = $("#watch-more");
+  const extra = (items?.length || 0) - watchLimit();
+  more.hidden = extra <= 0;
+  more.textContent = extra > 0 ? `+${extra}개 더 · 주식 리스트 →` : "";
+}
+
 function renderWatch(items) {
-  watchItems = items;
   watchCount = items.length;   // [S4-A]
   paintWatchCount();
-  const ul = h('<ul class="wl-grid" aria-label="내 관심종목"></ul>');
-  ul.append(...items.map(watchCard));
-  return ul;
-}
-
-// 이웃 카드와 자리를 바꾼다 — 화면은 먼저 바꾸고, 서버 저장이 실패하면 원래대로 되돌린다
-async function moveWatch(i, dir) {
-  const j = i + dir;
-  const before = watchItems;
-  const a = before[i], b = before[j];
-  const next = [...before];
-  next[i] = { ...b, sort_order: a.sort_order };
-  next[j] = { ...a, sort_order: b.sort_order };
-  $("#watchlist").replaceChildren(renderWatch(next));
-  try {
-    const res = await reorderWatchlist([
-      { market: a.market, ticker: a.ticker, sort_order: b.sort_order },
-      { market: b.market, ticker: b.ticker, sort_order: a.sort_order },
-    ]);
-    const scoreOf = new Map(before.map((x) => [`${x.market}/${x.ticker}`, x.score]));   // [S4-A] 순서 응답에 점수가 없어도 유지
-    $("#watchlist").replaceChildren(renderWatch(res.items.map((x) => ({ ...x, score: x.score ?? scoreOf.get(`${x.market}/${x.ticker}`) }))));
-  } catch (e) {
-    toast(e.message, "error");
-    $("#watchlist").replaceChildren(renderWatch(before));
+  renderWatchMore(items);
+  const shownItems = items.slice(0, watchLimit());
+  if (watchView === "compact") {
+    const ul = h('<ul class="list card card--flush wl-compact" aria-label="내 관심종목"></ul>');
+    ul.append(...shownItems.map(watchRow));
+    return ul;
   }
+  const grid = h('<div class="wl-grid wl-grid--home"></div>');
+  grid.append(...shownItems.map(watchCard));
+  return grid;
 }
 
-function loadWatchlist() {
-  return load($("#watchlist"), {
-    skeleton: skeleton("card", 3),
+$("#watch-view").append(segmented([{ value: "compact", label: "컴팩트" }, { value: "card", label: "카드" }], watchView, (v) => {
+  watchView = v;
+  try { localStorage.setItem(WATCH_VIEW_KEY, v); } catch { /* 저장 불가면 이번 화면에서만 유지 */ }
+  if (watchItems && watchItems.length) $("#watchlist").replaceChildren(renderWatch(watchItems));
+}, { label: "관심종목 보기 방식" }));
+
+async function loadWatchlist() {
+  const items = await load($("#watchlist"), {
+    skeleton: skeleton("row", 6),
     fetch: async () => (await getWatchlist()).items,
-    render: renderWatch,
-    empty: emptyState({ title: "관심종목이 없습니다", body: "주식 리스트에서 ★를 눌러 담아 보세요.",
+    render: (items) => {
+      watchItems = items;
+      return renderWatch(items);
+    },
+    empty: emptyState({ title: "관심종목이 없습니다", body: "주식 리스트나 상단 검색에서 종목을 찾아 ★를 누르면 여기에 모입니다.",
       action: '<a class="btn btn--primary" href="/stocks">주식 리스트로</a>' }),
   });
+  watchItems = items;
+  if (!items?.length) renderWatchMore(null);
+  return items;
 }
+
+// 카드 열 수가 바뀌는 폭(600px)을 넘나들면 한도가 달라지므로 다시 그린다
+let watchColsLast = cardCols();
+let watchResizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(watchResizeTimer);
+  watchResizeTimer = setTimeout(() => {
+    const cols = cardCols();
+    if (cols === watchColsLast || watchView !== "card" || !watchItems || !watchItems.length) return;
+    watchColsLast = cols;
+    $("#watchlist").replaceChildren(renderWatch(watchItems));
+  }, 150);
+});
 
 loadWatchlist();
 
