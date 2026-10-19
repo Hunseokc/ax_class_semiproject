@@ -715,7 +715,7 @@ s.fin_basis?.length ? `<p class="subtle">재무 기준 ${s.fin_basis.map((x) => 
 | 섹터 없음 | `stocks.sector IS NULL` | 섹터 미반영 (D9) |
 | 섹터 표본 부족 | `n < 5` 또는 `sector_r5 IS NULL` | 섹터 미반영 |
 | 섹터 표본 | 같은 국가·같은 `sector`, `is_active`, `coverage IN ('featured','benchmark')` — 자기 자신 포함 | — |
-| 섹터 기준일 `ref_date` | `base` 이하에서 표본 종목 일봉이 5개 이상 있는 가장 최근 날짜 | 비교군 일봉은 07:00에만 들어와서 마감 직후엔 하루 전 날짜로 계산돼요 |
+| 섹터 기준일 `ref_date` | `base` 이하에서 표본 종목 일봉이 5개 이상 있는 가장 최근 날짜. 그런 날이 없으면(표본 자체가 5개 미만) 표본 일봉이 있는 가장 최근 날짜 — 표본 수 안내용이고 점수에는 쓰지 않아요 | 비교군 일봉은 07:00에만 들어와서 마감 직후엔 하루 전 날짜로 계산돼요 |
 | 5일 수익률 | 그 날짜 종가 ÷ 그 종목 자기 일봉 기준 5거래일 전(6번째) 종가 − 1. 둘 중 하나가 없으면 제외/null | — |
 | `stock_r5`·`index_r5` 날짜 | 섹터 반영이면 `ref_date`, 아니면 시장 심리 거래일(없으면 `base`) | 툴팁의 세 수익률이 같은 날짜 기준 |
 
@@ -744,8 +744,8 @@ bars AS (                             -- 연휴가 길어도 6거래일이 들�
     WHERE d.trade_date <= CAST(:as_of AS date) AND d.trade_date > CAST(:as_of AS date) - 30
 ),
 ref AS (
-    SELECT MAX(c.trade_date) AS ref_date
-    FROM (SELECT b.trade_date FROM bars b GROUP BY b.trade_date HAVING COUNT(*) >= :min_n) c
+    SELECT COALESCE(MAX(c.trade_date) FILTER (WHERE c.cnt >= :min_n), MAX(c.trade_date)) AS ref_date
+    FROM (SELECT b.trade_date, COUNT(*) AS cnt FROM bars b GROUP BY b.trade_date) c
 ),
 ranked AS (                           -- ref_date부터 거꾸로 번호(rn = 1이 ref_date 이하 최신)
     SELECT b.stock_id, b.trade_date, b.close,
@@ -858,6 +858,18 @@ INDEX_R5 = text("""
 조건이 맞지 않으면 행이 없어 `.scalar()`가 None이에요.
 
 ### 5-5. 응답 — `GET /api/v1/stocks/{market}/{ticker}`에 `market_condition`
+
+#### 섹터 분류 (`backend/app/ingest/benchmark.py` — 구현하며 추가)
+
+지금 코드에는 `stocks.sector`를 채우는 곳이 없었어요(provider `get_sector_classifications`·`get_sic`와 `sectors.sector_for_krx`·`sector_for_sic`만 있음). `select_benchmark` 끝(`map_ids` 뒤)에서 부르는 함수를 추가해요. 비교군 선정 방식(테마 그룹)은 그대로예요.
+
+```python
+SIC_RECHECK_DAYS = 365
+
+def classify_sectors(engine: Engine, providers: Providers, today: date, notes: list[str]) -> None:
+    """업종 → stocks.industry·sic·sector. 국내는 활성 종목 전체(KRX 전 종목 조회 1회),
+    미국은 노출 종목·비교군 중 SIC를 확인한 지 SIC_RECHECK_DAYS가 지난 종목만. 실패는 비고만 남긴다."""
+```
 
 #### `backend/app/queries/stock_detail.sql`
 

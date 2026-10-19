@@ -6,6 +6,8 @@
 - 평시 데이터(1일 1회): 일봉은 국내 날짜별 전 종목·미국 묶음 다운로드로 증분, 최신 밸류에이션,
   재무는 유효기간(data_freshness — 공시 일정 기반 + 90일 상한)이 지난 종목만. 상세 화면을 열지 않은 지 30일이 지나면 그 밖의 데이터는 정리
 - 공시·2년 일봉·5개년 재무는 상세 화면을 열거나 관심종목에 추가할 때 유효기간이 지난 것만 받는다(app/services/hydration.py)
+- 업종 섹터(stocks.sector): 선정 때 국내 KRX 업종(전 종목 1회 조회)·미국 SEC SIC(1년마다 재확인)를 universe.yaml sectors로 묶는다.
+  시장·섹터 점수의 섹터 흐름 표본이 된다(app/services/market_condition.py)
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ from decimal import Decimal
 from sqlalchemy import Engine, text
 
 from app.ingest import jobs
+from app.ingest.sectors import sector_for_krx, sector_for_sic
 from app.ingest.store import BENCHMARK_LOCK_KEY, advisory_lock, job_log, upsert
 from app.ingest.universe import FREQUENT_SQL, load_universe, stock_refs, yf_symbol
 from app.providers.base import ProviderError, StockRef
@@ -26,6 +29,7 @@ from app.services import freshness
 log = logging.getLogger(__name__)
 PRUNE_AFTER_DAYS = 30           # 상세를 마지막으로 받은 뒤 이 기간이 지나면 평시 데이터만 남긴다
 FEATURED_FIN_YEARS = jobs.FIN_YEARS
+SIC_RECHECK_DAYS = 365        # 미국 SIC는 거의 바뀌지 않아 1년마다 다시 확인(종목마다 SEC 호출 1번)
 
 
 def config() -> dict:
@@ -120,6 +124,7 @@ def select_benchmark(engine: Engine, providers: Providers, *, today: date | None
                 WHERE s.coverage = 'benchmark' AND s.is_active AND NOT (s.stock_id = ANY(:ids)) AND NOT {FREQUENT_SQL}
                 RETURNING s.ticker"""), {"ids": chosen_ids}).scalars().all()
         map_ids(engine, providers, chosen_ids, res.notes)
+        classify_sectors(engine, providers, today, res.notes)
         out["selected"] = [str(c["ticker"]) for c in chosen]
         out["dropped"] = list(dropped)
         res.rows = len(chosen)
@@ -129,6 +134,49 @@ def select_benchmark(engine: Engine, providers: Providers, *, today: date | None
         if dropped:
             res.notes.append(f"비교군에서 빠짐: {', '.join(dropped)}")
     return out
+
+
+def classify_sectors(engine: Engine, providers: Providers, today: date, notes: list[str]) -> None:
+    """업종 → stocks.industry·sic·sector. 국내는 활성 종목 전체(KRX 전 종목 조회 1회),
+    미국은 노출 종목·비교군 중 SIC를 확인한 지 SIC_RECHECK_DAYS가 지난 종목만(종목마다 SEC 호출 1번). 실패는 비고만 남긴다."""
+    kr = 0
+    if providers.kr_bulk is not None:
+        try:
+            rows = providers.kr_bulk.get_sector_classifications(today)
+        except ProviderError as e:
+            notes.append(f"국내 업종 조회 실패: {e}")
+            rows = []
+        with engine.begin() as conn:
+            ids = dict(conn.execute(text("""SELECT s.ticker, s.stock_id FROM stocks s JOIN markets m ON m.market_id = s.market_id
+                                             WHERE m.country = 'KR' AND s.is_active""")).all())
+            upd = [{"id": ids[c.ticker], "ind": c.industry[:64], "sec": sector_for_krx(c.industry)} for c in rows if c.ticker in ids]
+            if upd:
+                conn.execute(text("""UPDATE stocks SET industry = :ind, sector = :sec, industry_checked_at = now()
+                                     WHERE stock_id = :id"""), upd)
+        kr = len(upd)
+    us, failed = 0, 0
+    ref = providers.us_reference
+    if ref is not None:
+        with engine.connect() as conn:
+            need = conn.execute(text("""
+                SELECT s.stock_id, s.cik FROM stocks s JOIN markets m ON m.market_id = s.market_id
+                WHERE m.country = 'US' AND s.is_active AND s.coverage IN ('featured', 'benchmark') AND s.cik IS NOT NULL
+                  AND (s.industry_checked_at IS NULL OR s.industry_checked_at < now() - make_interval(days => :d))"""),
+                {"d": SIC_RECHECK_DAYS}).all()
+        upd = []
+        for sid, cik in need:
+            try:
+                sic, desc = ref.get_sic(cik)
+            except ProviderError:
+                failed += 1
+                continue
+            upd.append({"id": sid, "sic": sic, "ind": (desc or "")[:64] or None, "sec": sector_for_sic(sic)})
+        if upd:
+            with engine.begin() as conn:
+                conn.execute(text("""UPDATE stocks SET sic = :sic, industry = :ind, sector = :sec, industry_checked_at = now()
+                                     WHERE stock_id = :id"""), upd)
+        us = len(upd)
+    notes.append(f"업종 섹터: 국내 {kr} · 미국 SIC {us}" + (f"(실패 {failed})" if failed else ""))
 
 
 def map_ids(engine: Engine, providers: Providers, stock_ids: list[int], notes: list[str]) -> None:
