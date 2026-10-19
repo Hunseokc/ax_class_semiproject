@@ -48,8 +48,8 @@ export const api = {
 // 화면에서 쓰는 호출 모음 ----------------------------------------------------------
 // ── [S1-A] Market · Stocks ──
 // group 은 경쟁 그룹 '이름'(예: "반도체"), q 는 이름·티커 검색어 — 원본 stocks.js 와 같은 방식
-export const getStocks = ({ country, sort = "market_cap", order = "desc", group, q, limit = 100, offset = 0, preset = getPreset() } = {}) =>   // [S4-A] preset
-  getWithPreset("/stocks", { country, sort, order, group, q, limit, offset, preset });
+export const getStocks = ({ country, sort = "market_cap", order = "desc", group, sector, q, limit = 100, offset = 0, preset = getPreset() } = {}) =>   // [S4-A] preset
+  getWithPreset("/stocks", { country, sort, order, group, sector, q, limit, offset, preset });
 
 export const getStock = (market, ticker) => api.get(`/stocks/${market}/${ticker}`);
 

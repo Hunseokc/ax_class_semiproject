@@ -1334,7 +1334,7 @@ def load_us_bulk(engine, *, years=3, frames=None, now=None) -> dict:
 
 ---
 
-## 9. 4-4 — 노출 종목 확장 (D5 결정 뒤)
+## 9. 4-4 — 노출 종목 확장 (D5 확정 2026-10-19: 리스트 = 노출 + 비교군)
 
 ### 9-1. `GET /stocks` — `sector` 필터
 
@@ -1343,16 +1343,22 @@ def load_us_bulk(engine, *, years=3, frames=None, now=None) -> dict:
 | `sector` | string, 선택, 1~32자 | `stocks.sector`와 정확히 일치. `universe.yaml`의 `sectors[].name`(점수 섹터 9개) 밖이면 422 `VALIDATION_ERROR` |
 
 - 기존 파라미터와 AND. `total`은 필터 뒤 개수.
-- `StockRow`에 `sector: str | None`(마지막 필드), `stock_list.sql`에 `s.sector` + `AND (CAST(:sector AS text) IS NULL OR s.sector = :sector)`.
+- `StockRow`에 `sector: str | None`, `coverage: str`(featured·benchmark·listed — 갱신 주기가 달라 화면이 구분할 수 있게), `stock_list.sql`에 `s.sector, s.coverage` + `AND (CAST(:sector AS text) IS NULL OR s.sector = :sector)`.
+- 기본 목록 대상: `s.coverage IN ('featured', 'benchmark')`(전에는 featured만). listed는 검색어(q)가 있을 때만.
 
 ### 9-2. 화면 (`stocks.js`)
 
 - 페이지 나누기: `limit=25`, `offset`, `total`로 페이지 수. URL `?page=`로 새로고침해도 유지.
 - 필터: 국가 탭(기존) + 섹터 선택(9개 + "전체"). 섹터 목록은 화면 상수 — 이름은 `universe.yaml sectors[].name`과 같아야 해요.
+- 필터·정렬·검색을 바꾸면 1페이지로, 투자 성향을 바꾸면 같은 페이지로 다시 조회해요. 순위는 전체 기준이라 2페이지는 26위부터.
+- 행 부제에 섹터 배지(한 줄, 넘치면 말줄임).
+- 확인(Playwright 1280·390px): 국내 70종목 3페이지, 2페이지 첫 순위 26, 반도체·전자 13종목, 가로 스크롤 0, 콘솔 에러 0.
 
-### 9-3. 노출 규칙
+### 9-3. 노출 규칙 (D5)
 
-D5 수치가 나오면 `universe.yaml stocks` 확장 또는 "노출 = 시가총액 상위 N" 중 하나를 정해 이 절에 적어요. 영향: `peer_groups`(테마), 첫 적재 시간, DB 용량(무료 500MB).
+측정(2026-10-19): 4시간 갱신은 노출 25종목에 시세 18초 + 밸류에이션 11초(종목당 약 1.2초), 07:00 비교군 갱신은 121종목 평균 2분, DB 28MB(listed 재무 일괄 적재 뒤).
+
+**결정: 노출 종목(4시간 갱신)은 25개 그대로 두고, 리스트에는 비교군 121개를 함께 보여 줘요(146개).** 비교군은 이미 매일 시세·밸류에이션·점수·섹터가 갱신돼서 수집 비용이 0이에요. 노출 종목을 늘리면 4시간마다 종목당 약 1.2초씩 늘어나는데, 그만큼의 차이(장중 4시간 vs 하루 1회)는 일봉 기준 서비스에서 크지 않아요. 비교군 행은 `as_of`로 기준일이 드러나요.
 
 ---
 
@@ -1362,7 +1368,7 @@ D5 수치가 나오면 `universe.yaml stocks` 확장 또는 "노출 = 시가총�
 | --- | --- | --- | --- |
 | D11 | 미국 listed 우선순위 소스 | **확정**: 상위 1,500개 안에서 시가총액(SEC 발행주식수 × 종가) 순, 30일마다 `stocks.cap_rank`에 저장(migration 009) | 7-2 측정 — 전 종목 종가 묶음 조회 약 2분이라 매일 하지 않아요 |
 | D12 | 백그라운드 하루 예산 값 | **확정(시작값)**: DART 2,000행 · SEC 1,000행, 첫 주 `ingestion_logs`로 조정 | DART 키 1개 하루 약 2만 번 중 절반 이하(행당 2~5번) |
-| D5 | 노출 종목 수 | 4-1 뒤 측정 | — |
+| D5 | 노출 종목 수 | **확정**: 4시간 갱신 노출은 25개 그대로, 리스트는 노출 + 비교군(146개) | 9-3 측정 — 비교군은 이미 매일 갱신돼 비용 0 |
 | D8 | 미국 일괄 방식 | **확정**: SEC frames, listed 첫 적재용 임시 값(7일) | 8-1 smoke — zip 1.4GB, frames 97% 일치·38초 |
 
 ---

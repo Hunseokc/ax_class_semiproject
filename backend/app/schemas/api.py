@@ -109,6 +109,8 @@ class StockRow(Schema):
     market_cap_krw: Num | None
     score: Num | None
     is_watched: bool
+    sector: str | None                       # 업종 섹터(stocks.sector). 금융 등 매핑 없음이면 null
+    coverage: str                            # featured(4시간 갱신) / benchmark(매일 07:00) / listed(검색 결과만)
 
 
 class StockListOut(Schema):
