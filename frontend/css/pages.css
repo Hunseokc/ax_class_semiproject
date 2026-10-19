@@ -533,3 +533,19 @@ a.home-pf__seg:hover .home-pf__seg-bar { filter: brightness(1.08); }
 .senti__foot { flex-wrap: wrap; }
 .senti__foot .badge, .home-widget__foot .badge { white-space: nowrap; }
 .senti-skeleton { height: 170px; border-radius: var(--r-row); }
+
+
+/* ── [S7-A] 투자 매력도: 왼쪽 [매력 점수 | 순위] · [시장·섹터 점수 | 섹터 문장] 두 줄, 오른쪽 레이더 (시안 docs/assets/score_panel_sector_mockup.png) ── */
+.score-panel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.score-panel__left { align-items: stretch; gap: var(--sp-5); text-align: left; }
+.score-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-6); }
+.score-row__gauge { display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); flex: 0 0 auto; }
+.score-row__title { margin: 0; font-size: var(--fs-md); font-weight: var(--fw-semibold); }
+.score-row__text { flex: 1 1 160px; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); word-break: keep-all; }
+.score-row__sector p { margin: 0; }
+.score-row__date { margin-top: var(--sp-2) !important; color: var(--text-3); font-size: var(--fs-xs); }
+.score-row__tip { max-width: 280px; word-break: keep-all; }
+.score-row__wide { grid-column: 1 / -1; }
+.score-row__tip-head { margin-top: 4px; }
+.score-row__tip-note { margin-top: 4px; font-weight: var(--fw-regular); opacity: .75; }
+@media (max-width: 767px) { .score-panel { grid-template-columns: 1fr; } }
