@@ -49,6 +49,48 @@ def is_common_us(ticker: str, name: str) -> bool:
     return not (len(ticker) == 5 and ticker[-1] in NASDAQ_5TH_NON_COMMON)
 
 
+DPS_CONCEPTS = ("CommonStockDividendsPerShareDeclared", "CommonStockDividendsPerShareCashPaid")
+
+
+def _days(e: dict) -> int:
+    return (date.fromisoformat(e["end"]) - date.fromisoformat(e["start"])).days
+
+
+def annual_dps(gaap: dict, today: date | None = None) -> tuple[Decimal | None, date | None]:
+    """최근 FY 주당 배당(선언 기준 우선) → (금액, 기간 끝).
+
+    1) 10-K의 1년(350~380일) 값. 2) 없으면 분기(85~100일)로만 신고하는 회사(GD·CRM 등):
+    겹치지 않게 이어지는 최근 4개 분기를 더한다. 4개 분기가 1년(350~380일)을 덮고, 마지막 분기가
+    400일 안이어야 한다(오래전에 끊긴 값을 지금 배당으로 쓰지 않는다)."""
+    today = today or date.today()
+    rows_of = {c: [e for e in gaap.get(c, {}).get("units", {}).get("USD/shares", []) if "start" in e and "val" in e]
+               for c in DPS_CONCEPTS}
+    for rows in rows_of.values():
+        annual = [e for e in rows if e.get("form") in ANNUAL_FORMS and 350 <= _days(e) <= 380]
+        if annual:
+            best = max(annual, key=lambda e: (e["end"], e.get("filed", "")))
+            return to_dec(best["val"], 4), date.fromisoformat(best["end"])
+    for rows in rows_of.values():
+        latest: dict[tuple[str, str], dict] = {}                   # 같은 분기가 10-Q·10-K에 거듭 나오면 최신 제출본
+        for e in rows:
+            if 85 <= _days(e) <= 100:
+                key = (e["start"], e["end"])
+                if key not in latest or e.get("filed", "") > latest[key].get("filed", ""):
+                    latest[key] = e
+        picked: list[dict] = []
+        for e in sorted(latest.values(), key=lambda e: e["end"], reverse=True):
+            if not picked or e["end"] < picked[-1]["start"]:
+                picked.append(e)
+            if len(picked) == 4:
+                break
+        if len(picked) < 4:
+            continue
+        end, start = date.fromisoformat(picked[0]["end"]), date.fromisoformat(picked[-1]["start"])
+        if 350 <= (end - start).days <= 380 and (today - end).days <= 400:
+            return to_dec(sum(Decimal(str(e["val"])) for e in picked), 4), end
+    return None, None
+
+
 class SecClient:
     """FinancialProvider + DisclosureProvider (US)."""
     source = "SEC"
@@ -143,16 +185,7 @@ class SecClient:
             if rows:
                 best = max(rows, key=lambda e: (e["end"], e.get("filed", "")))
                 shares, shares_as_of = int(best["val"]), date.fromisoformat(best["end"])
-        dps = dps_end = None
-        gaap = facts.get("us-gaap", {})
-        for concept in ("CommonStockDividendsPerShareDeclared", "CommonStockDividendsPerShareCashPaid"):
-            rows = [e for e in gaap.get(concept, {}).get("units", {}).get("USD/shares", [])
-                    if e.get("form") in ANNUAL_FORMS and "start" in e
-                    and 350 <= (date.fromisoformat(e["end"]) - date.fromisoformat(e["start"])).days <= 380]
-            if rows:
-                best = max(rows, key=lambda e: (e["end"], e.get("filed", "")))
-                dps, dps_end = to_dec(best.get("val"), 4), date.fromisoformat(best["end"])
-                break
+        dps, dps_end = annual_dps(facts.get("us-gaap", {}))
         return ValuationBase(shares_outstanding=shares if shares and shares > 0 else None, shares_as_of=shares_as_of,
                              dps=dps if dps is None or dps >= 0 else None, dps_period_end=dps_end)
 

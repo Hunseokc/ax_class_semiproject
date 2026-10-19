@@ -14,6 +14,7 @@ from sqlalchemy import text
 from app.ingest import jobs
 from app.ingest.sectors import sector_for_krx, sector_for_sic
 from app.providers.base import ValuationBase
+from app.providers.sec import annual_dps
 from app.services import freshness
 from app.services.freshness import SEOUL, financials_valid_until
 from tests.conftest import D
@@ -118,6 +119,26 @@ def test_kr_valuation_requests_only_confirmed_days(engine):
     jobs.load_valuations(engine, pv, stock_ids=[1], full=True)
     _, _, end = pv.kr_valuation.calls[-1]
     assert end <= jobs.last_closed_day("KR")                      # KRX 공표 전 당일(0 → 빈 행)은 요청하지 않는다
+
+
+def _dps(start, end, val, form="10-Q", filed="2026-08-01"):
+    return {"start": start, "end": end, "val": val, "form": form, "filed": filed}
+
+
+def test_annual_dps_prefers_fy_value_and_sums_four_quarters_otherwise():
+    today = date(2026, 10, 19)
+    quarters = [_dps("2025-09-29", "2025-12-31", 1.5, "10-K"), _dps("2026-01-01", "2026-04-05", 1.59),
+                _dps("2026-04-06", "2026-07-05", 1.59), _dps("2025-06-30", "2025-09-28", 1.5),
+                _dps("2026-01-01", "2026-07-05", 3.18),                       # 반기 누계는 분기가 아니다
+                _dps("2026-04-06", "2026-07-05", 1.59, filed="2026-07-30")]   # 같은 분기 이전 제출본
+    gaap = {"CommonStockDividendsPerShareDeclared": {"units": {"USD/shares": quarters}}}
+    assert annual_dps(gaap, today) == (Decimal("6.18"), date(2026, 7, 5))     # 분기만 신고(GD): 최근 4개 분기 합
+    gaap["CommonStockDividendsPerShareCashPaid"] = {"units": {"USD/shares": [
+        _dps("2025-01-01", "2025-12-31", 5.8, "10-K")]}}
+    assert annual_dps(gaap, today) == (Decimal("5.8"), date(2025, 12, 31))    # 1년치 값이 있으면 그 값
+    assert annual_dps({"CommonStockDividendsPerShareCashPaid": {"units": {"USD/shares": [   # 2009년에 끊긴 분기 값
+        _dps(f"2009-{m:02d}-01", f"2009-{m + 2:02d}-28", 0.3) for m in (1, 4, 7, 10) if m + 2 <= 12]}}}, today) == (None, None)
+    assert annual_dps({}, today) == (None, None)
 
 
 # ------------------------------------------------------------------ 섹터 매핑
