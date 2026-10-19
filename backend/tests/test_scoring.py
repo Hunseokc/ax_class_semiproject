@@ -16,9 +16,10 @@ from sqlalchemy import text
 from app.services.fx import FxService
 from app.services.refresh import RefreshService
 from app.ingest.jobs import migrate
+from app.queries import sql
 from app.services.scoring import (FACTORS, METRICS, aggregate, compute_scores, load_config, normalize, sync_presets,
                                   validate_presets)
-from tests.conftest import D
+from tests.conftest import D, scalar
 from tests.fakes import make_providers
 from tests.test_analysis import _path, _replace_prices
 
@@ -334,6 +335,23 @@ def test_boundary_cases(engine, universe):
     assert "momentum" in sc[7]["data_quality"]["missing_metrics"] and "notes" not in sc[1]["data_quality"]
     # 유효 팩터 1개(value)뿐인 카카오(8) → 점수 NULL
     assert sc[8]["factor_coverage"] == 1 and sc[8]["score"] is None
+
+
+def test_listed_stocks_are_excluded_from_universe(engine, universe):
+    with engine.begin() as conn:                                         # 상장 목록(검색용) 종목은 비교 표본이 아니다
+        conn.execute(text("INSERT INTO stocks (stock_id, market_id, ticker, name, coverage) VALUES (9, 1, '999999', '상장', 'listed')"))
+        conn.execute(text("""INSERT INTO valuation_snapshots (stock_id, as_of, eps, bps, shares_outstanding, source)
+                             VALUES (9, :d, 500, 5000, 1000, 'PYKRX')"""), {"d": D})
+    _replace_prices(engine, 9, _path(300, 0, .5), D)
+    compute_scores(engine, as_of=D)
+    assert scalar(engine, "SELECT count(*) FROM stock_metric_values WHERE stock_id = 9") == 0
+    assert scalar(engine, "SELECT count(*) FROM stock_scores WHERE stock_id = 9") == 0
+
+
+def test_score_metrics_with_stock_id_returns_only_that_stock(engine, universe):
+    with engine.connect() as conn:
+        rows = conn.execute(sql("score_metrics"), {"stock_id": 1}).mappings().all()
+    assert {r["stock_id"] for r in rows} == {1} and len(rows) == len(METRICS)
 
 
 def test_adding_a_stock_does_not_rescale_like_min_max(engine, universe):

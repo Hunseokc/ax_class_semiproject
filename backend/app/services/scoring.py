@@ -103,7 +103,7 @@ def sync_presets(conn: Connection, cfg: dict | None = None) -> None:
 # ------------------------------------------------------------------ 계산 단계
 def insert_metric_values(conn: Connection, as_of: date) -> dict[int, list[str]]:
     """1단계. 반환: 종목별 메모(대체 계산·고정 사유)."""
-    rows = conn.execute(sql("score_metrics")).mappings().all()
+    rows = conn.execute(sql("score_metrics"), {"stock_id": None}).mappings().all()
     if rows:
         conn.execute(text("""INSERT INTO stock_metric_values (stock_id, as_of, metric, factor, raw_value, z_raw)
                              VALUES (:stock_id, :as_of, :metric, :factor, :raw_value, :z_fixed)"""),
