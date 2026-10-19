@@ -21,10 +21,6 @@ C = ["backend/app/services/sectors.py", "backend/app/services/sentiment.py", "ba
      "backend/app/api/home.py", "backend/tests/test_home_widgets.py"]
 
 # ------------------------------------------------------------------ 원본과 다르게 둔 것
-[[allow]]
-keys = ["view:v_stock_metrics"]
-reason = "원본 끝 열 dps·dividend_yield(배당)는 Stage 6-B 4번(views.sql [S6-B])에서 추가 — 그 전까지 이 두 열만큼 다르다"
-
 # ------------------------------------------------------------------ 이번 단계에 팀원이 만드는 것
 # owner는 본문을 원본대로 쓰는 사람. D가 단계 시작 때 껍데기(TODO(껍데기))를 먼저 넣는 이름도 여기 적는다.
 [[planned]]

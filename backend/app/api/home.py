@@ -13,8 +13,8 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_id, get_db, get_engine_dep, get_preset
-from app.queries import sql
 from app.schemas.api import HomeRankingOut, SectorsOut, SentimentOut
+from app.services.home_ranking import get_attractiveness_ranking, get_volume_surge_ranking
 from app.services.sectors import read_sectors
 from app.services.sentiment import get_sentiment
 
@@ -30,18 +30,6 @@ def ranking(kind: Literal["volume_surge", "attractiveness"] = Query(description=
             user_id: int = Depends(get_current_user_id),
             preset: dict = Depends(get_preset),
             db: Session = Depends(get_db)):
-    # TODO(연결): C의 services/home_ranking.py — 연결 시 원본처럼 맨 위 import로 옮기고 아래 except 대체 경로를 지운다
-    try:
-        from app.services.home_ranking import get_attractiveness_ranking, get_volume_surge_ranking
-    except ImportError:          # C의 파일이 stage6에 들어오기 전: 같은 SQL을 직접 실행(원본 함수 본문과 같음)
-        def get_volume_surge_ranking(db, country, limit=5, *, user_id):
-            rows = db.execute(sql("home_volume_surge"), {"country": country, "limit": limit, "user_id": user_id})
-            return [dict(r) for r in rows.mappings().all()]
-
-        def get_attractiveness_ranking(db, country, limit=5, *, preset, user_id):
-            rows = db.execute(sql("home_attractiveness"),
-                              {"country": country, "limit": limit, "preset": preset, "user_id": user_id})
-            return [dict(r) for r in rows.mappings().all()]
     if kind == "volume_surge":
         items = get_volume_surge_ranking(db, country, limit, user_id=user_id)
     else:
