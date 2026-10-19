@@ -40,7 +40,8 @@ async def lifespan(_: FastAPI):
 
         def refresh_service():
             pv = deps.get_providers()
-            return deps.RefreshService(engine, pv, FxService(engine, pv.fx, ttl), ttl, scorer=deps.get_scorer())
+            return deps.RefreshService(engine, pv, FxService(engine, pv.fx, ttl), ttl, scorer=deps.get_scorer(),
+                                       sector_loader=deps.load_sectors)
 
         task = asyncio.create_task(Scheduler(engine, refresh_service, deps.get_providers, deps.get_scorer()).run_forever())
     yield

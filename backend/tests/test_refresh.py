@@ -164,8 +164,10 @@ def test_refresh_api(client, engine):
     r = client.post("/api/v1/market/refresh")
     assert r.status_code == 200
     body = r.json()
+    # API 경로에는 섹터 수집기가 연결된다. 테스트 provider에는 미국 묶음 다운로드가 없어 SECTORS_US는 실패가 정상
     jobs = {j["job_type"]: j["status"] for j in body["jobs"]}
-    assert jobs == {**dict.fromkeys(("FX", "INDICES", "PRICES", "VALUATION"), "SUCCESS"), "SCORES": "SKIPPED"}
+    assert set(jobs) == {"FX", "INDICES", "SECTORS_US", "SECTORS_KR", "PRICES", "VALUATION", "SCORES"}
+    assert jobs["SECTORS_US"] == "FAILED" and jobs["SECTORS_KR"] == "SUCCESS"
     assert body["ttl_hours"] == 4 and body["next_refresh_available_at"]
     status = {j["job_type"]: j["status"] for j in client.get("/api/v1/market/refresh/status").json()["jobs"]}
-    assert all(v == "FRESH" for v in status.values())
+    assert all(v == "FRESH" for k, v in status.items() if k != "SECTORS_US") and status["SECTORS_US"] == "STALE"
