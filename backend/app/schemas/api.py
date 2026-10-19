@@ -85,6 +85,9 @@ class FxOut(Schema):
     change_rate: Num | None
     history: list[FxPointOut]                # 최근 1년 DAILY (오래된 순)
     as_of: datetime
+    high_52w: Num | None = None              # 52주 최고·최저(현재 값 포함) — 1년치가 없으면 null
+    low_52w: Num | None = None
+    position_52w: Num | None = None
 
 
 # ------------------------------------------------------------------ 종목

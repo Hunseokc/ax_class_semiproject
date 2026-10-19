@@ -1,6 +1,4 @@
-"""대시보드 홈: 시장 주목 종목(거래량 급증·매력도 순위).
-
-Stage 6-B에서 뺀 것: 지수·환율 52주 범위, 장 상태(session_status) — Stage 6-D(market_calendar) 몫."""
+"""대시보드 홈: 시장 주목 종목(거래량 급증·매력도 순위), 지수·환율 52주 범위, 관심종목 스파크라인."""
 from datetime import timedelta
 
 from sqlalchemy import text
@@ -78,3 +76,53 @@ def test_ranking_validates_params(client):
     assert client.get(f"{API}/home/ranking", params={"kind": "volume"}).status_code == 422
     assert client.get(f"{API}/home/ranking", params={"kind": "attractiveness", "country": "JP"}).status_code == 422
     assert client.get(f"{API}/home/ranking", params={"kind": "attractiveness", "limit": 0}).status_code == 422
+
+
+# ------------------------------------------------------------------ 52주 범위·스파크라인
+def test_index_52w_range_needs_a_full_year(client, engine):
+    idx = client.get(f"{API}/market/indices").json()["indices"][0]
+    assert idx["high_52w"] is None and idx["position_52w"] is None                       # 3일치뿐
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO index_daily_prices (index_id, trade_date, close) VALUES (1, :d, :c)"),
+                     [{"d": D - timedelta(days=400), "c": 9999}, {"d": D - timedelta(days=200), "c": 2000},
+                      {"d": D - timedelta(days=100), "c": 3000}])
+    idx = client.get(f"{API}/market/indices").json()["indices"][0]
+    assert idx["low_52w"] == 2000 and idx["high_52w"] == 3000                            # 1년 넘은 9,999는 범위 밖
+    assert idx["position_52w"] == 0.52                                                   # (2520 − 2000) / 1000
+    assert [p["close"] for p in idx["sparkline"]] == [2000, 3000, 2500, 2510, 2520]      # 1년치
+
+
+def test_fx_52w_range_and_history(client, engine):
+    fx = client.get(f"{API}/market/fx").json()
+    assert fx["position_52w"] is None and len(fx["history"]) == 3
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO fx_rates (rate_at, usd_krw, granularity) VALUES (CAST(:d AS date) + time '00:00', :v, 'DAILY')"),
+                     [{"d": D - timedelta(days=400), "v": 1500}, {"d": D - timedelta(days=100), "v": 1400}])
+    fx = client.get(f"{API}/market/fx").json()
+    assert fx["low_52w"] == 1300 and fx["high_52w"] == 1400 and fx["position_52w"] == 0
+    assert len(fx["history"]) == 4 and fx["change_rate"] == 0                           # 전일 대비 계산은 그대로
+
+
+# ------------------------------------------------------------------ 장 상태(거래소 달력)
+def test_session_status_uses_exchange_calendar():
+    from datetime import date, datetime, timezone
+
+    from app.services.market_calendar import session_status
+
+    def at(y, m, d, hour_utc=3):
+        return datetime(y, m, d, hour_utc, tzinfo=timezone.utc)
+
+    assert session_status("KR", date(2026, 10, 8), at(2026, 10, 9)) == "holiday"           # 한글날(금)
+    assert session_status("US", date(2026, 10, 8), at(2026, 10, 9, 15)) == "previous_session"   # 미국은 개장
+    assert session_status("KR", date(2026, 9, 23), at(2026, 9, 25)) == "holiday"           # 추석 연휴
+    assert session_status("US", date(2026, 11, 25), at(2026, 11, 26, 15)) == "holiday"     # 추수감사절
+    assert session_status("KR", date(2026, 10, 8), at(2026, 10, 10)) == "holiday"          # 토요일
+    assert session_status("KR", date(2026, 10, 8), at(2026, 10, 12)) == "previous_session"
+    assert session_status("KR", date(2026, 10, 12), at(2026, 10, 12)) == "today"
+    assert session_status("JP", date(2026, 10, 8)) is None and session_status("KR", None) is None
+    assert session_status("KR", date(2020, 1, 1), at(2099, 1, 2)) is None                   # 달력 범위 밖 → 판정 포기
+
+
+def test_indices_include_session_status(client):
+    idx = client.get(f"{API}/market/indices").json()["indices"][0]
+    assert idx["session_status"] in {"holiday", "previous_session"}                        # 픽스처 기준일은 4일 전
