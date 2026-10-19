@@ -1,6 +1,6 @@
 // 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
 import { PRESET_EVENT, getFx, getIndices, getPortfolioSummary, getPortfolios, getPreset, getHomeRanking, getSectors, getSentiment, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S6-A] getHomeRanking·getSectors·getSentiment · 포트폴리오 요약
-import { DASH, changeHtml, changeLabel, date, dateTime, esc, initials, krw, num, pct, price, shortDate, signedKrw, stockUrl, usd } from "../format.js";   // [S5-A] pct
+import { DASH, changeHtml, changeLabel, date, dateTime, esc, krw, num, pct, price, shortDate, signedKrw, stockUrl, usd } from "../format.js";   // [S5-A] pct
 import { color, destroyCharts, scoreBand, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
 import { emptyState, errorState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";   // [S5-A] marketBadge
@@ -442,19 +442,19 @@ function renderSentiment(d) {
   const c = d.components;
   const parts = [["가격 위치 (52주)", c.price_position], ["이동평균 괴리 (125일)", c.ma_gap_score], ["RSI (14일)", c.rsi_score]];
   if (d.market === "US") parts.push(["변동성 (VIX)", c.vix_score]);
-  const band = scoreBand(d.score);
   const index = d.index_code === "SPX" ? "S&P 500" : "KOSPI";
+  // 게이지 + 어제·지난주를 한 묶음으로 가운데 두고, 기준일 줄은 칸 맨 아래 (구간 이름은 게이지 색·라벨이 보여 준다)
   return h(`<div class="senti">
-      <div class="senti__gauge" tabindex="0" aria-describedby="senti-tip"
-           aria-label="시장 심리 지수 ${Math.round(d.score)}점 ${esc(d.label)}">
-        ${scoreGauge(d.score, { labels: SENTIMENT_LABELS })}
-        <ol class="senti__scale" aria-hidden="true">${SENTIMENT_LABELS.map((l, i) =>
-          `<li class="${band && band.index === i + 1 ? "is-current" : ""}"><i style="background:var(--gauge-${i + 1})"></i>${l}</li>`).join("")}</ol>
-        <div class="senti__tip" role="tooltip" id="senti-tip"><strong>구성요소 점수 (0~100)</strong>
-          ${parts.map(([n, v]) => `<span>${n}</span><span class="num">${isNum(v) ? Math.round(v) : "계산 불가"}</span>`).join("")}
+      <div class="senti__main">
+        <div class="senti__gauge" tabindex="0" aria-describedby="senti-tip"
+             aria-label="시장 심리 지수 ${Math.round(d.score)}점 ${esc(d.label)}">
+          ${scoreGauge(d.score, { labels: SENTIMENT_LABELS })}
+          <div class="senti__tip" role="tooltip" id="senti-tip"><strong>구성요소 점수 (0~100)</strong>
+            ${parts.map(([n, v]) => `<span>${n}</span><span class="num">${isNum(v) ? Math.round(v) : "계산 불가"}</span>`).join("")}
+          </div>
         </div>
+        <dl class="senti__hist">${sentimentHistory("어제", d.previous)}${sentimentHistory("지난주", d.week_ago)}</dl>
       </div>
-      <dl class="senti__hist">${sentimentHistory("어제", d.previous)}${sentimentHistory("지난주", d.week_ago)}</dl>
       <p class="home-widget__foot senti__foot"><span>${index} 기준 · 기준일 ${esc(monthDay(d.as_of))}</span>${
         sessionBadge({ as_of: d.as_of, country: d.market, session_status: d.session_status })}</p>
     </div>`);
@@ -477,8 +477,8 @@ loadSectors({ fallback: true });
 loadSentiment();
 
 // ---------------------------------------------------------------- 내 포트폴리오 요약 (GET /portfolios · /portfolios/{id}/summary — 포트폴리오 화면과 같은 값)
-// 총 평가금액(담은 종목 + 현금) · 평가손익 · 시드 사용률 · 원가 비중 상위 종목. 편집은 포트폴리오 화면에서 한다
-const PF_TOP = 5;
+// 총 평가금액(담은 종목 + 현금) · 평가손익 · 시드 사용률 · 원가 비중 상위 종목 쌓은 막대. 편집은 포트폴리오 화면에서 한다
+const PF_TOP = 3;
 const PF_KEY = "homePortfolio";   // 고른 포트폴리오는 브라우저에 저장(없거나 지워졌으면 첫 번째)
 const pfPnlClass = (v) => (v > 0 ? "chg chg--kr-up" : v < 0 ? "chg chg--kr-down" : "chg chg--flat");   // 원화 손익은 국내 관례 색(포트폴리오 화면과 같음)
 const pfPnlHtml = (v, rate) => (v === null ? DASH : `<span class="${pfPnlClass(v)}">${signedKrw(v)}${isNum(rate) ? ` (${pct(rate, { sign: true })})` : ""}</span>`);
@@ -488,19 +488,30 @@ function storedPortfolioId() {
   try { return Number(localStorage.getItem(PF_KEY)) || null; } catch { return null; }
 }
 
-function pfItemRow(it) {
-  return `<li><a class="home-pf__item" href="${stockUrl(it.market, it.ticker)}">
-      <span class="avatar" aria-hidden="true">${esc(initials(it.name))}</span>
-      <span class="row__main"><span class="row__title">${esc(it.name)}</span>
-        <span class="home-pf__weight"><span class="bar" role="img" aria-label="원가 비중 ${pct(it.weight, { digits: 1 })}"><span class="bar__fill" style="width:${Math.min(100, it.weight * 100).toFixed(1)}%"></span></span>
-          <span class="subtle num">${pct(it.weight, { digits: 1 })}</span></span></span>
-      <span class="home-pf__pnl num">${it.pnl_rate == null ? DASH : `<span class="${pfPnlClass(it.pnl_rate)}">${pct(it.pnl_rate, { sign: true })}</span>`}</span>
-    </a></li>`;
+// 시드 사용 막대 한 칸: 칸 안 = 이름, 칸 아래 = 수익률. 너비 = 시드 대비 금액(비중은 그림으로만), 상위 종목은 상세로 가는 링크
+function pfSeg(it, i) {
+  const pnl = it.pnl_rate == null ? "" : `<span class="${pfPnlClass(it.pnl_rate)}">(${pct(it.pnl_rate, { sign: true })})</span>`;
+  const inner = `<span class="home-pf__seg-bar"><span class="home-pf__seg-name">${esc(it.name)}</span></span>
+      <span class="home-pf__seg-pnl num">${pnl}</span>`;
+  const style = `flex:${it.share} 1 0;--seg:var(--pf-seg-${i + 1})`;
+  const label = `${it.name} 원가 비중 ${pct(it.weight, { digits: 1 })}${it.pnl_rate == null ? "" : ` 수익률 ${pct(it.pnl_rate, { sign: true })}`}`;
+  return it.ticker
+    ? `<a class="home-pf__seg" role="listitem" href="${stockUrl(it.market, it.ticker)}" style="${style}" title="${esc(label)}" aria-label="${esc(label)}">${inner}</a>`
+    : `<span class="home-pf__seg" role="listitem" style="${style}" title="${esc(label)}" aria-label="${esc(label)}">${inner}</span>`;
 }
 
 function renderPortfolioWidget(s) {
-  const usage = s.usage_rate ?? 0;
+  const usage = Math.min(1, s.usage_rate ?? 0);
   const items = [...s.items].sort((a, b) => b.weight - a.weight);
+  // 시드 사용 막대 = 상위 3종목 + "외 n개" + 남은 현금. 칸 너비는 원가 비중 × 사용률(시드 대비)
+  const segs = items.slice(0, PF_TOP).map((it) => ({ ...it, share: it.weight * usage }));
+  const rest = items.slice(PF_TOP);
+  if (rest.length) {
+    const weight = rest.reduce((a, it) => a + it.weight, 0);
+    segs.push({ name: `외 ${rest.length}개`, weight, share: weight * usage, pnl_rate: null });
+  }
+  const cash = 1 - usage > 0 ? `<span class="home-pf__seg home-pf__seg--cash" role="listitem" style="flex:${1 - usage} 1 0"
+      title="현금 ${esc(krw(s.remaining_krw))}" aria-label="현금 ${esc(krw(s.remaining_krw))}"><span class="home-pf__seg-bar"></span></span>` : "";
   const el = h(`<div class="home-pf__inner">
       <div class="home-pf__hero">
         <span class="subtle">총 평가금액</span>
@@ -508,7 +519,7 @@ function renderPortfolioWidget(s) {
         <span class="home-pf__total-pnl num">${items.length ? pfPnlHtml(s.total_pnl_krw, s.total_pnl_rate) : "담은 종목 없음"}</span>
       </div>
       <div class="home-pf__usage">
-        <div class="bar" role="img" aria-label="시드 사용률 ${pct(usage, { digits: 1 })}"><div class="bar__fill" style="width:${Math.min(100, usage * 100)}%"></div></div>
+        <div class="home-pf__stack" role="list" aria-label="시드 사용률 ${pct(usage, { digits: 1 })} — 담은 종목 원가 비중 순">${segs.map(pfSeg).join("")}${cash}</div>
         <span class="subtle">시드 ${krw(s.seed_krw, { compact: true })} 중 ${pct(usage, { digits: 1 })} 사용 · 현금 ${krw(s.remaining_krw, { compact: true })}</span>
       </div>
     </div>`);
@@ -517,9 +528,6 @@ function renderPortfolioWidget(s) {
       action: '<a class="btn btn--primary" href="/stocks">주식 리스트로</a>' }));
     return el;
   }
-  const extra = items.length - PF_TOP;
-  el.append(h(`<div class="home-pf__list"><p class="home-pf__cap subtle">원가 비중 상위 ${Math.min(PF_TOP, items.length)}종목${extra > 0 ? ` · 외 ${extra}개` : ""}</p>
-      <ul class="list home-pf__items" aria-label="담은 종목 (원가 비중 순)">${items.slice(0, PF_TOP).map(pfItemRow).join("")}</ul></div>`));
   el.append(h(`<p class="home-widget__foot">모의 계산 · 체결 기록 아님${s.as_of ? ` · 기준일 ${esc(monthDay(s.as_of))}` : ""}</p>`));
   return el;
 }

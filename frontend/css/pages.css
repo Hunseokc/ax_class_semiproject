@@ -55,6 +55,9 @@
 .stat__label { color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 .stat__value { font-size: var(--fs-lg); font-weight: var(--fw-extra); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat__sub { color: var(--text-3); font-size: var(--fs-xs); }
+.stat__value:has(.stat__raw) { white-space: normal; }
+.stat__label, .stat__sub { word-break: keep-all; }   /* 한글이 단어 중간에서 끊기지 않게 */   /* 좁은 칸에서는 괄호 수치가 다음 줄로 */
+.stat__raw { margin-left: var(--sp-1); color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }   /* 비교 문구 옆 괄호 속 원래 수치 */
 
 /* ---------------------------------------------------------------- 주식 리스트 ★ 열 [S2-A] */
 .stock-row { grid-template-columns: 28px minmax(180px, 2fr) minmax(130px, 1.2fr) minmax(90px, 1fr) minmax(90px, 1fr) 116px; }
@@ -243,7 +246,19 @@
 @media (max-width: 767px) { .score-panel { grid-template-columns: 1fr; } }
 
 /* ── [S4-A] 수치 분석 · 접힌 섹션 ── */
-.numeric { display: flex; flex-direction: column; gap: var(--sp-4); }
+/* 한눈에 보는 투자 지표: 질문 3개 카드(결론 크게 · 수치 작게) + 거래량 한 줄 */
+.glance-wrap { display: flex; flex-direction: column; gap: var(--sp-3); }
+.glance { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-3); }
+.glance__card { background: var(--surface); border-radius: var(--r-row); padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.glance__q { color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.glance__a { font-size: var(--fs-lg); font-weight: var(--fw-extra); line-height: 1.3; word-break: keep-all; }
+.glance__facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); color: var(--text-2); word-break: keep-all; }
+.glance__facts span, .glance__basis { color: var(--text-3); font-size: var(--fs-xs); }
+.glance__chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); font-size: var(--fs-xs); }
+.glance__chips > span { display: inline-flex; gap: 4px; padding: 2px 8px; border-radius: var(--r-pill); background: var(--card); white-space: nowrap; }
+.glance__chips > span > em { font-style: normal; color: var(--text-3); }
+.glance__foot { margin: 0; font-size: var(--fs-sm); color: var(--text-2); word-break: keep-all; }
+.glance__foot span { color: var(--text-3); font-size: var(--fs-xs); }
 
 /* 접힌 섹션: 요약(제목·설명·화살표)만 보이고, 펼치면 처음 한 번 불러온다 */
 .fold { display: block; }
@@ -416,7 +431,7 @@
 .topbar--home { flex-wrap: wrap; }
 .topbar--home .gsearch { flex: 1 1 260px; width: auto; }       /* 좁은 화면에서는 검색이 한 줄을 다 쓰고 투자 성향이 아래 줄로 */
 .section__meta { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-sm); font-weight: var(--fw-regular); }
-/* 2열: 시장 심리 지수 + 섹터 히트맵 | 내 포트폴리오 요약, 두 열 높이를 맞춘다. 관심종목은 그 아래 전체 폭 */
+/* 2열(1:1): [시장 심리 지수 | 섹터 히트맵] | 내 포트폴리오 요약, 두 열 높이를 맞춘다. 관심종목은 그 아래 전체 폭 */
 .home-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-5); align-items: stretch; }
 .home-watch { min-width: 0; padding: var(--sp-5); }   /* 섹터 히트맵·심리 지수 위젯과 같은 회색 박스(제목 포함) */
 .home-watch .wl-compact { background: none; padding: 0; }   /* 박스 안 목록은 배경을 겹치지 않는다 */
@@ -425,8 +440,11 @@
 .home-watch__body > * { flex: 1; }
 .home-watch__more { align-self: flex-end; }
 .home-watch__sub { margin-top: var(--sp-1); }
-.home-side { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
-.home-side > :last-child { flex: 1; }                 /* 좌측이 더 길면 아래 위젯이 남는 높이를 채운다 */
+/* 심리 지수 | 히트맵 가로 배치, 두 칸 높이를 맞춘다.
+   왼쪽 열이 좁아지는 화면 폭(포트폴리오와 2열인 1101~1439px, 한 열이지만 사이드바가 있는 ~899px)에서는 위아래로 쌓는다 */
+.home-side { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: var(--sp-4); align-items: stretch; min-width: 0; }
+@media (max-width: 899px), (min-width: 1101px) and (max-width: 1439px) { .home-side { grid-template-columns: 1fr; } }
+.home-widget .segmented { flex: none; white-space: nowrap; }   /* 좁은 칸에서 탭 글자가 한 글자씩 꺾이지 않게 — 탭은 제목 아래 줄로 내려간다 */
 .home-widget { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-5); }
 .home-widget__body { min-width: 0; }
 .home-widget__foot { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
@@ -441,18 +459,23 @@
 .home-pf__big { font-size: var(--fs-2xl); font-weight: var(--fw-extra); letter-spacing: -0.02em; line-height: 1.15; }
 .home-pf__total-pnl { font-size: var(--fs-md); font-weight: var(--fw-bold); }
 .home-pf__usage { display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--fs-xs); }
-.home-pf__usage .bar { height: 8px; }
-.home-pf__list { display: flex; flex-direction: column; gap: var(--sp-2); }
-.home-pf__cap { margin: 0; font-size: var(--fs-xs); }
-.home-pf__items { gap: 0; }
-.home-pf__item { display: grid; grid-template-columns: 36px minmax(0, 1fr) 72px; align-items: center; gap: var(--sp-3); padding: var(--sp-2); border-radius: var(--r-row); color: inherit; text-decoration: none; }
-.home-pf__item:hover { background: var(--card-active); }
-.home-pf__item .avatar { width: 36px; height: 36px; font-size: var(--fs-xs); }
-.home-pf__weight { display: flex; align-items: center; gap: var(--sp-2); margin-top: 4px; font-size: var(--fs-xs); }
-.home-pf__weight .bar { flex: 1; height: 6px; }
-.home-pf__weight .bar__fill { display: block; }   /* 링크 안이라 span으로 둔 막대 */
-.home-pf__weight .num { width: 44px; text-align: right; }
-.home-pf__pnl { text-align: right; font-size: var(--fs-sm); font-weight: var(--fw-bold); }
+/* 시드 사용 막대(종목별로 쌓음): 칸 너비 = 시드 대비 금액, 칸 안 이름, 칸 아래 수익률, 끝 빈 칸 = 현금. 좁은 칸은 이름이 말줄임(전체는 툴팁) */
+.home-pf__stack {
+  --pf-seg-1: var(--ice-strong); --pf-seg-2: var(--lavender-strong); --pf-seg-3: var(--ice); --pf-seg-4: var(--lavender);
+  display: flex; gap: 2px;
+}
+.home-pf__seg { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: inherit; text-decoration: none; }
+.home-pf__seg-bar {
+  display: flex; align-items: center; height: 26px; padding: 0 6px; overflow: hidden; white-space: nowrap;
+  background: var(--seg); color: var(--text-on-pastel); font-size: 11px; font-weight: var(--fw-bold);
+}
+.home-pf__seg-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.home-pf__seg:first-child .home-pf__seg-bar { border-radius: var(--r-pill) 0 0 var(--r-pill); }
+.home-pf__seg:last-child .home-pf__seg-bar { border-radius: 0 var(--r-pill) var(--r-pill) 0; }
+.home-pf__seg:only-child .home-pf__seg-bar { border-radius: var(--r-pill); }
+.home-pf__seg--cash .home-pf__seg-bar { background: var(--card-active); }
+a.home-pf__seg:hover .home-pf__seg-bar { filter: brightness(1.08); }
+.home-pf__seg-pnl { padding-left: 4px; font-size: 11px; font-weight: var(--fw-bold); white-space: nowrap; }   /* 칸보다 길면 오른쪽으로 넘쳐 보인다(잘리지 않게) */
 
 /* 한 줄 시장 요약 + 관심종목 연결 요약 (규칙 기반 문장) */
 .market-brief { display: flex; flex-direction: column; gap: 2px; margin: calc(-1 * var(--sp-2)) 0 var(--sp-2); }   /* 아래 카드와 간격 = 섹션 사이 간격(24px) */
@@ -475,25 +498,26 @@
 .heat__name { font-size: var(--fs-xs); font-weight: var(--fw-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .heat__chg { font-size: var(--fs-sm); font-weight: var(--fw-extra); }
 .heat-skeleton { height: 172px; border-radius: var(--r-row); }
-/* 홈 왼쪽 열 아래 위젯(히트맵)은 오른쪽 포트폴리오 높이만큼 늘어나므로 타일 줄이 남는 높이를 나눠 갖는다 */
+/* 히트맵은 옆 심리 지수·오른쪽 포트폴리오 높이만큼 늘어나므로 타일 줄이 남는 높이를 나눠 갖는다 */
 .home-side > :last-child .home-widget__body { flex: 1; display: flex; flex-direction: column; }
 .home-side > :last-child .heat { flex: 1; align-content: stretch; }
 
-/* 시장 심리 지수: 매력도 게이지를 크게 + 5구간 라벨 + 구성요소 툴팁 */
-.senti { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-3) var(--sp-4); align-items: center; }
+/* 시장 심리 지수: 게이지 + 어제·지난주 묶음을 칸 가운데, 기준일 줄은 칸 맨 아래(옆 히트맵 기준일과 같은 높이).
+   칸이 좁으면 위아래로, 넓으면(한 줄 배치·모바일) 게이지 옆에 어제·지난주 */
+#sentiment { container: senti / inline-size; flex: 1; display: flex; flex-direction: column; }
+#sentiment > * { flex: 1; }
+.senti { display: flex; flex-direction: column; gap: var(--sp-3); }
+.senti__main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-3); }
+@container senti (min-width: 340px) { .senti__main { flex-direction: row; gap: var(--sp-8); } .senti__hist { flex-direction: column; } }
 .senti__gauge { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); border-radius: var(--r-row); outline: none; }
 .senti__gauge:focus-visible { box-shadow: var(--focus); }
 .senti .gauge-mini { width: auto; }
-.senti .gauge-mini svg { width: 184px; height: 108px; }
-.senti .gauge-mini__value strong { font-size: var(--fs-2xl); }
+.senti .gauge-mini svg { width: 144px; height: 84px; }
+.senti .gauge-mini__value strong { font-size: var(--fs-xl); }
 .senti .gauge-mini__band { font-size: var(--fs-sm); color: var(--text-2); }
 .senti .gauge-mini__ticks { stroke: var(--text-3); }
 .senti .gauge-mini__needle line { stroke: var(--text); }
 .senti .gauge-mini__needle circle { fill: var(--text); }
-.senti__scale { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px var(--sp-2); margin: 0; padding: 0; list-style: none; font-size: 11px; color: var(--text-3); }
-.senti__scale li { display: inline-flex; align-items: center; gap: 4px; }
-.senti__scale i { width: 7px; height: 7px; border-radius: 50%; display: block; }
-.senti__scale .is-current { color: var(--text); font-weight: var(--fw-bold); }
 .senti__tip {
   position: absolute; left: 50%; top: 100%; translate: -50% 6px; z-index: 20; width: max-content; max-width: 260px;
   display: none; grid-template-columns: 1fr auto; gap: 4px var(--sp-4);
@@ -502,10 +526,10 @@
 }
 .senti__tip strong { grid-column: 1 / -1; }
 .senti__gauge:hover .senti__tip, .senti__gauge:focus-visible .senti__tip { display: grid; }
-.senti__hist { display: flex; flex-direction: column; gap: var(--sp-3); margin: 0; }
+.senti__hist { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-2) var(--sp-5); margin: 0; }
 .senti__hist-item dt { color: var(--text-3); font-size: var(--fs-xs); }
 .senti__hist-item dd { margin: 0; font-size: var(--fs-sm); color: var(--text-2); white-space: nowrap; }
 .senti__hist-item strong { color: var(--text); font-size: var(--fs-md); }
-.senti__foot { grid-column: 1 / -1; }
-.senti-skeleton { height: 200px; border-radius: var(--r-row); }
-@media (max-width: 420px) { .senti { grid-template-columns: 1fr; } .senti__hist { flex-direction: row; justify-content: center; gap: var(--sp-6); } }
+.senti__foot { flex-wrap: wrap; }
+.senti__foot .badge, .home-widget__foot .badge { white-space: nowrap; }
+.senti-skeleton { height: 170px; border-radius: var(--r-row); }
