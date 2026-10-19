@@ -265,6 +265,10 @@ def run_benchmark(engine: Engine, providers: Providers, scorer: Callable[[Engine
         out: dict = {}
         with job_log(engine, source="INTERNAL", job_type="BENCHMARK", label="daily") as res:
             res.notes.append("일일:")
+            try:                              # 새 사업보고서를 낸 종목의 재무를 먼저 만료시킨다 → 아래 재무 갱신 대상
+                out["feed"] = jobs.load_dart_feed(engine, providers, today=today)
+            except Exception as e:  # noqa: BLE001 — 실패 사유는 load_dart_feed의 ingestion_logs 행에 남는다
+                res.notes.append(f"공시 증분 실패: {e}")
             if reselect or selection_due(engine):
                 out["select"] = select_benchmark(engine, providers, today=today)
             out.update(load_benchmark(engine, providers, today=today))

@@ -11,6 +11,7 @@ import io
 import logging
 import re
 import zipfile
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from xml.etree import ElementTree
@@ -55,6 +56,16 @@ _NM_PREFIX = re.compile(r"^[\sⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩIVX\d\.\-]+")
 
 def _norm_nm(nm: str) -> str:
     return re.sub(r"\s+", "", _NM_PREFIX.sub("", nm or ""))
+
+
+@dataclass(frozen=True)
+class FiledReport:
+    """회사 지정 없는 사업보고서 목록 1건(공시 증분용)."""
+    rcept_no: str                   # 접수번호 14자리 (YYYYMMDD + 일련번호) — 문자열 크기 비교가 접수 순서
+    rcept_dt: date
+    corp_code: str
+    stock_code: str | None          # 비상장이면 None
+    report_nm: str                  # 공백을 한 칸으로 정리한 제목. 정정은 "[기재정정]사업보고서 (2025.12)" 형태
 
 
 class DartClient:
@@ -158,6 +169,20 @@ class DartClient:
         return out
 
     # ------------------------------------------------------------ 공시
+    def list_annual_reports(self, start: date, end: date, page_no: int = 1) -> tuple[list[FiledReport], int]:
+        """회사 지정 없이 사업보고서(A001) 목록 한 페이지(100건). 정정·첨부 공시 포함. 반환: (목록, total_page).
+        회사 지정이 없으면 조회 기간은 3개월까지다(초과는 호출 측이 나눔). 정렬은 접수번호 순이 보장되지 않는다
+        ([첨부추가] 등이 앞에 섞임) — 호출 측은 기간 안 전체 페이지를 받아야 한다."""
+        d = self._get("list.json", bgn_de=start.strftime("%Y%m%d"), end_de=end.strftime("%Y%m%d"), pblntf_ty="A",
+                      pblntf_detail_ty="A001", sort="date", sort_mth="desc", page_no=page_no, page_count=100)
+        if d.get("status") == STATUS_NO_DATA:
+            return [], 0
+        items = [FiledReport(rcept_no=x["rcept_no"], rcept_dt=datetime.strptime(x["rcept_dt"], "%Y%m%d").date(),
+                             corp_code=x["corp_code"], stock_code=(x.get("stock_code") or "").strip() or None,
+                             report_nm=re.sub(r"\s+", " ", x["report_nm"]).strip())
+                 for x in d.get("list", [])]
+        return items, int(d.get("total_page") or 0)
+
     def get_disclosures(self, stock: StockRef, start: date, end: date) -> list[Disclosure]:
         out: dict[str, Disclosure] = {}
         for ty, label in DISCLOSURE_TYPES.items():

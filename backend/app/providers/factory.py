@@ -36,6 +36,8 @@ class Providers:
     us_listing: base.ListingProvider | None = None
     # ── [S5-D] 미국 참조 데이터 ──
     us_reference: base.ReferenceDataProvider | None = None  # 미국 발행주식수·SIC·기초값(SEC). None이면 yfinance 밸류에이션
+    # 국내 사업보고서 목록(회사 지정 없이 날짜로) — 공시 증분(jobs.load_dart_feed). None이면 건너뛴다
+    kr_feed: object | None = None                             # DartClient (list_annual_reports)
 
     def price(self, country: str) -> base.PriceProvider:
         return self.kr_price if country == "KR" else self.us_price
@@ -92,4 +94,5 @@ def default_providers() -> Providers:
         us_reference=sec,
         # ── [S3-B] 재무·공시 ──
         kr_financial=dart, us_financial=sec, us_financial_supplement=yahoo, kr_disclosure=dart, us_disclosure=sec,
+        kr_feed=dart,                                     # 재무용과 같은 DartClient(분당 한도 공유)
     )
