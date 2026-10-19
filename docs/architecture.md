@@ -47,6 +47,7 @@ flowchart LR
 - **같은 작업이 겹치지 않게** PostgreSQL advisory lock을 쓴다: 갱신(`REFRESH_LOCK_KEY`), 환율 조회, 비교군 갱신(`BENCHMARK_LOCK_KEY`), 스케줄러.
 - **재무·공시 수집은 회사 단위·국가별 키로 잠근다**(`DART_LOCK_KEY` 국내, `SEC_LOCK_KEY` 미국). DART·SEC를 부르는 동안만 회사 1개씩 잡고 풀어서, 상세 화면 요청이 07:00 비교군 재무 묶음 전체가 아니라 처리 중인 회사 하나만 기다린다. 잠금 연결 1개를 반복문 동안 재사용하고(`LockSession`), DB 쓰기는 `ingest.flush_every`(20)개 회사마다 한 트랜잭션으로 모은다(`BatchWriter` — 행 저장과 `data_freshness`는 같은 트랜잭션, `ingestion_logs`는 별도). DART 분당 한도는 프로세스마다 45회(API 서비스 + Job 합계 90 이하).
 - **07:00 비교군 갱신은 공시 목록 증분부터** 한다(`jobs.load_dart_feed`): 회사 지정 없는 사업보고서 목록(DART list.json A001)을 기준점(`ingest_cursor`)부터 받아, 새 사업보고서·정정을 낸 DB 종목의 재무 유효기간을 끝낸다. 국내 재무 첫 적재는 OpenDART 재무정보 일괄다운로드 파일로 한 번에 넣는다(`python -m app.ingest dart-bulk`, API 호출 없음).
+- **08:00 백그라운드 재무 적재**(`app/ingest/background.py`): 재무 기록이 없는 국내 listed 종목을 거래대금 → 시가총액 순으로, 오늘 남긴 DART 재무·공시 로그 행이 `background.dart_calls_per_day`(2,000)에 닿을 때까지 받는다. 미국은 순위 소스(D11)를 정한 뒤.
 - **07:00 비교군 재무는 하루 예산**(`benchmark.fin_daily_budget`, 100종목)까지만 유효기간이 가장 오래 지난 순으로 받는다. 노출·관심·포트폴리오 종목은 예산과 무관하다.
 - 컨테이너는 `db`(PostgreSQL)와 `api`(uvicorn + 스케줄러) 두 개다(`compose.yml`). `api`의 HEALTHCHECK는 `/health/db`.
 

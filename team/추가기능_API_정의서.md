@@ -1261,17 +1261,22 @@ def used_today(conn: Connection, source: str, now: datetime | None = None) -> in
     """오늘(서울 0시 이후) ingestion_logs에서 source가 같고 job_type IN ('FINANCIALS','DISCLOSURES')인 행 수."""
 
 
-def priority_queue(conn: Connection, country: str, limit: int) -> list[int]:
-    """재무 기록(data_freshness kind='financials')이 없는 활성 listed 종목을 우선순위 순으로 limit개 (아래 표)."""
+def priority_queue(conn: Connection, country: str, limit: int, ranking: dict[str, tuple[Decimal, Decimal]]) -> list[int]:
+    """재무 기록(data_freshness kind='financials')이 없는 활성 listed 종목(corp_code·CIK가 있는 것)을 순위대로 limit개.
+    ranking: 티커 → (거래대금, 시가총액). 순위에 없는 종목은 맨 뒤(종목 id 순)."""
 
 
-def run_background(engine: Engine, providers: Providers, *, now: datetime | None = None) -> dict:
+def run_background(engine: Engine, providers: Providers, *, now: datetime | None = None) -> dict | None:
     """국가마다 남은 예산 = calls_per_day − used_today. 0보다 크면 priority_queue(…, 남은 예산)를
-    jobs.load_financials(stock_ids=…, years=benchmark.config()["fin_years"])로 받는다.
+    jobs.load_financials(stock_ids=…, years=benchmark fin_years)로 받는다. 다른 프로세스가 실행 중이면 None.
     반환: {"KR": {"budget", "used", "queued", "statuses"}, "US": {...}}"""
 ```
 
-로그: `job_log(source="INTERNAL", job_type="BENCHMARK", label="background")` 1행. 스케줄러: `services/scheduler.py`의 `tick`에 `run_at_kst` 이후 하루 1회(비교군과 같은 방식 — 마지막 성공 시각으로 판정).
+- 잠금: `BACKGROUND_LOCK_KEY = 7_301_013`(`wait=False` — 겹치면 건너뜀). 예산이 남지 않으면 순위 조회도 하지 않아요(외부 호출 0).
+- 로그: `job_log(source="INTERNAL", job_type="BENCHMARK", label="background")` 1행, 비고는 `백그라운드:`로 시작해요. 스케줄러는 비교군 성공을 `일일:` 비고로만 세서 둘이 섞이지 않아요.
+- 스케줄러: `services/scheduler.py`의 `tick`에서 비교군 다음으로 `run_at_kst`(08:00) 이후 하루 1회(`last_background_success`). CLI `python -m app.ingest background`.
+- **미국은 D11 결정 전이라 건너뛰어요**(`queued: 0`, 비고 "순위 소스 미정"). 팀 코드에는 미국 시가총액 순위를 구하는 단계(semi의 `classify_us`)가 없어서, D11을 정할 때 함께 들여와야 해요.
+- 개발 DB 확인(2026-10-19): `listing` 뒤 국내 listed 2,509개(corp_code 전부), 예산을 5로 잡아 실행 → 거래대금 상위 5개 SUCCESS.
 
 | 우선순위 | 국내 (KR) | 미국 (US) |
 | --- | --- | --- |
@@ -1287,7 +1292,8 @@ def run_background(engine: Engine, providers: Providers, *, now: datetime | None
 | `test_used_today_counts_only_today_and_source` | 어제 행·다른 source 행은 세지 않음 |
 | `test_queue_skips_stocks_with_freshness` | 기록 있는 listed·비활성·featured는 큐에 없음 |
 | `test_budget_stops_background` | 예산 5, 오늘 사용 3 → 2개만 받음 |
-| `test_kr_queue_orders_by_trading_value_then_cap` | 거래대금 같으면 시가총액 순 |
+| `test_kr_queue_orders_by_trading_value_then_cap` | 거래대금 같으면 시가총액 순, 순위에 없는 종목은 맨 뒤 |
+| `test_no_budget_left_makes_no_external_calls` | 예산을 다 쓰면 순위 조회·재무 호출 0 |
 
 ---
 
