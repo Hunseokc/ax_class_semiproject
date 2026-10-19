@@ -1,6 +1,6 @@
 // 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
-import { PRESET_EVENT, getFx, getIndices, getPreset, getHomeRanking, getSectors, getSentiment, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S6-A] getHomeRanking·getSectors·getSentiment
-import { changeHtml, changeLabel, date, dateTime, esc, num, pct, price, shortDate, stockUrl, usd } from "../format.js";   // [S5-A] pct
+import { PRESET_EVENT, getFx, getIndices, getPortfolioSummary, getPortfolios, getPreset, getHomeRanking, getSectors, getSentiment, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S6-A] getHomeRanking·getSectors·getSentiment · 포트폴리오 요약
+import { DASH, changeHtml, changeLabel, date, dateTime, esc, initials, krw, num, pct, price, shortDate, signedKrw, stockUrl, usd } from "../format.js";   // [S5-A] pct
 import { color, destroyCharts, scoreBand, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
 import { emptyState, errorState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";   // [S5-A] marketBadge
@@ -54,25 +54,20 @@ function sessionBadge(ix) {
   return `<span class="badge badge--market" title="${why}">${text}</span>`;
 }
 
-/** 52주 저점~고점 사이 현재 위치 바. 1년치가 없으면 같은 높이의 안내 줄(카드 높이 유지) */
-function range52(low, high, pos, digits = 2) {
-  if (!isNum(pos) || !isNum(low) || !isNum(high)) {
-    return '<div class="r52 r52--na"><span class="r52__lbl">52주</span><span>1년치 데이터 부족</span></div>';
-  }
-  const p = Math.max(0, Math.min(1, pos)) * 100;
-  return `<div class="r52" role="img" aria-label="52주 범위 ${num(low, digits)}~${num(high, digits)} 중 ${Math.round(p)}% 위치"
-      title="52주 저점 ${num(low, digits)} · 고점 ${num(high, digits)} · 현재 ${Math.round(p)}% 위치">
-      <span class="r52__lbl">52주</span><span class="r52__track"><i class="r52__dot" style="left:${p.toFixed(1)}%"></i></span></div>`;
+/** 52주 저점~고점 사이 현재 위치 — 컴팩트 카드에서는 바 대신 값 줄 툴팁으로 보여 준다 */
+function range52Title(low, high, pos, digits = 2) {
+  if (!isNum(pos) || !isNum(low) || !isNum(high)) return "52주 범위: 1년치 데이터 부족";
+  return `52주 저점 ${num(low, digits)} · 고점 ${num(high, digits)} · 현재 ${Math.round(Math.max(0, Math.min(1, pos)) * 100)}% 위치`;
 }
 
+// 컴팩트 지수 카드: 이름(+장 상태 배지) · 값과 등락률 한 줄 · 스파크라인. 기간은 섹션 상단 탭, 기준일·52주는 툴팁
 function indexCard(ix) {
+  const badge = sessionBadge(ix);
   const el = h(`<article class="metric-card" aria-label="${esc(ix.name)}">
-      <div class="metric-card__label"><span title="${esc(ix.name)}">${esc(ix.name)}</span><span class="subtle">${esc(ix.country || "")}</span></div>
-      <div class="metric-card__value num">${num(ix.close, 2)}</div>
-      <div class="metric-card__spark"><canvas aria-hidden="true"></canvas></div>
-      <div class="metric-card__meta"><span>${sparkMeta().label} 추이</span>${sessionBadge(ix)}</div>
-      ${range52(ix.low_52w, ix.high_52w, ix.position_52w)}
-      <div class="metric-card__foot">${changeHtml(ix.change_rate, ix.country)}<span class="subtle" title="기준일 ${date(ix.as_of)}">${shortDate(ix.as_of)}</span></div>
+      <div class="metric-card__label"><span title="${esc(ix.name)}">${esc(ix.name)}</span>${badge || `<span class="subtle">${esc(ix.country || "")}</span>`}</div>
+      <div class="metric-card__value-row" title="기준일 ${date(ix.as_of)} · ${range52Title(ix.low_52w, ix.high_52w, ix.position_52w)}">
+        <span class="metric-card__value num">${num(ix.close, 2)}</span>${changeHtml(ix.change_rate, ix.country)}</div>
+      <div class="metric-card__spark" title="${sparkMeta().label} 추이"><canvas aria-hidden="true"></canvas></div>
     </article>`);
   const closes = inRange(ix.sparkline || [], ix.as_of).map((p) => p.close);
   queueMicrotask(() => sparkline(el.querySelector("canvas"), closes, trendColor(ix.change_rate)));   // canvas가 붙은 뒤에 그린다
@@ -89,12 +84,9 @@ function fxCard(fx) {
   const note = fxNote(fx.change_rate);
   const el = h(`<article class="metric-card" aria-label="원달러 환율">
       <div class="metric-card__label"><span>USD/KRW</span>${fx.fx_stale ? '<span class="badge badge--market" title="최신 환율을 가져오지 못해 마지막 값을 표시합니다">지연</span>' : '<span class="subtle">환율</span>'}</div>
-      <div class="metric-card__value num">${num(fx.usd_krw, 2)}<span class="subtle">원</span></div>
-      <div class="metric-card__spark"><canvas aria-hidden="true"></canvas></div>
-      <div class="metric-card__meta"><span>${sparkMeta().label} 추이</span></div>
-      ${range52(fx.low_52w, fx.high_52w, fx.position_52w)}
-      <div class="metric-card__foot">${changeHtml(fx.change_rate, "KR")}<span class="subtle" title="환율 기준 시각 ${dateTime(fx.rate_at)}">${dateTime(fx.rate_at).slice(-5)}</span></div>
-      ${note ? `<div class="metric-card__note">${note}</div>` : ""}
+      <div class="metric-card__value-row" title="환율 기준 시각 ${dateTime(fx.rate_at)} · ${range52Title(fx.low_52w, fx.high_52w, fx.position_52w)}${note ? ` · ${note}` : ""}">
+        <span class="metric-card__value num">${num(fx.usd_krw, 2)}<span class="subtle">원</span></span>${changeHtml(fx.change_rate, "KR")}</div>
+      <div class="metric-card__spark" title="${sparkMeta().label} 추이"><canvas aria-hidden="true"></canvas></div>
     </article>`);
   // 현재값이 SNAPSHOT(장중 시각)일 때만 끝에 덧붙인다. DAILY면 이미 history의 마지막 점이라 덧붙이면 꼬리가 평평해진다
   const history = inRange(fx.history || [], localDay("Asia/Seoul", new Date(fx.rate_at))).map((p) => p.usd_krw);
@@ -286,9 +278,9 @@ function watchRow(w) {
   return el;
 }
 
-// 모드별 표시 한도 — 컴팩트 최대 8행, 카드 3열×2줄(좁은 화면 2열×2줄). 넘으면 정렬 순서대로 자르고 '+N개 더'
+// 모드별 표시 한도 — 컴팩트 최대 8행, 카드 4열×2줄(중간 폭 3열, 좁은 화면 2열). 넘으면 정렬 순서대로 자르고 '+N개 더'
 const COMPACT_LIMIT = 8;
-const cardCols = () => (window.innerWidth < 600 ? 2 : 3);       // .wl-grid--home 미디어 쿼리와 맞춤
+const cardCols = () => (window.innerWidth < 600 ? 2 : window.innerWidth < 1024 ? 3 : 4);   // .wl-grid--home 미디어 쿼리와 맞춤
 const watchLimit = () => (watchView === "compact" ? COMPACT_LIMIT : cardCols() * 2);
 
 // 보기 방식은 브라우저에 저장 — 기본은 컴팩트. 이전 키(watchView)의 값이 새 기본값을 덮지 않도록 새 키를 쓴다
@@ -359,7 +351,7 @@ window.addEventListener("resize", () => {
 loadWatchlist();
 
 // ── [S3-A] 사이드바 새로고침이 끝나면 지수·환율·관심종목을 새 값으로 다시 불러온다 ──
-document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); loadSectors(); loadSentiment(); loadTop(); });   // [S6-A] 섹터·심리·순위
+document.addEventListener(REFRESHED_EVENT, () => { loadMarket(); loadWatchlist(); loadSectors(); loadSentiment(); loadTop(); loadPortfolioWidget(); });   // [S6-A] 섹터·심리·순위 · 포트폴리오 요약
 
 // ── [S4-A] 투자 성향: 관심종목 카드의 매력도 게이지가 따르는 값 ──
 // 성향 메뉴(#preset-menu)는 index.html에 자리가 있고, 아래에서 맨 위 검색바 줄로 옮긴다 [S6-A]
@@ -483,6 +475,96 @@ function loadSentiment() {
 // 처음 열 때: 국내 섹터 데이터가 없으면 미국 탭으로 시작
 loadSectors({ fallback: true });
 loadSentiment();
+
+// ---------------------------------------------------------------- 내 포트폴리오 요약 (GET /portfolios · /portfolios/{id}/summary — 포트폴리오 화면과 같은 값)
+// 총 평가금액(담은 종목 + 현금) · 평가손익 · 시드 사용률 · 원가 비중 상위 종목. 편집은 포트폴리오 화면에서 한다
+const PF_TOP = 5;
+const PF_KEY = "homePortfolio";   // 고른 포트폴리오는 브라우저에 저장(없거나 지워졌으면 첫 번째)
+const pfPnlClass = (v) => (v > 0 ? "chg chg--kr-up" : v < 0 ? "chg chg--kr-down" : "chg chg--flat");   // 원화 손익은 국내 관례 색(포트폴리오 화면과 같음)
+const pfPnlHtml = (v, rate) => (v === null ? DASH : `<span class="${pfPnlClass(v)}">${signedKrw(v)}${isNum(rate) ? ` (${pct(rate, { sign: true })})` : ""}</span>`);
+let pfId = null;
+
+function storedPortfolioId() {
+  try { return Number(localStorage.getItem(PF_KEY)) || null; } catch { return null; }
+}
+
+function pfItemRow(it) {
+  return `<li><a class="home-pf__item" href="${stockUrl(it.market, it.ticker)}">
+      <span class="avatar" aria-hidden="true">${esc(initials(it.name))}</span>
+      <span class="row__main"><span class="row__title">${esc(it.name)}</span>
+        <span class="home-pf__weight"><span class="bar" role="img" aria-label="원가 비중 ${pct(it.weight, { digits: 1 })}"><span class="bar__fill" style="width:${Math.min(100, it.weight * 100).toFixed(1)}%"></span></span>
+          <span class="subtle num">${pct(it.weight, { digits: 1 })}</span></span></span>
+      <span class="home-pf__pnl num">${it.pnl_rate == null ? DASH : `<span class="${pfPnlClass(it.pnl_rate)}">${pct(it.pnl_rate, { sign: true })}</span>`}</span>
+    </a></li>`;
+}
+
+function renderPortfolioWidget(s) {
+  const usage = s.usage_rate ?? 0;
+  const items = [...s.items].sort((a, b) => b.weight - a.weight);
+  const el = h(`<div class="home-pf__inner">
+      <div class="home-pf__hero">
+        <span class="subtle">총 평가금액</span>
+        <strong class="home-pf__big num">${krw(s.total_value_krw + s.remaining_krw)}</strong>
+        <span class="home-pf__total-pnl num">${items.length ? pfPnlHtml(s.total_pnl_krw, s.total_pnl_rate) : "담은 종목 없음"}</span>
+      </div>
+      <div class="home-pf__usage">
+        <div class="bar" role="img" aria-label="시드 사용률 ${pct(usage, { digits: 1 })}"><div class="bar__fill" style="width:${Math.min(100, usage * 100)}%"></div></div>
+        <span class="subtle">시드 ${krw(s.seed_krw, { compact: true })} 중 ${pct(usage, { digits: 1 })} 사용 · 현금 ${krw(s.remaining_krw, { compact: true })}</span>
+      </div>
+    </div>`);
+  if (!items.length) {
+    el.append(emptyState({ title: "아직 담은 종목이 없습니다", body: "주식 리스트나 종목 상세에서 종목을 담아 보세요.",
+      action: '<a class="btn btn--primary" href="/stocks">주식 리스트로</a>' }));
+    return el;
+  }
+  const extra = items.length - PF_TOP;
+  el.append(h(`<div class="home-pf__list"><p class="home-pf__cap subtle">원가 비중 상위 ${Math.min(PF_TOP, items.length)}종목${extra > 0 ? ` · 외 ${extra}개` : ""}</p>
+      <ul class="list home-pf__items" aria-label="담은 종목 (원가 비중 순)">${items.slice(0, PF_TOP).map(pfItemRow).join("")}</ul></div>`));
+  el.append(h(`<p class="home-widget__foot">모의 계산 · 체결 기록 아님${s.as_of ? ` · 기준일 ${esc(monthDay(s.as_of))}` : ""}</p>`));
+  return el;
+}
+
+async function loadPortfolioSummary() {
+  const box = $("#pf-summary");
+  $("#pf-more").href = `/portfolio?id=${pfId}`;
+  box.replaceChildren(skeleton("row", 4));
+  try {
+    box.replaceChildren(renderPortfolioWidget(await getPortfolioSummary(pfId)));
+  } catch (err) {
+    box.replaceChildren(errorState(err, loadPortfolioSummary));
+  }
+}
+
+async function loadPortfolioWidget() {
+  const box = $("#pf-summary");
+  box.replaceChildren(skeleton("row", 4));
+  let list;
+  try {
+    list = await getPortfolios();
+  } catch (err) {
+    $("#pf-tabs").replaceChildren();
+    box.replaceChildren(errorState(err, loadPortfolioWidget));
+    return;
+  }
+  if (!list.length) {
+    $("#pf-tabs").replaceChildren();
+    $("#pf-more").href = "/portfolio";
+    box.replaceChildren(emptyState({ title: "포트폴리오가 없습니다", body: "시드(투자 가능 금액)를 정해 모의 포트폴리오를 만들어 보세요.",
+      action: '<a class="btn btn--primary" href="/portfolio">포트폴리오 만들기</a>' }));
+    return;
+  }
+  const wanted = pfId ?? storedPortfolioId();
+  pfId = list.some((p) => p.portfolio_id === wanted) ? wanted : list[0].portfolio_id;
+  // 여러 개면 탭으로 고른다
+  $("#pf-tabs").replaceChildren(...(list.length > 1 ? [segmented(list.map((p) => ({ value: p.portfolio_id, label: p.name })), pfId, (v) => {
+    pfId = v;
+    try { localStorage.setItem(PF_KEY, String(v)); } catch { /* 저장 불가면 이번 화면에서만 유지 */ }
+    loadPortfolioSummary();
+  }, { label: "포트폴리오 선택" })] : []));
+  loadPortfolioSummary();
+}
+
+loadPortfolioWidget();
 
 // ---------------------------------------------------------------- 시장 주목 종목 TOP 5 (GET /home/ranking)
 // 행 = 순위 · 종목명(종목코드·시장 배지, 관심종목이면 ★) · 그 탭의 순위 근거 값 하나. 가격·등락률은 관심종목·리스트에 있으므로 넣지 않는다

@@ -36,30 +36,37 @@
           <div id="market"></div>
         </section>
 
-        <!-- 2열: 좌 관심종목(약 60%) · 우 섹터 히트맵 + 시장 심리 지수(약 40%). 좁은 화면에서는 한 열 -->
+        <!-- 2열: 좌 시장 심리 지수 + 섹터 히트맵 · 우 내 포트폴리오 요약. 좁은 화면에서는 한 열 -->
         <div class="home-split">
-          <section class="section home-watch" aria-labelledby="h-watch">
-            <div class="section__head">
-              <div><h2 id="h-watch">내 관심종목 <span class="section__meta">일봉 기준</span></h2>
-                <p class="subtle">★ 누른 종목의 최근 종가</p></div>
-              <div class="section__tools"><span class="subtle" id="watch-count"></span><div id="watch-view"></div><a class="section__link" href="/stocks">주식 리스트 →</a></div></div>
-            <div class="home-watch__body" id="watchlist"></div>
-            <a class="section__link home-watch__more" id="watch-more" href="/stocks" hidden></a>
-          </section>
-
           <div class="home-side">
+            <section class="card home-widget" aria-labelledby="h-sentiment">
+              <div class="section__head"><h2 id="h-sentiment">시장 심리 지수 <span class="section__meta">StockMind 간이 계산</span></h2><div id="sentiment-tabs"></div></div>
+              <div class="home-widget__body" id="sentiment"></div>
+            </section>
+
             <section class="card home-widget" aria-labelledby="h-sector">
               <div class="section__head"><h2 id="h-sector">섹터 히트맵</h2><div id="sector-tabs"></div></div>
               <div class="home-widget__body" id="sectors"></div>
               <p class="home-widget__foot" id="sector-foot"></p>
             </section>
-
-            <section class="card home-widget" aria-labelledby="h-sentiment">
-              <div class="section__head"><h2 id="h-sentiment">시장 심리 지수 <span class="section__meta">StockMind 간이 계산</span></h2><div id="sentiment-tabs"></div></div>
-              <div class="home-widget__body" id="sentiment"></div>
-            </section>
           </div>
+
+          <section class="card home-widget home-pf" aria-labelledby="h-pf">
+            <div class="section__head"><h2 id="h-pf">내 포트폴리오 <span class="section__meta">모의 계산</span></h2>
+              <div class="section__tools"><div id="pf-tabs"></div><a class="section__link" id="pf-more" href="/portfolio">포트폴리오 →</a></div></div>
+            <div class="home-widget__body home-pf__body" id="pf-summary"></div>
+          </section>
         </div>
+
+        <!-- 내 관심종목: 전체 폭 -->
+        <section class="section card home-watch" aria-labelledby="h-watch">
+          <div class="section__head">
+            <div><h2 id="h-watch">내 관심종목 <span class="section__meta">일봉 기준</span></h2>
+              <p class="subtle home-watch__sub">★ 누른 종목의 최근 종가</p></div>
+            <div class="section__tools"><span class="subtle" id="watch-count"></span><div id="watch-view"></div><a class="section__link" href="/stocks">주식 리스트 →</a></div></div>
+          <div class="home-watch__body" id="watchlist"></div>
+          <a class="section__link home-watch__more" id="watch-more" href="/stocks" hidden></a>
+        </section>
 
         <section class="section" aria-labelledby="h-top">
           <div class="section__head"><h2 id="h-top">시장 주목 종목 TOP 5</h2>
