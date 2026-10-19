@@ -123,6 +123,9 @@ class YahooProvider:
             bps=to_dec(info.get("bookValue"), 4),
             market_cap=to_dec(info.get("marketCap"), 0),
             shares_outstanding=to_int(info.get("sharesOutstanding")),
+            # 연간 주당배당금. 무배당 종목은 dividendRate가 없고 trailingAnnualDividendRate가 0이다
+            dps=to_dec(info.get("dividendRate") if info.get("dividendRate") is not None
+                       else info.get("trailingAnnualDividendRate"), 4),
         )]
 
     # --- 재무 보완 (연간 4개 기간)

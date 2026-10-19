@@ -83,7 +83,7 @@ class FakeValuation(CallLog):
     def get_valuations(self, stock: StockRef, start: date, end: date) -> list[Valuation]:
         self.record(stock.ticker, start, end)
         return [Valuation(as_of=min(end, date.today() - SAFE_LAG), per=Decimal(10), pbr=Decimal(1), market_cap=Decimal(10**12),
-                          shares_outstanding=10**9)]
+                          shares_outstanding=10**9, dps=Decimal("1.5"))]
 
 
 class FakeFinancial(CallLog):
@@ -158,7 +158,7 @@ class FakeKrBulk(CallLog):
         if day.weekday() >= 5:
             return {}
         return {t: Valuation(as_of=day, per=Decimal(10), pbr=Decimal(1), eps=Decimal(10), bps=Decimal(100),
-                             shares_outstanding=10**6) for t in self.tickers}
+                             shares_outstanding=10**6, dps=Decimal(0)) for t in self.tickers}   # 무배당 = 0
 
 
 class FakeUsBatch(CallLog):
