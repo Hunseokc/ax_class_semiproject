@@ -50,6 +50,8 @@ class Stock(Base):
     sic: Mapped[int | None] = mapped_column(SmallInteger)
     sector: Mapped[str | None] = mapped_column(String(32))
     industry_checked_at: Mapped[datetime | None] = mapped_column()
+    cap_rank: Mapped[int | None] = mapped_column(Integer)          # 미국 시가총액 순위(상위 1,500개) — migration 009
+    cap_ranked_at: Mapped[datetime | None] = mapped_column()
     market: Mapped[Market] = relationship(lazy="joined")
     __table_args__ = (UniqueConstraint("market_id", "ticker"), CheckConstraint("coverage IN ('featured','benchmark','listed')"))
 

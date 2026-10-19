@@ -2,7 +2,8 @@
 
 - 순서: 노출 종목·비교군은 4시간 갱신·07:00 비교군 갱신이 맡고, 여기서는 재무 기록(data_freshness)이 아예 없는 listed 종목만.
   국내는 최근 거래일 거래대금(종가 × 거래량) 순, 같으면 시가총액 순 — 날짜별 전 종목 조회 2회로 구한다.
-  미국은 순위 소스(D11)를 정하기 전이라 건너뛴다.
+  미국은 시가총액(SEC 발행주식수 × 종가) 상위 us_rank_pool개 안에서 순위대로(D11). 순위는 us_rank_days마다
+  stocks.cap_rank에 저장한다(전 종목 종가 묶음 조회 약 2분). ADR은 발행주식수가 원주 기준이라 순위가 부풀 수 있다 — 받는 순서에만 쓴다.
 - 하루 예산: 오늘(서울 0시부터) 남긴 ingestion_logs 행 수(source='DART'·'SEC'의 재무·공시)가 universe.yaml background
   *_calls_per_day에 닿으면 멈춘다. 상세 화면·07:00 갱신이 쓴 만큼 줄어든다. 일괄 적재(DART_BULK)는 세지 않는다.
 - 한 번 받은 종목은 freshness 기록이 생겨 큐에서 빠지고, 이후에는 공시 목록 증분(jobs.load_dart_feed)이 만료시킬 때만 다시 받는다.
@@ -19,7 +20,7 @@ from sqlalchemy import Connection, Engine, text
 
 from app.ingest import jobs
 from app.ingest.store import advisory_lock, job_log
-from app.ingest.universe import load_universe
+from app.ingest.universe import load_universe, stock_refs
 from app.providers.base import ProviderError
 from app.providers.factory import Providers
 
@@ -63,9 +64,10 @@ def _kr_ranking(providers: Providers) -> dict[str, tuple[Decimal, Decimal]]:
     return {}
 
 
-def priority_queue(conn: Connection, country: str, limit: int, ranking: dict[str, tuple[Decimal, Decimal]]) -> list[int]:
-    """재무 기록이 아예 없는 활성 listed 종목(재무를 받을 수 있게 corp_code가 있는 것)을 순위대로 limit개.
-    ranking: 티커 → (거래대금, 시가총액). 순위에 없는 종목은 맨 뒤(종목 id 순)."""
+def priority_queue(conn: Connection, country: str, limit: int, ranking: dict[str, tuple[Decimal, Decimal]],
+                   *, ranked_only: bool = False) -> list[int]:
+    """재무 기록이 아예 없는 활성 listed 종목(재무를 받을 수 있게 corp_code·CIK가 있는 것)을 순위대로 limit개.
+    ranking: 티커 → (1순위 값, 2순위 값), 클수록 앞. 순위에 없는 종목은 맨 뒤(종목 id 순), ranked_only면 빼고."""
     if limit <= 0:
         return []
     rows = conn.execute(text("""
@@ -74,9 +76,59 @@ def priority_queue(conn: Connection, country: str, limit: int, ranking: dict[str
           AND (CASE WHEN :c = 'KR' THEN s.corp_code ELSE s.cik END) IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM data_freshness f WHERE f.stock_id = s.stock_id AND f.kind = 'financials')"""),
         {"c": country}).all()
+    if ranked_only:
+        rows = [r for r in rows if r.ticker in ranking]
     zero = (Decimal(0), Decimal(0))
     rows = sorted(rows, key=lambda r: (*(-v for v in ranking.get(r.ticker, zero)), r.stock_id))
     return [r.stock_id for r in rows[:limit]]
+
+
+def rank_us(engine: Engine, providers: Providers, now: datetime | None = None, *, force: bool = False) -> int | None:
+    """미국 활성 종목(CIK 있음)의 시가총액 순위 → stocks.cap_rank(상위 us_rank_pool개, 나머지 NULL).
+    마지막으로 매긴 지 us_rank_days가 안 지났으면 하지 않고 None. 반환: 순위를 매긴 종목 수."""
+    cfg, now = config(), now or datetime.now(timezone.utc)
+    ref, batch = providers.us_reference, providers.us_batch_price
+    if ref is None or batch is None:
+        return None
+    with engine.connect() as conn:
+        last = conn.execute(text("""SELECT MAX(s.cap_ranked_at) FROM stocks s JOIN markets m ON m.market_id = s.market_id
+                                    WHERE m.country = 'US'""")).scalar()
+        if not force and last is not None and now - last < timedelta(days=int(cfg.get("us_rank_days", 30))):
+            return None
+        rows = conn.execute(text("""
+            SELECT s.stock_id, s.cik,
+                   (SELECT d.close FROM daily_prices d WHERE d.stock_id = s.stock_id AND d.trade_date >= :since
+                    ORDER BY d.trade_date DESC LIMIT 1) AS close
+            FROM stocks s JOIN markets m ON m.market_id = s.market_id
+            WHERE m.country = 'US' AND s.is_active AND s.cik IS NOT NULL"""),
+            {"since": now.date() - timedelta(days=10)}).all()
+    shares = ref.get_shares_frame(now.date())
+    closes = {r.stock_id: r.close for r in rows if r.close}
+    missing = [r.stock_id for r in rows if not r.close and r.cik in shares]
+    if missing:                                         # listed 종목은 일봉이 없어 묶음으로 최근 종가만
+        with engine.connect() as conn:
+            refs = stock_refs(conn, stock_ids=missing)
+        got = batch.get_daily_prices_batch(refs, now.date() - timedelta(days=10), now.date())
+        for r in refs:
+            bars = [b for b in got.get(r.ticker, []) if b.close]
+            if bars:
+                closes[r.stock_id] = bars[-1].close
+    caps = {r.stock_id: Decimal(shares[r.cik]) * closes[r.stock_id] for r in rows if r.cik in shares and r.stock_id in closes}
+    ranked = sorted(caps, key=lambda s: (-caps[s], s))[:int(cfg.get("us_rank_pool", 1500))]
+    with engine.begin() as conn:
+        conn.execute(text("""UPDATE stocks s SET cap_rank = NULL, cap_ranked_at = :now FROM markets m
+                             WHERE m.market_id = s.market_id AND m.country = 'US'"""), {"now": now})
+        if ranked:
+            conn.execute(text("UPDATE stocks SET cap_rank = :r WHERE stock_id = :s"),
+                         [{"r": i, "s": s} for i, s in enumerate(ranked, 1)])
+    return len(ranked)
+
+
+def _us_ranking(conn: Connection) -> dict[str, tuple[Decimal, Decimal]]:
+    """저장된 미국 순위 → priority_queue용 (점수, 0). 순위가 없는 종목은 빠진다(큐에도 넣지 않음)."""
+    return {t: (Decimal(-r), Decimal(0)) for t, r in conn.execute(text("""
+        SELECT s.ticker, s.cap_rank FROM stocks s JOIN markets m ON m.market_id = s.market_id
+        WHERE m.country = 'US' AND s.cap_rank IS NOT NULL"""))}
 
 
 def run_background(engine: Engine, providers: Providers, *, now: datetime | None = None) -> dict | None:
@@ -95,15 +147,20 @@ def run_background(engine: Engine, providers: Providers, *, now: datetime | None
                 with engine.connect() as conn:
                     used = used_today(conn, SOURCES[country], now)
                 queue: list[int] = []
-                if country == "KR" and budget > used:     # 미국 순위 소스는 D11 결정 뒤
+                if budget > used and country == "KR":
                     ranking = _kr_ranking(providers)
                     with engine.connect() as conn:
                         queue = priority_queue(conn, country, budget - used, ranking)
+                elif budget > used:                       # 미국: 시가총액 상위 us_rank_pool 안에서 순위대로 (D11)
+                    n = rank_us(engine, providers, now)
+                    if n is not None:
+                        res.notes.append(f"미국 시가총액 순위 갱신 {n}개")
+                    with engine.connect() as conn:
+                        queue = priority_queue(conn, country, budget - used, _us_ranking(conn), ranked_only=True)
                 statuses = (jobs.load_financials(engine, providers, years=load_universe().benchmark["fin_years"], stock_ids=queue)
                             if queue else {})
                 out[country] = {"budget": budget, "used": used, "queued": len(queue), "statuses": statuses}
                 ok = sum(1 for v in statuses.values() if v == "SUCCESS")
-                res.notes.append(f"{country} 예산 {budget} 사용 {used} 큐 {len(queue)} 성공 {ok}"
-                                 + (" (순위 소스 미정 — D11)" if country == "US" else ""))
+                res.notes.append(f"{country} 예산 {budget} 사용 {used} 큐 {len(queue)} 성공 {ok}")
             res.rows = sum(v["queued"] for v in out.values())
         return out

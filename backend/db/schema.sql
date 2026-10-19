@@ -15,6 +15,7 @@
 --   Stage 6: stocks.coverage 'listed'·valuation_snapshots.dps — 기존 DB는 005_listed_dividend
 --            sector_performance_daily·market_sentiment_daily (+ ingestion_logs.job_type에 SECTORS_US·SECTORS_KR) — 기존 DB는 007_home_widgets
 --   추가 기능 4-1: ingest_cursor(공시 목록 증분 기준점) — 기존 DB는 008_ingest_cursor
+--   추가 기능 4-3: stocks.cap_rank·cap_ranked_at(미국 시가총액 순위) — 기존 DB는 009_cap_rank
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -49,6 +50,9 @@ CREATE TABLE stocks (
   sic       SMALLINT,                                            -- 미국 SEC SIC 코드
   sector    VARCHAR(32),                                         -- NULL: 매핑 없음·금융 등 제외 업종
   industry_checked_at TIMESTAMPTZ,                               -- 업종을 마지막으로 확인한 시각(미국 SIC는 1년마다 다시 확인)
+  -- 시가총액 순위 (migration 009): 미국 상위 1,500개만 값이 있다. 백그라운드 재무 적재 우선순위용(화면에는 쓰지 않음)
+  cap_rank      INT CHECK (cap_rank > 0),
+  cap_ranked_at TIMESTAMPTZ,
   UNIQUE (market_id, ticker)
 );
 
