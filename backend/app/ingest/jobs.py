@@ -400,16 +400,16 @@ ON CONFLICT (stock_id, as_of) DO UPDATE SET
 
 
 # ── [S5-D] 미국 밸류에이션 = 기초값(SEC 발행주식수·FY 순이익·자본) × 최신 종가 — 외부 호출 없음(A-123) ──
-# (fundamental_bases.dps → valuation_snapshots.dps는 Stage 6 migration 005에서 이 SQL에 붙인다)
+# (배당 dps는 SEC 기초값의 최근 FY 주당배당금을 그대로 옮긴다)
 DERIVED_US_SQL = """
-INSERT INTO valuation_snapshots (stock_id, as_of, per, pbr, eps, bps, market_cap, shares_outstanding, source)
+INSERT INTO valuation_snapshots (stock_id, as_of, per, pbr, eps, bps, market_cap, shares_outstanding, dps, source)
 SELECT lp.stock_id, lp.trade_date,
        CASE WHEN f.net_income > 0 THEN ROUND(lp.close / (f.net_income / b.shares_outstanding), 4) END,
        CASE WHEN f.total_equity > 0 THEN ROUND(lp.close / (f.total_equity / b.shares_outstanding), 4) END,
        ROUND(f.net_income / b.shares_outstanding, 4),
        ROUND(f.total_equity / b.shares_outstanding, 4),
        ROUND(lp.close * b.shares_outstanding, 0),
-       b.shares_outstanding, 'DERIVED'
+       b.shares_outstanding, b.dps, 'DERIVED'
 FROM fundamental_bases b
 JOIN v_latest_price lp ON lp.stock_id = b.stock_id
 LEFT JOIN LATERAL (SELECT fs.net_income, fs.total_equity FROM financial_statements fs
@@ -418,7 +418,7 @@ LEFT JOIN LATERAL (SELECT fs.net_income, fs.total_equity FROM financial_statemen
 WHERE b.stock_id = ANY(:ids) AND b.shares_outstanding > 0
 ON CONFLICT (stock_id, as_of) DO UPDATE SET
   per = EXCLUDED.per, pbr = EXCLUDED.pbr, eps = EXCLUDED.eps, bps = EXCLUDED.bps, market_cap = EXCLUDED.market_cap,
-  shares_outstanding = EXCLUDED.shares_outstanding, source = EXCLUDED.source
+  shares_outstanding = EXCLUDED.shares_outstanding, dps = EXCLUDED.dps, source = EXCLUDED.source
 """
 
 
@@ -457,7 +457,7 @@ def load_valuations_bulk(engine: Engine, providers: Providers, stock_ids: list[i
                 if vals:
                     break
             rows = [{"stock_id": r.stock_id, "as_of": v.as_of, "per": v.per, "pbr": v.pbr, "eps": v.eps, "bps": v.bps,
-                     "market_cap": v.market_cap, "shares_outstanding": v.shares_outstanding,
+                     "market_cap": v.market_cap, "shares_outstanding": v.shares_outstanding, "dps": v.dps,
                      "source": providers.kr_bulk.source}
                     for r in kr if (v := vals.get(r.ticker)) is not None]
             with engine.begin() as conn:
@@ -535,7 +535,7 @@ def load_valuations(engine: Engine, providers: Providers, *, full: bool = False,
                     res.rows = upsert(conn, "valuation_snapshots", [
                         {"stock_id": ref.stock_id, "as_of": v.as_of, "per": v.per, "pbr": v.pbr, "eps": v.eps,
                          "bps": v.bps, "market_cap": v.market_cap, "shares_outstanding": v.shares_outstanding,
-                         "source": p.source} for v in vals if v.as_of <= kr_end or ref.country == "US"],
+                         "dps": v.dps, "source": p.source} for v in vals if v.as_of <= kr_end or ref.country == "US"],
                         ["stock_id", "as_of"])
         statuses[ref.ticker] = res.status
     return statuses

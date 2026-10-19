@@ -105,7 +105,8 @@ class KrxProvider:
                 as_of=day, per=positive_or_none(to_dec(r.get("PER"))), pbr=positive_or_none(to_dec(r.get("PBR"))),
                 eps=eps if eps not in (None, 0) else None, bps=bps if bps not in (None, 0) else None,
                 market_cap=to_dec(c.get("시가총액")) if c is not None else None,
-                shares_outstanding=to_int(c.get("상장주식수")) if c is not None else None)
+                shares_outstanding=to_int(c.get("상장주식수")) if c is not None else None,
+                dps=to_dec(r.get("DPS")))                       # 무배당은 0 (PER 등과 달리 유효한 값)
         return out
 
     # ── [S5-D] 업종 분류 ──
@@ -146,5 +147,6 @@ class KrxProvider:
                 bps=bps if bps not in (None, 0) else None,
                 market_cap=to_dec(c.get("시가총액")) if c is not None else None,
                 shares_outstanding=to_int(c.get("상장주식수")) if c is not None else None,
+                dps=to_dec(r.get("DPS")),                       # 무배당은 0 (PER 등과 달리 유효한 값)
             ))
         return out
