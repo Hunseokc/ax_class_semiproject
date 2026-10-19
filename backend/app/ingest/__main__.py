@@ -25,6 +25,8 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from datetime import date
+from pathlib import Path
 
 from sqlalchemy import text
 
@@ -122,6 +124,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status")
     # ── [S6-B] 상장 목록 ──
     sub.add_parser("listing")
+    # ── 추가 기능 4-1: 공시 목록 증분 · 재무 일괄 첫 적재 ──
+    sub.add_parser("dart-feed")
+    p = sub.add_parser("dart-bulk", help="OpenDART 재무정보 일괄다운로드(사업보고서 BS·PL zip/txt) 첫 적재")
+    p.add_argument("--as-of", type=date.fromisoformat, required=True, help="파일 기준일 — 공시 증분이 이 날부터 이어 받는다")
+    p.add_argument("--years", type=int, default=4)
+    p.add_argument("files", nargs="+", type=Path)
     args = ap.parse_args(argv)
 
     setup_logging(get_settings().log_level)
@@ -218,6 +226,11 @@ def main(argv: list[str] | None = None) -> int:
         from app.ingest.listing import sync_listing
         for country, res in sync_listing(engine, providers()).items():
             print(country, res)
+    elif args.cmd == "dart-feed":
+        print(jobs.load_dart_feed(engine, providers()))
+    elif args.cmd == "dart-bulk":
+        from app.ingest.dart_bulk import load_bulk
+        print(load_bulk(engine, args.files, as_of=args.as_of, years=args.years))
     if args.cmd not in ("status",):
         print(f"[{args.cmd}] 완료 {time.monotonic() - t0:.1f}s")
     return 0

@@ -14,8 +14,8 @@ from sqlalchemy import Connection, Engine, text
 
 from app.core.config import ROOT_DIR
 from app.ingest.preprocess import Quarantined, clean_bars, clean_fx
-from app.ingest.store import (LOCK_WAIT_NOTE_SECONDS, BatchWriter, LockSession, Unit, default_flush_every, error_text,
-                              job_log, provider_lock_key, upsert)
+from app.ingest.store import (DART_LOCK_KEY, LOCK_WAIT_NOTE_SECONDS, BatchWriter, LockSession, Unit, default_flush_every,
+                              error_text, job_log, provider_lock_key, upsert)
 from app.ingest.universe import index_refs, load_universe, stock_refs
 from app.providers.base import Financial, ProviderError, StockRef
 from app.providers.factory import Providers
@@ -611,6 +611,8 @@ def _fetch_financials(providers: Providers, locks: LockSession, ref: StockRef, y
         base = None
         with locks.hold(provider_lock_key(ref.country)) as waited:     # DART·SEC를 부르는 구간만
             fins = p.get_annual_financials(ref, years)
+            if not fins:          # 공시 직후 재무 API가 아직 비어 있을 수 있다 → 최신으로 기록하지 않고 1일 뒤 다시
+                raise ProviderError("재무 빈 응답")
             # 미국 기초값(발행주식수·주당 배당)은 재무와 같은 SEC 응답에서 꺼낸다
             if ref.country == "US" and ref.cik and providers.us_reference is not None:
                 try:
@@ -699,6 +701,88 @@ def _fetch_disclosures(providers: Providers, locks: LockSession, ref: StockRef, 
         u.error = error_text(e)
         log.error("DISCLOSURES %s 실패: %s", ref.ticker, u.error)
     return u
+
+
+# ---------------------------------------------------------------- 공시 목록 증분 (새 사업보고서 → 재무 유효기간 종료)
+# 회사마다 공시 목록을 부르지 않고, 회사 지정 없는 사업보고서 목록(list.json A001)을 기준점부터 날짜로 받는다.
+# 목록은 접수번호 순으로 정렬되지 않아([첨부추가] 등이 앞에 섞임) 기준점에서 멈추지 않고 기간 안 전체 페이지를 받는다.
+FEED_SOURCE = "DART_A001"      # ingest_cursor.source
+FEED_OVERLAP_DAYS = 2          # 기준점 날짜보다 이만큼 앞부터 다시 받는다(늦게 반영되는 공시)
+FEED_WINDOW_DAYS = 90          # 회사 지정 없는 list.json 조회 기간 상한(3개월)
+FEED_FIRST_DAYS = 7            # 기준점이 없을 때 처음 받는 기간
+FEED_SKIP_PREFIXES = ("[첨부추가]", "[첨부정정]")   # 첨부 서류만 바뀐 공시 — 재무 수치는 그대로라 만료하지 않는다
+
+
+def _feed_windows(start: date, end: date) -> list[tuple[date, date]]:
+    out, s = [], start
+    while s <= end:
+        e = min(end, s + timedelta(days=FEED_WINDOW_DAYS - 1))
+        out.append((s, e))
+        s = e + timedelta(days=1)
+    return out
+
+
+def load_dart_feed(engine: Engine, providers: Providers, *, today: date | None = None) -> dict:
+    """새 사업보고서(정정 포함)를 낸 DB 종목의 재무 유효기간을 끝내고 공시 행을 넣는다. 기준점은 모두 성공한 뒤에만 옮긴다.
+    반환: {"status": "SUCCESS"|"FAILED"|"SKIPPED", "pages", "filings", "matched", "expired", "cursor"}"""
+    out = {"status": "SKIPPED", "pages": 0, "filings": 0, "matched": 0, "expired": 0, "cursor": None}
+    feed = providers.kr_feed
+    if feed is None:
+        return out
+    today = today or datetime.now(ZoneInfo("Asia/Seoul")).date()
+    with engine.connect() as conn:
+        cur = conn.execute(text("SELECT last_rcept_no, last_rcept_dt FROM ingest_cursor WHERE source = :s"),
+                           {"s": FEED_SOURCE}).first()
+    last_no, start = (cur[0], cur[1] - timedelta(days=FEED_OVERLAP_DAYS)) if cur else ("0" * 14, today - timedelta(days=FEED_FIRST_DAYS))
+    out["cursor"] = last_no if cur else None
+    with job_log(engine, source="DART", job_type="DISCLOSURES", label="feed A001") as res:
+        new: dict[str, object] = {}
+        with LockSession(engine) as locks:
+            for ws, we in _feed_windows(start, today):           # 오래된 구간부터
+                page = 1
+                while True:
+                    with locks.hold(DART_LOCK_KEY):
+                        items, total = feed.list_annual_reports(ws, we, page)
+                    out["pages"] += 1
+                    new.update({x.rcept_no: x for x in items if x.rcept_no > last_no})
+                    if page >= total:
+                        break
+                    page += 1
+        filings = [x for x in new.values() if "사업보고서" in x.report_nm and not x.report_nm.startswith(FEED_SKIP_PREFIXES)]
+        out["filings"] = len(filings)
+        with engine.begin() as conn:
+            codes = {x.corp_code for x in filings}
+            ids = dict(conn.execute(text("SELECT corp_code, stock_id FROM stocks WHERE corp_code = ANY(:c) AND is_active"),
+                                    {"c": list(codes)}).all()) if codes else {}
+            hits = [x for x in filings if x.corp_code in ids]
+            upsert(conn, "disclosures", [
+                {"stock_id": ids[x.corp_code], "rcept_no": x.rcept_no, "title": x.report_nm, "report_type": "정기공시",
+                 "filed_at": datetime.combine(x.rcept_dt, time(0), ZoneInfo("Asia/Seoul")),
+                 "url": f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={x.rcept_no}", "data_source": "DART"} for x in hits],
+                ["rcept_no"])
+            out["matched"] = len(hits)
+            out["expired"] = freshness.expire_financials(conn, sorted({ids[x.corp_code] for x in hits}))
+            if new:                                                # 받은 것 중 가장 큰 접수번호(첨부 공시 포함)
+                top = max(new.values(), key=lambda x: x.rcept_no)
+                cursor = (top.rcept_no, top.rcept_dt)
+            elif cur is None:
+                cursor = (f"{start:%Y%m%d}000000", start)
+            else:
+                cursor = None
+            if cursor:
+                conn.execute(text("""
+                    INSERT INTO ingest_cursor (source, last_rcept_no, last_rcept_dt) VALUES (:s, :no, :d)
+                    ON CONFLICT (source) DO UPDATE SET last_rcept_no = EXCLUDED.last_rcept_no,
+                                                       last_rcept_dt = EXCLUDED.last_rcept_dt, updated_at = now()"""),
+                    {"s": FEED_SOURCE, "no": cursor[0], "d": cursor[1]})
+                out["cursor"] = cursor[0]
+        res.rows = out["matched"]
+        res.notes.append(f"pages={out['pages']} filings={out['filings']} matched={out['matched']} expired={out['expired']}")
+        out["status"] = "SUCCESS"
+    if res.status == "FAILED":
+        out["status"] = "FAILED"
+        out["cursor"] = last_no if cur else None
+    return out
 
 
 # ---------------------------------------------------------------- 데모 사용자

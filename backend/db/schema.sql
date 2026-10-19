@@ -14,6 +14,7 @@
 --              — 기존 DB는 006_sector_freshness
 --   Stage 6: stocks.coverage 'listed'·valuation_snapshots.dps — 기존 DB는 005_listed_dividend
 --            sector_performance_daily·market_sentiment_daily (+ ingestion_logs.job_type에 SECTORS_US·SECTORS_KR) — 기존 DB는 007_home_widgets
+--   추가 기능 4-1: ingest_cursor(공시 목록 증분 기준점) — 기존 DB는 008_ingest_cursor
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -383,4 +384,13 @@ CREATE TABLE market_sentiment_daily (
   formula_version SMALLINT      NOT NULL,
   computed_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
   UNIQUE (market, trade_date)
+);
+
+-- 추가 기능 4-1 — 공시 목록 증분 수집 기준점 (migration 008_ingest_cursor)
+-- 소스별 마지막으로 처리한 접수번호. 모두 성공한 뒤에만 옮긴다(중간 실패 시 다음 실행이 같은 지점부터)
+CREATE TABLE ingest_cursor (
+  source        VARCHAR(20)  PRIMARY KEY,                    -- 'DART_A001' (DART 사업보고서 목록)
+  last_rcept_no CHAR(14)     NOT NULL CHECK (last_rcept_no ~ '^[0-9]{14}$'),
+  last_rcept_dt DATE         NOT NULL,
+  updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
 );

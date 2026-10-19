@@ -11,8 +11,8 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from app.providers.base import (Bar, Classification, Disclosure, Financial, FxPoint, IndexRef, Listing, StockRef, Valuation,
-                                ValuationBase)
+from app.providers.base import (Bar, Classification, Disclosure, Financial, FxPoint, IndexRef, Listing, ProviderError, StockRef,
+                                Valuation, ValuationBase)
 from app.providers.factory import Providers
 
 SAFE_LAG = timedelta(days=2)    # 어느 시장 기준으로도 '오늘(미확정 봉)'이 되지 않도록 이틀 전까지만 돌려준다
@@ -203,7 +203,7 @@ class FakeReference(CallLog):
         return self.bases.get(stock.ticker, ValuationBase(shares_outstanding=None, shares_as_of=None))
 
 
-def make_providers(fx: FakeFx | None = None, *, with_fundamentals: bool = False) -> Providers:
+def make_providers(fx: FakeFx | None = None, *, with_fundamentals: bool = False, kr_feed=None) -> Providers:
     price, index, val = FakePrice(), FakeIndex(), FakeValuation()
     fx = fx or FakeFx()
     fin = {"kr_financial": None, "us_financial": None, "kr_disclosure": None, "us_disclosure": None}
@@ -211,4 +211,20 @@ def make_providers(fx: FakeFx | None = None, *, with_fundamentals: bool = False)
         fin = {"kr_financial": FakeFinancial("DART"), "us_financial": FakeFinancial("SEC"),
                "kr_disclosure": FakeDisclosure("DART"), "us_disclosure": FakeDisclosure("SEC")}
     return Providers(kr_price=price, us_price=price, kr_index=index, us_index=index, fx=fx,
-                     kr_valuation=val, us_valuation=val, us_financial_supplement=None, **fin)
+                     kr_valuation=val, us_valuation=val, us_financial_supplement=None, kr_feed=kr_feed, **fin)
+
+
+# ── 공시 목록 증분(회사 지정 없는 사업보고서 목록) ──
+class FakeDartFeed(CallLog):
+    """list_annual_reports만 흉내. pages: 호출 순서대로 돌려줄 (목록, total_page). fail_on: 이 번째 호출(1부터)에서 ProviderError."""
+    source = "DART"
+
+    def __init__(self, pages: list, fail_on: int | None = None):
+        super().__init__()
+        self.pages, self.fail_on = list(pages), fail_on
+
+    def list_annual_reports(self, start: date, end: date, page_no: int = 1):
+        self.record(start, end, page_no)
+        if self.fail_on is not None and self.count == self.fail_on:
+            raise ProviderError("가짜 목록 실패")
+        return self.pages.pop(0) if self.pages else ([], 0)

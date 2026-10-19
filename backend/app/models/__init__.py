@@ -4,7 +4,8 @@ Stage 1 테이블 10개 + Stage 2 테이블 4개(users·watchlist_items·portfol
 + Stage 3 테이블 2개(financial_statements·disclosures)
 + Stage 4 테이블 4개(scoring_presets·scoring_weights·stock_metric_values·stock_scores)
 + Stage 5-D 테이블 2개(data_freshness·fundamental_bases)
-+ Stage 6 테이블 2개(sector_performance_daily·market_sentiment_daily).
++ Stage 6 테이블 2개(sector_performance_daily·market_sentiment_daily)
++ 추가 기능 테이블 1개(ingest_cursor).
 """
 from __future__ import annotations
 
@@ -330,3 +331,13 @@ class MarketSentimentDaily(Base):
     computed_at: Mapped[datetime] = mapped_column(server_default=func.now())
     __table_args__ = (UniqueConstraint("market", "trade_date"), CheckConstraint("market IN ('KR','US')"),
                       CheckConstraint("score BETWEEN 0 AND 100"))
+
+
+class IngestCursor(Base):
+    """공시 목록 증분 수집 기준점 — 소스별 마지막으로 처리한 접수번호(app/ingest/jobs.py load_dart_feed)."""
+    __tablename__ = "ingest_cursor"
+    source: Mapped[str] = mapped_column(String(20), primary_key=True)
+    last_rcept_no: Mapped[str] = mapped_column(CHAR(14))
+    last_rcept_dt: Mapped[date] = mapped_column(Date)
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    __table_args__ = (CheckConstraint("last_rcept_no ~ '^[0-9]{14}$'"),)
