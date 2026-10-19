@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import analysis, deps, health, market, portfolios, stocks, watchlist
+from app.api import analysis, deps, health, home, market, portfolios, stocks, watchlist
 from app.core.config import FRONTEND_DIR, get_settings
 from app.core.db import get_engine
 from app.core.errors import NotFound, install_error_handlers, internal_error_response
@@ -40,7 +40,8 @@ async def lifespan(_: FastAPI):
 
         def refresh_service():
             pv = deps.get_providers()
-            return deps.RefreshService(engine, pv, FxService(engine, pv.fx, ttl), ttl, scorer=deps.get_scorer())
+            return deps.RefreshService(engine, pv, FxService(engine, pv.fx, ttl), ttl, scorer=deps.get_scorer(),
+                                       sector_loader=deps.load_sectors)
 
         task = asyncio.create_task(Scheduler(engine, refresh_service, deps.get_providers, deps.get_scorer()).run_forever())
     yield
@@ -107,7 +108,8 @@ api.include_router(portfolios.router)
 for r in (analysis.router, analysis.stats_router, analysis.scoring_router):
     api.include_router(r)
 
-# ── [S5] 홈 위젯·통계·검색 ──
+# ── [S6] 홈 위젯 ──
+api.include_router(home.router)
 
 app.include_router(api)
 app.include_router(health.router)       # /health, /health/db — /api/v1 밖

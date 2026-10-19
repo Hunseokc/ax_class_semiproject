@@ -2,7 +2,7 @@
 
 > **상태: Stage 3 확정 (v3.0).** Stage 1 테이블 10개 + Stage 2 사용자 테이블 4개 + Stage 3 재무·공시 테이블 2개, VIEW 2개, 보조 인덱스 10개, 트리거 2개를 실제 DDL 기준으로 담았다. 이후 단계에서 D가 테이블을 추가할 때 이 문서의 해당 절을 함께 확장한다.
 > (Stage 4+: 매력도·비교군·섹터 — 의도적 비정규화 5-2, `v_stock_metrics`, EXPLAIN 비교도 그때 채운다. `watchlist_items`의 메모·목표가·`updated_at`은 Stage 5 — 기존 DB는 migration 004.)
-> **Stage 4 계약**(매력도 테이블 4개, `peer_group_members.is_primary`, `v_stock_metrics` 컬럼, 마이그레이션 001·002)은 9절, Stage 5-D(006)는 10절에 모았다. 1~8절의 Stage 4·5 반영은 Stage 6 최종 문서에서 한다.
+> **Stage 4 계약**(매력도 테이블 4개, `peer_group_members.is_primary`, `v_stock_metrics` 컬럼, 마이그레이션 001·002)은 9절, Stage 5-D(006)는 10절, Stage 6(005·007)은 11절에 모았다. 1~8절의 Stage 4·5 반영은 Stage 6 최종 문서에서 한다.
 
 - DDL 원문: `backend/db/schema.sql` → `backend/db/indexes.sql` → `backend/db/views.sql` 순서로 실행 (`python -m app.ingest init-db`가 같은 순서로 적용)
 - DBMS: PostgreSQL 16 / 테이블 16개, VIEW 2개, 보조 인덱스 10개, 트리거 2개(updated_at 자동 갱신 — portfolios·portfolio_items)
@@ -662,3 +662,48 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | 원본 대비 schema·ORM·import 계약 | `python team/tools/check_contract.py 5` 통과 |
 | ORM ↔ DDL 일치, Stage 1~5 외 테이블 없음 | `test_orm_matches_schema`, `test_tables_are_stage1_to_5_only` 통과 |
 | Stage 5-D 제약 위반 4건(그룹 kind, 유효기간 < 시도 시각, 유효기간 kind, 발행주식수 0) 거부 | `test_constraints_reject_bad_rows` 통과 |
+
+## 11. Stage 6 — 상장 목록·배당·홈 위젯 (D 계약)
+
+새로 만드는 DB는 `schema.sql`에 반영되어 있고, 이미 적재된 DB는 마이그레이션으로 바꾼다.
+
+### 11-1. 마이그레이션
+| 파일 | 내용 | 실행 |
+|---|---|---|
+| `backend/db/migrations/005_listed_dividend.sql` | `stocks.coverage`에 `listed`(상장 보통주 목록) 허용, `valuation_snapshots.dps`(CHECK ≥ 0) — 멱등 | `python -m app.ingest migrate 005_listed_dividend` (상장 목록 적재는 B의 `listing`) |
+| `backend/db/migrations/007_home_widgets.sql` | `sector_performance_daily`, `market_sentiment_daily` 생성, `ingestion_logs.job_type`에 `SECTORS_US`·`SECTORS_KR` — 멱등 | `python -m app.ingest migrate 007_home_widgets` |
+
+### 11-2. 테이블·컬럼 정의서
+
+#### `valuation_snapshots` 추가 컬럼
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| dps | numeric(18,4) | Y |  | CHECK ≥ 0 | 주당배당금(연간, 종목 통화). 0 = 무배당, NULL = 미제공 |
+
+#### `sector_performance_daily` (섹터 히트맵, 캐시 성격 — 30일 지난 행은 갱신 작업이 정리)
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| id | bigint | N | bigserial | PK | |
+| market | character(2) | N |  | UNIQUE①, CHECK IN (KR, US) | 시장 |
+| sector_code | character varying(16) | N |  | UNIQUE① | 미국 섹터 ETF 티커(XLK…) / KRX 섹터 지수 코드 |
+| sector_name | character varying(40) | N |  |  | 섹터 이름 |
+| trade_date | date | N |  | UNIQUE① | 거래일 |
+| change_pct | numeric(8,4) | Y |  |  | 전일 대비 %(1.23 = 1.23%) |
+| fetched_at | timestamp with time zone | N | now() |  | 수집 시각 |
+
+가중치(타일 크기)는 저장하지 않고 코드 상수(`app/services/sectors.py`)로 둔다.
+
+#### `market_sentiment_daily` (시장 심리 지수 — StockMind 간이 계산, 0~100 높을수록 탐욕)
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| id | bigint | N | bigserial | PK | |
+| market | character(2) | N |  | UNIQUE①, CHECK IN (KR, US) | 시장 |
+| trade_date | date | N |  | UNIQUE① | 기준 지수(KOSPI·S&P 500)의 거래일 |
+| score | numeric(5,2) | N |  | CHECK 0~100 | 종합 점수 |
+| label | character varying(10) | N |  |  | 점수 구간 이름 |
+| price_position · ma_gap_score · rsi_score · vix_score | numeric(5,2) | Y |  | CHECK 0~100 | 구성요소 점수(52주 위치·이동평균 괴리·RSI·VIX — VIX는 미국만) |
+| formula_version | smallint | N |  |  | 계산식 버전 |
+| computed_at | timestamp with time zone | N | now() |  | 계산 시각 |

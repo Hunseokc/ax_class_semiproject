@@ -88,18 +88,44 @@ $("#range-tabs").append(segmented(["1m", "3m", "6m", "1y"].map((v) => ({ value: 
 const stat = (label, value, sub = "") => `<div class="stat"><span class="stat__label">${label}</span>
   <span class="stat__value num">${value}</span>${sub ? `<span class="stat__sub">${sub}</span>` : ""}</div>`;
 
-function renderKeyMetrics(s) {
+// 경쟁 비교 응답은 핵심 정보(PER·PBR 비교)와 '경쟁 종목 비교' 칸이 같이 쓴다 — 한 번만 요청, 실패하면 다음에 다시
+let peersReq = null;
+const fetchPeers = () => (peersReq ??= getPeers(MARKET, TICKER).catch((e) => { peersReq = null; throw e; }));
+
+/** 비교 그룹(경쟁 비교 칸과 같은 첫 그룹)의 다른 종목들 값 평균과 개수. 비교할 종목이 없으면 null
+ *  positive: PER·PBR처럼 양수만 의미 있는 지표면 true(적자 음수 제외), ROE·영업이익률은 false */
+function peerAverage(d, key, { positive = true } = {}) {
+  const g = d.groups.find((x) => x.has_peers);
+  const vals = (g?.members || []).filter((m) => !m.is_target).map((m) => m.values[key])
+    .filter((v) => (positive ? v > 0 : typeof v === "number"));
+  return vals.length ? { avg: vals.reduce((a, b) => a + b, 0) / vals.length, n: vals.length } : null;
+}
+
+// PER·PBR: 경쟁 종목 평균 대비 몇 % 낮은지/높은지를 크게, 원래 수치는 옆 괄호에 작게. 비교할 수 없으면 원래 수치만
+function valuationStat(label, v, cmp, rawSub) {
+  if (!(v > 0)) return stat(label, DASH, label === "PER" ? "적자·미제공" : "미제공");
+  const raw = `${num(v, 2)}배`;
+  if (!cmp) return stat(label, raw, rawSub);
+  const diff = v / cmp.avg - 1;
+  const text = Math.abs(diff) < 0.005 ? "평균과 비슷" : `${pct(Math.abs(diff), { digits: 0 })} ${diff < 0 ? "낮음" : "높음"}`;
+  return stat(`${label} · 경쟁 평균 대비`, `${text}<span class="stat__raw">(${raw})</span>`,
+    `경쟁 ${cmp.n}종목 평균 ${num(cmp.avg, 2)}배 · 낮을수록 저평가`);
+}
+
+function renderKeyMetrics(s, peerData = null) {
+  const cmp = (key) => (peerData ? peerAverage(peerData, key) : null);
   $("#key-metrics").replaceChildren(h(`<div class="stat-grid">
       ${stat("시가총액", money(s.market_cap, s.currency), s.currency === "USD" ? `≈ ${krw(s.market_cap_krw, { compact: true })}` : "")}
-      ${stat("PER", s.per ? `${num(s.per, 2)}배` : DASH, s.per ? "주가 ÷ 주당순이익" : "적자·미제공")}
-      ${stat("PBR", s.pbr ? `${num(s.pbr, 2)}배` : DASH, "주가 ÷ 주당순자산")}
+      ${valuationStat("PER", s.per, cmp("per"), "주가 ÷ 주당순이익")}
+      ${valuationStat("PBR", s.pbr, cmp("pbr"), "주가 ÷ 주당순자산")}
     </div>`));
 }
 
 // ── [S3-A] 재무 추이 ──
 // stock.html은 A의 담당 파일 목록에 없어서, 이 파일이 '재무 추이' 칸을 핵심 정보 바로 아래에 만들어 붙인다
-const finSection = h(`<section class="section card detail-section" aria-labelledby="h-fin">
-    <h2 id="h-fin">재무 추이</h2><div id="financials"></div></section>`);
+const finSection = h(`<details class="section card detail-section fold" open>
+    <summary><h2>재무 추이</h2><span class="subtle">연간 매출·영업이익·순이익·영업이익률</span></summary>
+    <div class="fold__body" id="financials"></div></details>`);
 $("#key-metrics").closest("section").after(finSection);
 
 const FIN_COLORS = () => [color("--ice"), color("--lavender"), "#aba2fc"];   // 매출·영업이익·순이익 (세 번째는 구분색, 등락 의미 없음)
@@ -371,14 +397,15 @@ async function mountPresetControl() {
   document.addEventListener(PRESET_EVENT, loadAnalysis);
 }
 
-// ── [S4-A] 수치 분석 (접힌 '투자 지표 상세') ──
-// 복잡한 자료는 기본으로 접어 두고, 처음 펼칠 때 그린다. stock.html을 못 고쳐서 이 파일이 칸을 만들어 핵심 정보 바로 아래(재무 추이 위)에 붙인다
-const foldMetrics = h(`<details class="section card detail-section fold" id="fold-metrics">
-    <summary><h2>투자 지표 상세</h2><span class="subtle">ROE·영업이익률·기간 수익률·변동성·낙폭</span></summary>
-    <div class="fold__body"><div id="detail-metrics"></div><div id="numeric"></div></div></details>`);
+// ── [S4-A] 한눈에 보는 투자 지표 ──
+// 숫자를 '수익성 · 주가 흐름 · 위험' 세 질문으로 묶어 결론 한 줄을 크게, 원래 수치는 작게 둔다.
+// 기본은 펼친 상태, 접었다 다시 펼치면 필요할 때만 그린다. stock.html을 못 고쳐서 이 파일이 칸을 만들어 핵심 정보 바로 아래(재무 추이 위)에 붙인다
+const foldMetrics = h(`<details class="section card detail-section fold" id="fold-metrics" open>
+    <summary><h2>한눈에 보는 투자 지표</h2><span class="subtle">수익성 · 주가 흐름 · 위험</span></summary>
+    <div class="fold__body" id="detail-metrics"></div></details>`);
 $("#key-metrics").closest("section").after(foldMetrics);
 
-// ---------------------------------------------------------------- 접힌 섹션: 처음 펼칠 때 불러온다
+// ---------------------------------------------------------------- 접이식 섹션: 펼쳐져 있을 때 불러온다
 const folds = {};
 function fold(name, loader) {
   const el = $(`#fold-${name}`);
@@ -393,39 +420,76 @@ function reloadFold(name) {
   if (f.el.open && stock) { f.loaded = true; f.loader(); } else f.loaded = false;
 }
 
-// PER·PBR은 위의 '핵심 정보'에 이미 있어서 여기서는 재무 기반 두 지표만 둔다
-function renderDetailMetrics(a) {
+const has = (v) => typeof v === "number";
+const glanceCard = (q, answer, body) => `<div class="glance__card"><span class="glance__q">${q}</span>
+    <strong class="glance__a">${answer}</strong>${body}</div>`;
+const fact = (label, value, note = "") => `<li>${label} <b class="num">${value}</b>${note ? ` <span>(${note})</span>` : ""}</li>`;
+
+// 수익성: ROE·영업이익률을 경쟁 종목 평균과 비교 (PER·PBR(핵심 정보)과 같은 그룹)
+function profitCard(a, peerData) {
   const m = a.metrics;
-  $("#detail-metrics").replaceChildren(h(`<div class="stat-grid">
-      ${stat("ROE", pct(m.roe), a.fin_period_end ? `FY ${a.fin_period_end.slice(0, 4)} · ${esc(a.accounting_std || "")}` : "재무 없음")}
-      ${stat("영업이익률", pct(m.operating_margin), "영업이익 ÷ 매출")}
-    </div>`));
-  renderNumeric(a);
+  if (!has(m.roe) && !has(m.operating_margin)) return glanceCard("돈을 잘 버나 · 수익성", "재무 데이터 없음", "");
+  const avg = (key) => (peerData ? peerAverage(peerData, key, { positive: false }) : null);
+  const roeAvg = avg("roe"), opmAvg = avg("operating_margin");
+  const sides = [[m.roe, roeAvg], [m.operating_margin, opmAvg]].filter(([v, c]) => has(v) && c).map(([v, c]) => Math.sign(v - c.avg));
+  let answer;
+  if (has(m.operating_margin) && m.operating_margin < 0) answer = "영업 적자 상태";
+  else if (!sides.length) answer = "흑자 · 비교할 경쟁 종목 없음";
+  else if (sides.every((x) => x > 0)) answer = "경쟁 평균보다 잘 버는 편";
+  else if (sides.every((x) => x < 0)) answer = "경쟁 평균보다 덜 버는 편";
+  else answer = "경쟁 평균과 비슷한 편";
+  const note = (c) => (c ? `경쟁 평균 ${pct(c.avg, { digits: 1 })}` : "");
+  return glanceCard("돈을 잘 버나 · 수익성", answer, `<ul class="glance__facts">
+      ${fact("ROE", pct(m.roe, { digits: 1 }), note(roeAvg))}
+      ${fact("영업이익률", pct(m.operating_margin, { digits: 1 }), note(opmAvg))}
+      <li class="glance__basis">${a.fin_period_end ? `FY${a.fin_period_end.slice(0, 4)} · ${esc(a.accounting_std || "")} · ` : ""}ROE = 순이익 ÷ 자본</li></ul>`);
 }
 
-function renderNumeric(a) {
+// 주가 흐름: 긴 흐름(1년, 없으면 6개월)과 최근(3개월, 없으면 1개월)의 방향 조합
+function trendCard(m) {
+  const [longLabel, long] = has(m.return_1y) ? ["1년", m.return_1y] : ["6개월", m.return_6m];
+  const [shortLabel, short] = has(m.return_3m) ? ["3개월", m.return_3m] : ["1개월", m.return_1m];
+  let answer = "데이터 부족";
+  if (has(long) && has(short)) {
+    answer = long > 0 ? (short >= 0 ? "꾸준히 오르는 흐름" : `${longLabel} 상승 · 최근 쉬는 중`)
+      : (short > 0 ? `${longLabel} 하락 · 최근 반등` : "내리는 흐름");
+  }
+  const chips = [["1주", m.return_1w], ["1개월", m.return_1m], ["3개월", m.return_3m], ["6개월", m.return_6m], ["1년", m.return_1y]]
+    .map(([l, v]) => `<span><em>${l}</em>${changeHtml(v, stock.country)}</span>`).join("");
+  const ma = has(m.ma120_gap)
+    ? `<li class="glance__basis">120일 평균선보다 ${pct(Math.abs(m.ma120_gap), { digits: 1 })} ${m.ma120_gap >= 0 ? "위" : "아래"}${m.ma120 ? ` (${price(m.ma120, stock.currency)})` : ""}</li>` : "";
+  return glanceCard("주가는 어떤 흐름인가 · 추세", answer, `<div class="glance__chips">${chips}</div><ul class="glance__facts">${ma}</ul>`);
+}
+
+// 위험: 판정 없이 쉬운 말로 — 연환산 변동성 ÷ √252 = 하루 평균 움직임, 최대낙폭 = 1년 중 고점 대비 최대 하락
+function riskCard(m) {
+  const daily = has(m.volatility_1y) ? m.volatility_1y / Math.sqrt(252) : null;
+  const answer = daily === null ? "데이터 부족" : `하루 평균 ±${pct(daily, { digits: 1 })} 움직임`;
+  return glanceCard("얼마나 출렁이나 · 위험", answer, `<ul class="glance__facts">
+      ${has(m.max_drawdown_1y) ? `<li>1년 중 고점 대비 최대 <b class="num">${pct(Math.abs(m.max_drawdown_1y), { digits: 0 })}</b> 하락한 적 있음</li>` : ""}
+      <li class="glance__basis">연환산 변동성 ${pct(m.volatility_1y, { digits: 1 })} · 최대낙폭 ${pct(m.max_drawdown_1y, { digits: 1 })} (최근 252거래일)</li></ul>`);
+}
+
+// 거래량: 20일 평균 대비 배수를 말로
+function volumeLine(m) {
+  const r = m.volume_ratio_20d;
+  if (!has(r)) return "";
+  const word = r >= 1.5 ? "평소보다 거래가 많음 · 관심 늘어남" : r <= 0.7 ? "평소보다 한산함" : "평소 수준";
+  return `<p class="glance__foot">거래량 <strong>${word}</strong> <span>(20일 평균 대비 ${num(r, 2)}배 · 최신 ${num(m.volume)}주)</span></p>`;
+}
+
+function paintGlance(a, peerData) {
   const m = a.metrics;
-  const labels = ["1주", "1개월", "3개월", "6개월", "1년"];
-  const data = [m.return_1w, m.return_1m, m.return_3m, m.return_6m, m.return_1y];
-  const el = h(`<div class="numeric">
-      <h3>기간 수익률과 위험</h3>
-      <div class="chart-box chart-box--sm"><canvas role="img" aria-label="기간별 수익률 막대"></canvas></div>
-      <div class="stat-grid">
-        ${stat("연환산 변동성", pct(m.volatility_1y, { digits: 1 }), "최근 252거래일")}
-        ${stat("최대낙폭(MDD)", pct(m.max_drawdown_1y, { digits: 1 }), "최근 252거래일")}
-        ${stat("120일선 괴리율", pct(m.ma120_gap, { sign: true, digits: 1 }), m.ma120 ? `120일선 ${price(m.ma120, a.currency)}` : "")}
-        ${stat("거래량/20일 평균", m.volume_ratio_20d !== null ? `${num(m.volume_ratio_20d, 2)}배` : DASH, `최신 ${num(m.volume)}주`)}
-      </div></div>`);
-  queueMicrotask(() => draw(el.querySelector("canvas"), {
-    type: "bar",
-    data: { labels, datasets: [{ data: data.map((x) => (x === null ? null : x * 100)), backgroundColor: data.map((x) => signColor(x, stock.country)), borderRadius: 10, maxBarThickness: 44 }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      scales: { x: plainAxis, y: { ...dashedAxis, ticks: { callback: (v) => `${v}%` } } },
-      plugins: { tooltip: { callbacks: { label: (ctx) => (ctx.raw === null ? "데이터 부족" : `${ctx.raw > 0 ? "+" : ""}${ctx.raw.toFixed(2)}%`) } } },
-    },
-  }));
-  $("#numeric").replaceChildren(el);
+  $("#detail-metrics").replaceChildren(h(`<div class="glance-wrap">
+      <div class="glance">${profitCard(a, peerData)}${trendCard(m)}${riskCard(m)}</div>
+      ${volumeLine(m)}
+      <p class="subtle">결론 문장은 숫자를 쉬운 말로 옮긴 것이며 투자 권유가 아닙니다.</p></div>`));
+}
+
+// 경쟁 평균이 오기 전에도 먼저 그리고, 오면 수익성 비교를 채워 다시 그린다
+function renderDetailMetrics(a) {
+  paintGlance(a, null);
+  fetchPeers().then((d) => { if (analysisData === a) paintGlance(a, d); }).catch(() => { /* 비교 없이 표시 */ });
 }
 
 fold("metrics", () => {
@@ -435,7 +499,7 @@ fold("metrics", () => {
 
 // ── [S4-A] 경쟁 종목 비교 ──
 // stock.html을 못 고쳐서 이 파일이 접이식 칸을 만들어 재무 추이 아래(공시 위)에 붙인다
-const foldPeers = h(`<details class="section card detail-section fold" id="fold-peers">
+const foldPeers = h(`<details class="section card detail-section fold" id="fold-peers" open>
     <summary><h2>경쟁 종목 비교</h2><span class="subtle">같은 그룹의 가격 추이·지표 순위</span></summary>
     <div class="fold__body" id="peers"></div></details>`);
 finSection.after(foldPeers);
@@ -544,7 +608,7 @@ function renderPeers() {
 function loadPeers() {
   return load($("#peers"), {
     skeleton: skeleton("row", 3),
-    fetch: () => getPeers(MARKET, TICKER),
+    fetch: fetchPeers,
     isEmpty: (d) => !d.groups.length,
     empty: emptyState({ title: "속한 경쟁 그룹이 없습니다" }),
     render: (d) => {
@@ -559,7 +623,7 @@ fold("peers", loadPeers);
 
 // ── [S5-A] 월별 요약 (GET /statistics/monthly) ──
 // stock.html을 못 고쳐서 이 파일이 접이식 칸을 만들어 재무 추이 아래(경쟁 비교 위)에 붙인다
-const foldMonthly = h(`<details class="section card detail-section fold" id="fold-monthly">
+const foldMonthly = h(`<details class="section card detail-section fold" id="fold-monthly" open>
     <summary><h2>월별 요약</h2><span class="subtle">최근 12개월 거래일·평균 종가·수익률</span></summary>
     <div class="fold__body" id="monthly"></div></details>`);
 finSection.after(foldMonthly);
@@ -606,6 +670,9 @@ async function init() {
   document.querySelectorAll(".detail-section").forEach((s) => (s.hidden = false));   // 다시 시도 성공 시 복구
   renderHeader(stock);
   renderKeyMetrics(stock);
+  peersReq = null;   // 새로고침 뒤에는 새 값으로
+  const shown = stock;
+  fetchPeers().then((d) => { if (stock === shown) renderKeyMetrics(stock, d); }).catch(() => { /* 비교 없이 원래 수치만 */ });
   loadCandles();
   loadFinancials();   // [S3-A]
   loadDisclosures();  // [S3-A]

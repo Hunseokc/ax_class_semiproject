@@ -15,7 +15,7 @@
 [이번 단계] Stage 6 — 홈 위젯 데이터. 계산 결과는 DB에 저장하고 홈은 저장값을 읽는다.
 [내 파트] 섹터 등락 수집·저장 → 시장 심리 지수 계산·저장 → 홈 순위 보조 → 엔드포인트 → 테스트
 [브랜치] feat/s6-c-home-widgets
-[참조 원본] ../ax_class_semiproject/backend/app/services/{sectors,sentiment,home_ranking}.py, api/home.py(/sectors·/sentiment), db/migrations/007_home_widgets.sql, tests/test_home_widgets.py (읽기 전용)
+[참조 원본] ../ax_class_stockmind/backend/app/services/{sectors,sentiment,home_ranking}.py, api/home.py(/sectors·/sentiment), db/migrations/007_home_widgets.sql, tests/test_home_widgets.py (읽기 전용)
 
 [담당 파일 — 이 순서대로]
 1. backend/app/services/sectors.py — 미국 섹터 ETF(XLK…)·KRX 섹터 지수 등락 수집(load_sectors), 30일 지난 행 정리, read_sectors. 가중치는 코드 상수(테이블에 저장 안 하는 이유를 설계 설명에)
@@ -51,7 +51,7 @@
 [이번 단계] Stage 6 — 검색·홈 순위
 [내 파트] 상장 목록 동기화 → 참고 점수 → 검색 SQL·API → 배당 지표 → 홈 순위 API → 테스트
 [브랜치] feat/s6-b-search-ranking
-[참조 원본] ../ax_class_semiproject/backend/app/ingest/listing.py, services/reference_score.py, queries/{stock_search,home_volume_surge,home_attractiveness}.sql, api/{stocks,home,analysis}.py, tests/{test_listing,test_home_api}.py, docs/06 /stocks/search (읽기 전용)
+[참조 원본] ../ax_class_stockmind/backend/app/ingest/listing.py, services/reference_score.py, queries/{stock_search,home_volume_surge,home_attractiveness}.sql, api/{stocks,home,analysis}.py, tests/{test_listing,test_home_api}.py, docs/06 /stocks/search (읽기 전용)
 
 [담당 파일 — 이 순서대로]
 1. backend/app/ingest/listing.py + __main__.py [S6-B] listing — 국내·미국 상장 보통주 목록 동기화(coverage='listed'), corp_code 매핑, 상장폐지 비활성
@@ -89,7 +89,7 @@
 [이번 단계] Stage 6 — 홈 대시보드 개편. 원본 최종 홈 화면(docs/screenshots/01_home.png)의 기능(위젯 구성)을 갖추는 것이 목표다. 배치·디자인은 참고하되 A가 정해도 된다.
 [내 파트] 검색 컴포넌트 → 홈 레이아웃 2열 → 관심종목 컴팩트/카드 → 섹터 히트맵 → 시장 심리 지수 → 순위 탭 → 지수 카드 다듬기
 [브랜치] feat/s6-a-home-redesign
-[참조 원본] ../ax_class_semiproject/frontend/js/components/search.js, js/pages/home.js, index.html, css/pages.css, docs/screenshots/{01_home,06_mobile_home}.png (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
+[참조 원본] ../ax_class_stockmind/frontend/js/components/search.js, js/pages/home.js, index.html, css/pages.css, docs/screenshots/{01_home,06_mobile_home}.png (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S6-A] 구역: searchStocks·getHomeRanking·getSectors·getSentiment
@@ -130,6 +130,6 @@
 2. refresh에 섹터·심리 지수 연결(C 요청), sample.py export_sample, ingest/smoke.py
 2-1. B의 상장 목록(listing) 머지 후 benchmark 섹터 계층: `select_benchmark`·`classify_kr`·`classify_us`·`run_benchmark`의 sync_listing을 원본으로 교체(Stage 5에서 미룸 — 원본 선정이 listed를 후보로 씀) → benchmark --reselect → scores
 3. 문서: docs 01~09·ASSUMPTIONS·explain_result·smoke_test_result·07 테스트 결과서·08 최종 결과보고서, README, 스크린샷 재촬영
-4. 최종 확인: diff -r --exclude=.git ../ax_class_semiproject . → 차이 0(또는 문서 표현 차이만)
+4. 최종 확인: diff -r --exclude=.git ../ax_class_stockmind . → 차이 0(또는 문서 표현 차이만)
 5. 새 환경에서 README "5분 시작하기" 그대로 재현 → stage6 → main, 태그 v6.0
 ```

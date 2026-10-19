@@ -3,7 +3,8 @@
 Stage 1 테이블 10개 + Stage 2 테이블 4개(users·watchlist_items·portfolios·portfolio_items)
 + Stage 3 테이블 2개(financial_statements·disclosures)
 + Stage 4 테이블 4개(scoring_presets·scoring_weights·stock_metric_values·stock_scores)
-+ Stage 5-D 테이블 2개(data_freshness·fundamental_bases). 이후 단계 테이블은 D가 단계 시작 시 schema.sql과 함께 추가한다.
++ Stage 5-D 테이블 2개(data_freshness·fundamental_bases)
++ Stage 6 테이블 2개(sector_performance_daily·market_sentiment_daily).
 """
 from __future__ import annotations
 
@@ -49,7 +50,7 @@ class Stock(Base):
     sector: Mapped[str | None] = mapped_column(String(32))
     industry_checked_at: Mapped[datetime | None] = mapped_column()
     market: Mapped[Market] = relationship(lazy="joined")
-    __table_args__ = (UniqueConstraint("market_id", "ticker"), CheckConstraint("coverage IN ('featured','benchmark')"))
+    __table_args__ = (UniqueConstraint("market_id", "ticker"), CheckConstraint("coverage IN ('featured','benchmark','listed')"))
 
 
 class PeerGroup(Base):
@@ -92,6 +93,7 @@ class ValuationSnapshot(Base):
     market_cap: Mapped[Decimal | None] = mapped_column(Numeric(26, 0))
     shares_outstanding: Mapped[int | None] = mapped_column(BigInteger)
     source: Mapped[str] = mapped_column(String(20))
+    dps: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
 
 
 # ------------------------------------------------------------------ 지수·환율
@@ -296,3 +298,35 @@ class FundamentalBase(Base):
     dps_period_end: Mapped[date | None] = mapped_column(Date)
     source: Mapped[str] = mapped_column(String(20))
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+# ── [S6-D] 홈 위젯 ──
+class SectorPerformanceDaily(Base):
+    """섹터 히트맵 — 섹터별 전일 대비 등락률(캐시 성격). 가중치는 app/services/sectors.py 상수."""
+    __tablename__ = "sector_performance_daily"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    market: Mapped[str] = mapped_column(CHAR(2))
+    sector_code: Mapped[str] = mapped_column(String(16))
+    sector_name: Mapped[str] = mapped_column(String(40))
+    trade_date: Mapped[date] = mapped_column(Date)
+    change_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    fetched_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    __table_args__ = (UniqueConstraint("market", "sector_code", "trade_date"), CheckConstraint("market IN ('KR','US')"))
+
+
+class MarketSentimentDaily(Base):
+    """시장 심리 지수(StockMind 간이 계산) — 계산식은 app/services/sentiment.py, 버전은 formula_version."""
+    __tablename__ = "market_sentiment_daily"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    market: Mapped[str] = mapped_column(CHAR(2))
+    trade_date: Mapped[date] = mapped_column(Date)
+    score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    label: Mapped[str] = mapped_column(String(10))
+    price_position: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    ma_gap_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    rsi_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    vix_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    formula_version: Mapped[int] = mapped_column(SmallInteger)
+    computed_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    __table_args__ = (UniqueConstraint("market", "trade_date"), CheckConstraint("market IN ('KR','US')"),
+                      CheckConstraint("score BETWEEN 0 AND 100"))

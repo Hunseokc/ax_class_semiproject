@@ -57,6 +57,10 @@ class IndexOut(Schema):
     change: Num | None
     change_rate: Num | None
     sparkline: list[SparkPoint]              # 최근 1년 종가, 오래된 순 (일봉이 없으면 빈 목록)
+    high_52w: Num | None = None              # 52주 종가 최고·최저 — 1년치가 없으면 null
+    low_52w: Num | None = None
+    position_52w: Num | None = None          # (현재 − 저점) / (고점 − 저점), 0~1
+    session_status: Literal["today", "holiday", "previous_session"] | None = None   # 거래소 달력 기준 장 상태
 
 
 class IndicesOut(Schema):
@@ -81,6 +85,9 @@ class FxOut(Schema):
     change_rate: Num | None
     history: list[FxPointOut]                # 최근 1년 DAILY (오래된 순)
     as_of: datetime
+    high_52w: Num | None = None              # 52주 최고·최저(현재 값 포함) — 1년치가 없으면 null
+    low_52w: Num | None = None
+    position_52w: Num | None = None
 
 
 # ------------------------------------------------------------------ 종목
@@ -154,6 +161,8 @@ class StockDetailOut(Schema):
     preset: str
     groups: list[GroupRef]                   # 소속 경쟁 그룹(없으면 빈 목록)
     is_watched: bool
+    coverage: str
+    detail_status: str              # ready / loading(비교군 상세 데이터 받는 중) / failed
 
 
 class Candle(Schema):
@@ -500,3 +509,86 @@ class EqualWeightOut(Schema):
     fx_rate: Num | None
     fx_rate_at: datetime | None
     saved: bool = False              # 계산 전용 — 저장하려면 담기 API를 종목별로 호출
+
+
+# ── [S6] 검색·홈 위젯 ─────────────────────────────────────────────
+# 응답 모양은 원본 그대로 — 본문은 Stage 6 담당자(B: 검색·홈 순위, C: 섹터·심리 지수)
+class HomeRankItem(Schema):
+    rank: int
+    stock_id: int
+    market: str
+    country: str
+    currency: str
+    ticker: str
+    name: str
+    value: Num                               # 거래량 급증: 배수(2.4 = 2.4배) / 매력도: 점수(0~100)
+    as_of: date | None
+    is_watched: bool
+
+
+class HomeRankingOut(Schema):
+    kind: Literal["volume_surge", "attractiveness"]
+    country: str
+    preset: str | None                       # 매력도 순위일 때만
+    items: list[HomeRankItem]
+
+
+SessionStatus = Literal["today", "holiday", "previous_session"]
+
+
+class SectorTileOut(Schema):
+    code: str                                # 미국 섹터 ETF 티커 / KRX 섹터 지수 코드
+    name: str
+    weight: float                            # 타일 크기용 근사 비중(%) — 코드 상수
+    change_pct: Num | None                   # 전일 대비 %(1.23 = 1.23%), 그날 값이 없으면 null
+
+
+class SectorsOut(Schema):
+    country: Literal["KR", "US"]
+    available: bool                          # 저장된 값이 하나도 없으면 false('데이터 준비 중')
+    as_of: date | None
+    session_status: SessionStatus | None
+    fetched_at: datetime | None
+    sectors: list[SectorTileOut]
+
+
+class SentimentPointOut(Schema):
+    trade_date: date
+    score: Num
+    label: str
+
+
+class SentimentComponentsOut(Schema):
+    price_position: Num | None               # 52주 범위 안 위치
+    ma_gap_score: Num | None                 # 125일 이동평균 괴리
+    rsi_score: Num | None                    # RSI(14)
+    vix_score: Num | None                    # VIX(미국만)
+
+
+class SentimentOut(Schema):
+    market: Literal["KR", "US"]
+    index_code: str                          # 기준 지수 (KOSPI · SPX)
+    formula_version: int
+    as_of: date | None
+    session_status: SessionStatus | None
+    score: Num | None                        # 0~100, 높을수록 탐욕. 구성요소 2개 미만이면 null
+    label: str
+    components: SentimentComponentsOut
+    previous: SentimentPointOut | None       # 직전 거래일
+    week_ago: SentimentPointOut | None       # 5거래일 전
+
+
+class SearchItem(Schema):
+    stock_id: int
+    market: str
+    country: str
+    currency: str
+    ticker: str
+    name: str
+    name_en: str | None
+    coverage: str                    # featured / benchmark / listed(상장 종목 목록 — 열면 데이터를 받는다)
+
+
+class SearchOut(Schema):
+    q: str
+    items: list[SearchItem]

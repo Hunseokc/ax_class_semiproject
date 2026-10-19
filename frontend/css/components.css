@@ -54,6 +54,7 @@
 .badge--kr { background: rgba(255, 107, 107, .14); color: #ffb3b3; }
 .badge--us { background: rgba(94, 168, 255, .14); color: #b9d8ff; }
 .badge--sector { background: transparent; border: 1px solid var(--line); color: var(--text-2); }
+.row__sub .badge { padding: 0 6px; font-size: 10px; line-height: 16px; }   /* 행 부제(티커 옆) 시장 표기는 티커 글자 크기에 맞춰 작게 */
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);

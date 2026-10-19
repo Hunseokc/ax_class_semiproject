@@ -1,6 +1,6 @@
 """분석 API: 종목 수치 분석·매력도, 경쟁 그룹 비교·기준일=100 차트, DB 통계.
 
-Stage 5까지 뺀 것: 응답의 reference·reference_note(listed 참고 점수), metrics의 dps·dividend_yield.
+Stage 6-B: 응답의 reference·reference_note(listed 참고 점수), metrics의 dps·dividend_yield(배당).
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from app.queries import sql
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN, Num, Schema
 from app.core.config import get_settings
 from app.services.data_quality import data_quality
+from app.services.reference_score import reference_score
 from app.services.scoring import FACTORS, METRICS, default_preset
 
 router = APIRouter(prefix="/stocks", tags=["analysis"])
@@ -38,7 +39,7 @@ PEER_METRICS = ["return_1m", "return_3m", "return_1y", "per", "pbr", "roe", "ope
 METRIC_FIELDS = ["return_1w", "return_1m", "return_3m", "return_6m", "return_1y", "volatility_1y", "max_drawdown_1y",
                  "ma20", "ma60", "ma120", "ma120_gap", "high_52w", "low_52w", "position_52w", "volume",
                  "avg_volume_20d", "volume_ratio_20d", "per", "pbr", "eps", "bps", "market_cap", "market_cap_krw",
-                 "operating_margin", "roe", "debt_ratio", "revenue_yoy", "operating_income_yoy"]
+                 "operating_margin", "roe", "debt_ratio", "revenue_yoy", "operating_income_yoy", "dps", "dividend_yield"]
 
 
 # ------------------------------------------------------------------ 스키마 (Swagger 문서용)
@@ -92,6 +93,8 @@ class ScoreOut(Schema):
     data_quality: dict = {}
     method: str = SCORE_METHOD
     peer_average: PeerAverageOut | None = None   # 레이더 비교용 주 그룹 평균
+    reference: bool = False                      # 상장 목록 종목의 참고 점수(유니버스 밖)
+    reference_note: str | None = None
 
 
 class PresetOut(PresetRef):
@@ -230,7 +233,12 @@ def analysis(market: MarketPath, ticker: TickerPath, preset: dict = Depends(get_
     row = db.execute(sql("analysis"), {"stock_id": s["stock_id"], "preset_id": preset["preset_id"]}).mappings().first()
     if row is None:
         raise NotFound("시세가 없어 분석할 수 없습니다", code="NO_PRICE")
-    score = _attractiveness(db, s["stock_id"], s["country"], preset, row)
+    coverage = db.execute(text("SELECT coverage FROM stocks WHERE stock_id = :s"), {"s": s["stock_id"]}).scalar_one()
+    if coverage == "listed":
+        score = (reference_score(db.connection(), s["stock_id"], s["country"], preset)
+                 or {"preset": {k: preset[k] for k in ("code", "name", "description")}, "reference": True})
+    else:
+        score = _attractiveness(db, s["stock_id"], s["country"], preset, row)
     return {
         "market": s["market"], "ticker": s["ticker"], "currency": s["currency"], "as_of": row["as_of"],
         "valuation_as_of": row["valuation_as_of"], "fin_period_end": row["fin_period_end"],

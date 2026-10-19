@@ -14,6 +14,7 @@ from sqlalchemy import text
 from app.ingest import jobs
 from app.ingest.sectors import sector_for_krx, sector_for_sic
 from app.providers.base import ValuationBase
+from app.providers.sec import annual_dps
 from app.services import freshness
 from app.services.freshness import SEOUL, financials_valid_until
 from tests.conftest import D
@@ -91,16 +92,26 @@ def test_us_valuation_is_derived_from_base_and_close(engine):
         conn.execute(text("UPDATE stocks SET cik = '0000320193' WHERE stock_id = 3"))
     jobs.load_financials(engine, pv, stock_ids=[3])               # FY 순이익 9, 자본 100 (fake 최신 FY)
     with engine.connect() as conn:
-        v = conn.execute(text("""SELECT per, pbr, eps, bps, market_cap, source FROM valuation_snapshots
+        v = conn.execute(text("""SELECT per, pbr, eps, bps, market_cap, dps, source FROM valuation_snapshots
                                  WHERE stock_id = 3 AND as_of = :d"""), {"d": D}).mappings().one()
         base = conn.execute(text("SELECT shares_outstanding, dps FROM fundamental_bases WHERE stock_id = 3")).one()
     # 종가 200: EPS = 9/1000, PER = 200/0.009, BPS = 100/1000, PBR = 2000, 시총 = 200×1000
     assert v["source"] == "DERIVED" and v["eps"] == Decimal("0.009") and v["per"] == Decimal("22222.2222")
     assert v["bps"] == Decimal("0.1") and v["pbr"] == 2000 and v["market_cap"] == 200000
-    assert tuple(base) == (1000, 2)                               # 주당 배당은 기초값에 보관(화면 반영은 Stage 6)
+    assert tuple(base) == (1000, 2) and v["dps"] == 2             # 기초값의 주당 배당이 밸류에이션으로 옮겨진다
     calls = pv.us_valuation.count
     st = jobs.load_valuations(engine, pv, stock_ids=[3])          # 4시간 갱신 경로도 외부 호출 없이 계산
     assert st == {"AAPL": "SUCCESS"} and pv.us_valuation.count == calls
+
+
+def test_valuation_keeps_dividend_per_share(engine):
+    pv = make_providers()
+    jobs.load_valuations(engine, pv, stock_ids=[1], full=True)    # 종목별 경로: provider의 dps를 그대로 저장
+    with engine.connect() as conn:
+        latest = conn.execute(text("""SELECT dps FROM valuation_snapshots WHERE stock_id = 1
+                                      ORDER BY as_of DESC LIMIT 1""")).scalar()
+        row = conn.execute(text("SELECT dps, dividend_yield FROM v_stock_metrics WHERE stock_id = 1")).one()
+    assert latest == Decimal("1.5") and row.dps == Decimal("1.5") and row.dividend_yield is not None
 
 
 def test_kr_valuation_requests_only_confirmed_days(engine):
@@ -108,6 +119,26 @@ def test_kr_valuation_requests_only_confirmed_days(engine):
     jobs.load_valuations(engine, pv, stock_ids=[1], full=True)
     _, _, end = pv.kr_valuation.calls[-1]
     assert end <= jobs.last_closed_day("KR")                      # KRX 공표 전 당일(0 → 빈 행)은 요청하지 않는다
+
+
+def _dps(start, end, val, form="10-Q", filed="2026-08-01"):
+    return {"start": start, "end": end, "val": val, "form": form, "filed": filed}
+
+
+def test_annual_dps_prefers_fy_value_and_sums_four_quarters_otherwise():
+    today = date(2026, 10, 19)
+    quarters = [_dps("2025-09-29", "2025-12-31", 1.5, "10-K"), _dps("2026-01-01", "2026-04-05", 1.59),
+                _dps("2026-04-06", "2026-07-05", 1.59), _dps("2025-06-30", "2025-09-28", 1.5),
+                _dps("2026-01-01", "2026-07-05", 3.18),                       # 반기 누계는 분기가 아니다
+                _dps("2026-04-06", "2026-07-05", 1.59, filed="2026-07-30")]   # 같은 분기 이전 제출본
+    gaap = {"CommonStockDividendsPerShareDeclared": {"units": {"USD/shares": quarters}}}
+    assert annual_dps(gaap, today) == (Decimal("6.18"), date(2026, 7, 5))     # 분기만 신고(GD): 최근 4개 분기 합
+    gaap["CommonStockDividendsPerShareCashPaid"] = {"units": {"USD/shares": [
+        _dps("2025-01-01", "2025-12-31", 5.8, "10-K")]}}
+    assert annual_dps(gaap, today) == (Decimal("5.8"), date(2025, 12, 31))    # 1년치 값이 있으면 그 값
+    assert annual_dps({"CommonStockDividendsPerShareCashPaid": {"units": {"USD/shares": [   # 2009년에 끊긴 분기 값
+        _dps(f"2009-{m:02d}-01", f"2009-{m + 2:02d}-28", 0.3) for m in (1, 4, 7, 10) if m + 2 <= 12]}}}, today) == (None, None)
+    assert annual_dps({}, today) == (None, None)
 
 
 # ------------------------------------------------------------------ 섹터 매핑

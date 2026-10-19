@@ -5,14 +5,16 @@ pykrx 1.2.x는 시총·펀더멘털·지수 조회에 KRX 로그인이 필요하
 """
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 from app.core.config import export_krx_credentials
-from app.providers.base import Bar, Classification, IndexRef, StockRef, Valuation
+from app.providers.base import Bar, Classification, IndexRef, Listing, StockRef, Valuation
 from app.providers.convert import positive_or_none, to_dec, to_int
 from app.providers.http import Throttle, call_with_retry
 
 _throttle = Throttle(0.7)
+SPAC = re.compile(r"스팩")
 
 
 def _stock():
@@ -23,6 +25,11 @@ def _stock():
 
 def _ymd(d: date) -> str:
     return d.strftime("%Y%m%d")
+
+
+def is_common_kr(ticker: str, name: str) -> bool:
+    """보통주: 단축코드 끝자리 0(우선주는 5·7·9·K 등). 스팩(기업인수목적회사)은 제외."""
+    return len(ticker) == 6 and ticker.endswith("0") and not SPAC.search(name)
 
 
 def _bars(df, has_volume: bool) -> list[Bar]:
@@ -55,6 +62,19 @@ class KrxProvider:
             throttle=_throttle, what=f"pykrx index {index.code}")
         return _bars(df, has_volume=False)
 
+    def get_listed_stocks(self, as_of: date) -> list[Listing]:
+        """코스피·코스닥 보통주 목록. 종목명은 pykrx가 한 번 받아 둔 티커 표에서 찾는다."""
+        s = _stock()
+        out = []
+        for market in ("KOSPI", "KOSDAQ"):
+            tickers = call_with_retry(lambda: s.get_market_ticker_list(_ymd(as_of), market=market),
+                                      throttle=_throttle, what=f"pykrx ticker list {market}")
+            for t in tickers:
+                name = s.get_market_ticker_name(t)
+                if isinstance(name, str) and name and is_common_kr(t, name):
+                    out.append(Listing(market=market, ticker=t, name=name))
+        return out
+
     # ------------------------------------------------------------ 날짜별 전 종목 (호출 1회)
     def get_bars_by_date(self, day: date) -> dict[str, Bar]:
         """그날 전 종목 일봉(수정 전 가격) + 등락률. 휴장일은 빈 dict. 거래정지(시가 0·거래량 0)는 빼고 돌려준다."""
@@ -85,7 +105,8 @@ class KrxProvider:
                 as_of=day, per=positive_or_none(to_dec(r.get("PER"))), pbr=positive_or_none(to_dec(r.get("PBR"))),
                 eps=eps if eps not in (None, 0) else None, bps=bps if bps not in (None, 0) else None,
                 market_cap=to_dec(c.get("시가총액")) if c is not None else None,
-                shares_outstanding=to_int(c.get("상장주식수")) if c is not None else None)
+                shares_outstanding=to_int(c.get("상장주식수")) if c is not None else None,
+                dps=to_dec(r.get("DPS")))                       # 무배당은 0 (PER 등과 달리 유효한 값)
         return out
 
     # ── [S5-D] 업종 분류 ──
@@ -126,5 +147,6 @@ class KrxProvider:
                 bps=bps if bps not in (None, 0) else None,
                 market_cap=to_dec(c.get("시가총액")) if c is not None else None,
                 shares_outstanding=to_int(c.get("상장주식수")) if c is not None else None,
+                dps=to_dec(r.get("DPS")),                       # 무배당은 0 (PER 등과 달리 유효한 값)
             ))
         return out

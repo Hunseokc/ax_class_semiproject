@@ -83,9 +83,10 @@ def _csv_rows(name: str) -> int:
 
 
 def _counts(engine) -> dict[str, int]:
-    # ingestion_logs는 실행할 때마다 1행씩 쌓이는 것이 정상이라 비교에서 뺀다. 사용자 테이블(Stage 2)은 수집 대상이 아니라 뺀다
-    user_tables = {"users", "watchlist_items", "portfolios", "portfolio_items"}
-    return {t: scalar(engine, f"SELECT count(*) FROM {t}") for t in TABLES if t != "ingestion_logs" and t not in user_tables}
+    # ingestion_logs는 실행할 때마다 1행씩 쌓이는 것이 정상이라 비교에서 뺀다. 사용자 테이블(Stage 2)·홈 위젯 테이블(Stage 6)은
+    # 샘플 적재 대상이 아니라 뺀다
+    skip = {"users", "watchlist_items", "portfolios", "portfolio_items", "sector_performance_daily", "market_sentiment_daily"}
+    return {t: scalar(engine, f"SELECT count(*) FROM {t}") for t in TABLES if t != "ingestion_logs" and t not in skip}
 
 
 def test_sample_reload_is_idempotent(engine):

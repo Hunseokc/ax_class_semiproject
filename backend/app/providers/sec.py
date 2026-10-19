@@ -6,13 +6,14 @@ SEC 권고(초당 10건 이하)보다 보수적으로 초당 약 4건으로 제�
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime
 from decimal import Decimal
 
 import httpx
 
 from app.core.config import get_settings
-from app.providers.base import Disclosure, Financial, ProviderError, StockRef, ValuationBase
+from app.providers.base import Disclosure, Financial, Listing, ProviderError, StockRef, ValuationBase
 from app.providers.convert import to_dec
 from app.providers.http import Throttle, call_with_retry
 
@@ -34,6 +35,60 @@ CONCEPTS: list[tuple[str, tuple[str, ...], bool]] = [
     ("total_debt", ("Liabilities",), False),
 ]
 ANNUAL_FORMS = {"10-K", "10-K/A"}
+
+# 상장 보통주 목록 필터 (company_tickers_exchange.json)
+EXCHANGES = {"Nasdaq": "NASDAQ", "NYSE": "NYSE"}               # OTC·CBOE 등은 제외
+COMMON_TICKER = re.compile(r"^[A-Z]{1,5}(-[A-OQ-Z])?$")         # BRK-B·MOG-A 허용, 우선주(-P·-PA)·워런트(-WT)·유닛(-UN) 제외
+NASDAQ_5TH_NON_COMMON = set("MNOPQRTUVWXZ")                     # 나스닥 5번째 글자: 우선주·권리·유닛·워런트 등(L·Y·A·B는 보통주)
+NON_COMMON_NAME = re.compile(r"\bETF\b|\bETN\b|\bFUND\b|\bACQUISITION\b", re.I)   # ETF·펀드·스팩
+
+
+def is_common_us(ticker: str, name: str) -> bool:
+    if not COMMON_TICKER.match(ticker) or NON_COMMON_NAME.search(name):
+        return False
+    return not (len(ticker) == 5 and ticker[-1] in NASDAQ_5TH_NON_COMMON)
+
+
+DPS_CONCEPTS = ("CommonStockDividendsPerShareDeclared", "CommonStockDividendsPerShareCashPaid")
+
+
+def _days(e: dict) -> int:
+    return (date.fromisoformat(e["end"]) - date.fromisoformat(e["start"])).days
+
+
+def annual_dps(gaap: dict, today: date | None = None) -> tuple[Decimal | None, date | None]:
+    """최근 FY 주당 배당(선언 기준 우선) → (금액, 기간 끝).
+
+    1) 10-K의 1년(350~380일) 값. 2) 없으면 분기(85~100일)로만 신고하는 회사(GD·CRM 등):
+    겹치지 않게 이어지는 최근 4개 분기를 더한다. 4개 분기가 1년(350~380일)을 덮고, 마지막 분기가
+    400일 안이어야 한다(오래전에 끊긴 값을 지금 배당으로 쓰지 않는다)."""
+    today = today or date.today()
+    rows_of = {c: [e for e in gaap.get(c, {}).get("units", {}).get("USD/shares", []) if "start" in e and "val" in e]
+               for c in DPS_CONCEPTS}
+    for rows in rows_of.values():
+        annual = [e for e in rows if e.get("form") in ANNUAL_FORMS and 350 <= _days(e) <= 380]
+        if annual:
+            best = max(annual, key=lambda e: (e["end"], e.get("filed", "")))
+            return to_dec(best["val"], 4), date.fromisoformat(best["end"])
+    for rows in rows_of.values():
+        latest: dict[tuple[str, str], dict] = {}                   # 같은 분기가 10-Q·10-K에 거듭 나오면 최신 제출본
+        for e in rows:
+            if 85 <= _days(e) <= 100:
+                key = (e["start"], e["end"])
+                if key not in latest or e.get("filed", "") > latest[key].get("filed", ""):
+                    latest[key] = e
+        picked: list[dict] = []
+        for e in sorted(latest.values(), key=lambda e: e["end"], reverse=True):
+            if not picked or e["end"] < picked[-1]["start"]:
+                picked.append(e)
+            if len(picked) == 4:
+                break
+        if len(picked) < 4:
+            continue
+        end, start = date.fromisoformat(picked[0]["end"]), date.fromisoformat(picked[-1]["start"])
+        if 350 <= (end - start).days <= 380 and (today - end).days <= 400:
+            return to_dec(sum(Decimal(str(e["val"])) for e in picked), 4), end
+    return None, None
 
 
 class SecClient:
@@ -78,6 +133,20 @@ class SecClient:
             return r.json()
         return call_with_retry(call, throttle=_throttle, what=f"SEC frame {concept} {period}").get("data", [])
 
+    def get_listed_stocks(self, as_of: date) -> list[Listing]:
+        """NASDAQ·NYSE 보통주 목록(SEC 등록 회사, CIK 포함). as_of는 인터페이스 공통 인자(현재 목록만 제공)."""
+        d = self._json("https://www.sec.gov/files/company_tickers_exchange.json")
+        idx = {f: i for i, f in enumerate(d["fields"])}
+        out, seen = [], set()
+        for r in d["data"]:
+            ticker, name, ex = r[idx["ticker"]], r[idx["name"]], r[idx["exchange"]]
+            if ex not in EXCHANGES or not ticker or not name or ticker in seen or not is_common_us(ticker, name):
+                continue
+            seen.add(ticker)
+            out.append(Listing(market=EXCHANGES[ex], ticker=ticker, name=name, name_en=name,
+                               cik=str(r[idx["cik"]]).zfill(10)))
+        return out
+
     def get_shares_frame(self, as_of: date) -> dict[str, int]:
         """CIK → 발행주식수. 끝난 분기부터 3개 분기를 거슬러 가며 표지 기재값(dei)으로 채우고,
         dei가 없는 회사(주식 종류별로만 기재 — 예: Alphabet)는 재무상태표 발행주식수(us-gaap)로 채운다(호출 최대 6회)."""
@@ -116,16 +185,7 @@ class SecClient:
             if rows:
                 best = max(rows, key=lambda e: (e["end"], e.get("filed", "")))
                 shares, shares_as_of = int(best["val"]), date.fromisoformat(best["end"])
-        dps = dps_end = None
-        gaap = facts.get("us-gaap", {})
-        for concept in ("CommonStockDividendsPerShareDeclared", "CommonStockDividendsPerShareCashPaid"):
-            rows = [e for e in gaap.get(concept, {}).get("units", {}).get("USD/shares", [])
-                    if e.get("form") in ANNUAL_FORMS and "start" in e
-                    and 350 <= (date.fromisoformat(e["end"]) - date.fromisoformat(e["start"])).days <= 380]
-            if rows:
-                best = max(rows, key=lambda e: (e["end"], e.get("filed", "")))
-                dps, dps_end = to_dec(best.get("val"), 4), date.fromisoformat(best["end"])
-                break
+        dps, dps_end = annual_dps(facts.get("us-gaap", {}))
         return ValuationBase(shares_outstanding=shares if shares and shares > 0 else None, shares_as_of=shares_as_of,
                              dps=dps if dps is None or dps >= 0 else None, dps_period_end=dps_end)
 

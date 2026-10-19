@@ -1,7 +1,8 @@
 """테스트용 fake provider. 외부 호출 대신 고정 데이터를 돌려주고 호출 횟수·인자를 기록한다.
 
 Stage 5-D: 업종 분류(FakeKrBulk classifications)·미국 기초값(FakeReference).
-이후 단계: 비교군 시가총액(caps·get_market_caps)·상장 목록(FakeListing)·배당(dps)은 Stage 6.
+Stage 6-B: 상장 목록(FakeListing)·DART 고유번호 일괄 매핑(FakeFinancial.corp_codes).
+이후 단계: 비교군 시가총액(caps·get_market_caps)·배당(dps)은 Stage 6-D.
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from app.providers.base import (Bar, Classification, Disclosure, Financial, FxPoint, IndexRef, StockRef, Valuation,
+from app.providers.base import (Bar, Classification, Disclosure, Financial, FxPoint, IndexRef, Listing, StockRef, Valuation,
                                 ValuationBase)
 from app.providers.factory import Providers
 
@@ -82,7 +83,7 @@ class FakeValuation(CallLog):
     def get_valuations(self, stock: StockRef, start: date, end: date) -> list[Valuation]:
         self.record(stock.ticker, start, end)
         return [Valuation(as_of=min(end, date.today() - SAFE_LAG), per=Decimal(10), pbr=Decimal(1), market_cap=Decimal(10**12),
-                          shares_outstanding=10**9)]
+                          shares_outstanding=10**9, dps=Decimal("1.5"))]
 
 
 class FakeFinancial(CallLog):
@@ -99,6 +100,10 @@ class FakeFinancial(CallLog):
                           net_income=Decimal(8 + i), total_assets=Decimal(300), total_equity=Decimal(100),
                           total_debt=Decimal(50), data_source=self.source) for i, yy in enumerate((y - 1, y))]
 
+    # ── [S6-B] 고유번호 일괄 매핑(상장 목록 동기화) ──
+    def corp_codes(self, codes: set[str]) -> dict[str, str]:
+        return {c: f"C{c}" for c in codes}
+
 
 class FakeDisclosure(CallLog):
     def __init__(self, source: str):
@@ -109,6 +114,19 @@ class FakeDisclosure(CallLog):
         self.record(stock.ticker, start, end)
         return [Disclosure(rcept_no=f"{stock.ticker}-1", title="사업보고서", report_type="정기공시",
                            filed_at=datetime.now(timezone.utc) - timedelta(days=30), url=None)]   # 재무를 받기 전에 낸 보고서
+
+
+# ── [S6-B] 상장 목록 ──
+class FakeListing(CallLog):
+    """상장 보통주 목록. items를 바꿔 가며 동기화(추가·이전 상장·상장폐지)를 흉내 낸다."""
+
+    def __init__(self, source: str, items: list[Listing]):
+        super().__init__()
+        self.source, self.items = source, items
+
+    def get_listed_stocks(self, as_of: date) -> list[Listing]:
+        self.record(as_of)
+        return list(self.items)
 
 
 class FakeKrBulk(CallLog):
@@ -140,7 +158,7 @@ class FakeKrBulk(CallLog):
         if day.weekday() >= 5:
             return {}
         return {t: Valuation(as_of=day, per=Decimal(10), pbr=Decimal(1), eps=Decimal(10), bps=Decimal(100),
-                             shares_outstanding=10**6) for t in self.tickers}
+                             shares_outstanding=10**6, dps=Decimal(0)) for t in self.tickers}   # 무배당 = 0
 
 
 class FakeUsBatch(CallLog):

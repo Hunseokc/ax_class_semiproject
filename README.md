@@ -174,7 +174,7 @@ docker compose run --rm api pytest -q
 ## 폴더 구조
 
 ```
-ax_stockmind/
+ax_class_semiproject/
 ├─ backend/
 │  ├─ app/
 │  │  ├─ api/          라우터 (market, stocks, watchlist, portfolios, health)
@@ -191,7 +191,7 @@ ax_stockmind/
 │  └─ tests/
 ├─ frontend/           index · stocks · stock · portfolio 화면, css/, js/
 ├─ docs/               기획서·요구사항·데이터 조사·도메인 모델·ERD·API 정의서·트러블슈팅
-└─ team/               팀 작업 가이드·역할 분담·로드맵·단계별 프롬프트
+└─ team/               팀 작업 가이드·역할 분담·로드맵·단계별 프롬프트·추가 기능 아이디어
 ```
 
 ## 문서
@@ -218,7 +218,7 @@ ax_stockmind/
 | Stage 5 | 고도화 — 메모·목표가·통계 확장 | ✅ v5.0 |
 | Stage 6 | 홈 대시보드 개편·상단 검색·최종 문서 | |
 
-팀 작업 방식(브랜치·PR 규칙, Claude Code 사용법)은 [team/00_팀_작업_가이드.md](team/00_팀_작업_가이드.md)를 보세요.
+팀 작업 방식(브랜치·PR 규칙, Claude Code 사용법)은 [team/00_팀_작업_가이드.md](team/00_팀_작업_가이드.md)를 보세요. Stage 6 이후 추가 기능 아이디어(시장 컨디션 점수·데이터 수집 확장)는 [team/04_기능구현_아이디어.md](team/04_기능구현_아이디어.md)에 모아 두었습니다.
 
 ## 데이터 이용 조건
 

@@ -267,7 +267,8 @@ def test_indices(client):
     assert kospi["change_rate"] == pytest.approx(0.003984)           # 10 / 2510
     assert kospi["sparkline"] == [{"date": d.isoformat(), "close": 2500 + i * 10} for i, d in enumerate(DAYS)]
     assert set(kospi) == {"code", "name", "country", "currency", "as_of", "close", "prev_close", "change",
-                          "change_rate", "sparkline"}                # 52주 범위·장 상태는 Stage 1에 없다
+                          "change_rate", "sparkline",
+                          "high_52w", "low_52w", "position_52w", "session_status"}
 
 
 def test_index_without_prices_keeps_card(client, engine):
@@ -306,7 +307,7 @@ def test_fx_change_uses_previous_daily(client, engine):
     assert [h["date"] for h in b["history"]] == [d.isoformat() for d in DAYS]       # DAILY 3개, 오래된 순
     assert b["pair"] == "USD/KRW" and b["currency"] == "KRW" and b["fx_stale"] is False
     assert set(b) == {"pair", "currency", "usd_krw", "rate_at", "granularity", "fx_stale", "prev_close", "change",
-                      "change_rate", "history", "as_of"}
+                      "change_rate", "history", "as_of", "high_52w", "low_52w", "position_52w"}
 
 
 def test_fx_same_day_daily_is_not_the_comparison(client, engine, fake_fx):

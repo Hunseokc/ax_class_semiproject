@@ -1,4 +1,4 @@
-"""종목 조회 API: 리스트, 상세, 캔들, 재무, 공시, 경쟁 그룹 목록. (검색은 이후 단계)"""
+"""종목 조회 API: 리스트, 상세, 캔들, 재무, 공시, 경쟁 그룹 목록, 상단 검색."""
 from __future__ import annotations
 
 from typing import Literal
@@ -7,10 +7,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, get_preset, resolve_stock
+from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, get_hydrator, get_preset, resolve_stock
 from app.core.errors import NotFound, Unprocessable
 from app.queries import raw, sql
-from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, StockDetailOut, StockListOut
+from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, SearchOut, StockDetailOut, StockListOut
+from app.services.hydration import Hydrator
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -46,9 +47,26 @@ def list_stocks(
             "preset": preset["code"], "fx_rate_at": fx_at, "items": [dict(r) for r in rows]}
 
 
+# ── [S6-B] 상단 검색 ──
+def like_escape(q: str) -> str:
+    """LIKE 특수문자를 글자 그대로 찾도록 이스케이프(PostgreSQL 기본 ESCAPE는 백슬래시)."""
+    return q.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+
+
+@router.get("/search", response_model=SearchOut, summary="상단 검색 자동완성 (상장 보통주 전체 · 이름·영문명·티커)")
+def search_stocks(q: str = Query(min_length=1, max_length=50, description="이름·영문명·티커 일부"),
+                  limit: int = Query(8, ge=1, le=20), db: Session = Depends(get_db)):
+    q = q.strip()
+    if not q:
+        return {"q": q, "items": []}
+    rows = db.execute(sql("stock_search"), {"q": like_escape(q), "limit": limit}).mappings().all()
+    return {"q": q, "items": [dict(r) for r in rows]}
+
+
 @router.get("/{market}/{ticker}", response_model=StockDetailOut, summary="종목 기본 정보 + 최신 시세·밸류에이션")
 def stock_detail(market: MarketPath, ticker: TickerPath, user_id: int = Depends(get_current_user_id),
-                 preset: dict = Depends(get_preset), db: Session = Depends(get_db)):
+                 preset: dict = Depends(get_preset), db: Session = Depends(get_db),
+                 hydrator: Hydrator = Depends(get_hydrator)):
     row = db.execute(sql("stock_detail"), {"market": market.upper(), "ticker": ticker.upper(),
                                            "user_id": user_id, "preset": preset["code"]}).mappings().first()
     if row is None:
@@ -56,6 +74,8 @@ def stock_detail(market: MarketPath, ticker: TickerPath, user_id: int = Depends(
     out = dict(row)
     out["groups"] = out["groups"] or []
     out["preset"] = preset["code"]
+    # 매력도 비교군 종목은 상세를 열 때 공시·2년 일봉·5개년 재무를 받는다(백그라운드)
+    out["detail_status"] = hydrator.request(out["stock_id"], out["coverage"], out.pop("detail_synced_at"))
     out["fx_stale"] = False          # Stage 1은 DB 값만 읽는다. TTL 외부 호출(FxService)은 Stage 2에서 교체
     return out
 

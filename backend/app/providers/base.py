@@ -6,7 +6,7 @@
 Stage 1은 일봉·지수·환율만 둔다. 밸류에이션·재무·공시·대량 조회 인터페이스는 Stage 3에서 추가했다.
 Bar·FxPoint는 Stage 2에서 preprocess.py로부터 이곳으로 옮겼다(서비스·provider가 전처리 모듈에 기대지 않도록).
 Stage 5-D: 업종 분류(Classification)·미국 기초값(ValuationBase)과 ReferenceDataProvider.
-이후 단계: 배당(Valuation.dps)·상장 목록(Listing·ListingProvider)은 Stage 6.
+Stage 6-B: 배당(Valuation.dps)·상장 목록(Listing·ListingProvider).
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from typing import Protocol
 __all__ = ["Bar", "FxPoint", "Valuation", "Financial", "Disclosure", "StockRef", "IndexRef",
            "PriceProvider", "IndexProvider", "FxProvider", "ValuationProvider", "FinancialProvider",
            "DisclosureProvider", "MarketBulkProvider", "BatchPriceProvider", "ProviderError",
-           "Classification", "ValuationBase", "ReferenceDataProvider"]
+           "Classification", "ValuationBase", "ReferenceDataProvider", "Listing", "ListingProvider"]
 
 
 # ------------------------------------------------------------------ 레코드
@@ -49,6 +49,7 @@ class Valuation:
     bps: Decimal | None = None
     market_cap: Decimal | None = None
     shares_outstanding: int | None = None
+    dps: Decimal | None = None       # 주당배당금(연간). 0 = 무배당, None = 미제공
 
 
 @dataclass
@@ -91,6 +92,17 @@ class Disclosure:
     report_type: str | None
     filed_at: datetime
     url: str | None
+
+
+# ── [S6-B] 상장 목록 레코드 ──
+@dataclass(frozen=True)
+class Listing:
+    """상장 보통주 목록 1행 (검색용 마스터). 상세 데이터는 종목을 열 때 받는다."""
+    market: str                      # markets.code
+    ticker: str
+    name: str
+    name_en: str | None = None
+    cik: str | None = None           # US: SEC 목록에 함께 온다
 
 
 @dataclass(frozen=True)
@@ -170,6 +182,12 @@ class ReferenceDataProvider(Protocol):
     def get_shares_frame(self, as_of: date) -> dict[str, int]: ...
     def get_sic(self, cik: str) -> tuple[int | None, str | None]: ...
     def get_valuation_base(self, stock: StockRef) -> ValuationBase: ...
+
+
+# ── [S6-B] 상장 목록 ──
+class ListingProvider(Protocol):
+    source: str
+    def get_listed_stocks(self, as_of: date) -> list[Listing]: ...
 
 
 class ProviderError(Exception):
