@@ -37,6 +37,21 @@ def test_first_refresh_runs_every_job_once(engine):
     assert call_counts(p) == EXPECTED_ONE_RUN
 
 
+def test_indices_job_stores_market_sentiment_for_both_markets(engine, monkeypatch):
+    called = []
+    monkeypatch.setattr("app.services.sentiment.ensure_sentiment", lambda eng, market, now=None: called.append(market))
+    service(engine, make_providers()).refresh()
+    assert sorted(called) == ["KR", "US"]                            # 홈을 열지 않아도 지수 갱신 뒤 시장 심리를 저장
+
+
+def test_sentiment_failure_does_not_fail_indices_job(engine, monkeypatch):
+    def boom(eng, market, now=None):
+        raise RuntimeError("심리 계산 실패")
+    monkeypatch.setattr("app.services.sentiment.ensure_sentiment", boom)
+    result = service(engine, make_providers()).refresh()
+    assert {j.job_type: j.status for j in result.jobs}["INDICES"] == "SUCCESS"
+
+
 def test_refresh_within_ttl_makes_no_external_calls(engine):
     p = make_providers()
     svc = service(engine, p)

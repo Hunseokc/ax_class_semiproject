@@ -10,11 +10,12 @@ from decimal import Decimal
 
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Engine, text
+from sqlalchemy import Connection, Engine, text
 
 from app.core.config import ROOT_DIR
 from app.ingest.preprocess import Quarantined, clean_bars, clean_fx
-from app.ingest.store import DART_LOCK_KEY, advisory_lock, job_log, upsert
+from app.ingest.store import (LOCK_WAIT_NOTE_SECONDS, BatchWriter, LockSession, Unit, default_flush_every, error_text,
+                              job_log, provider_lock_key, upsert)
 from app.ingest.universe import index_refs, load_universe, stock_refs
 from app.providers.base import Financial, ProviderError, StockRef
 from app.providers.factory import Providers
@@ -572,103 +573,132 @@ def merge_supplement(primary: list[Financial], supplement: list[Financial], tole
 
 
 def load_financials(engine: Engine, providers: Providers, *, years: int = FIN_YEARS,
-                    tickers: list[str] | None = None, stock_ids: list[int] | None = None) -> dict[str, str]:
-    """FY 재무 years개년 — 국내 DART, 미국 SEC(+yfinance 보완)."""
+                    tickers: list[str] | None = None, stock_ids: list[int] | None = None,
+                    flush_every: int | None = None) -> dict[str, str]:
+    """FY 재무 years개년 — 국내 DART, 미국 SEC(+yfinance 보완). 잠금은 회사 단위, 저장은 flush_every개 회사씩 묶음."""
     with engine.connect() as conn:
         refs = stock_refs(conn, tickers, stock_ids=stock_ids)
-    with advisory_lock(engine, DART_LOCK_KEY):
-        return _load_financials(engine, providers, refs, years)
+    return _load_financials(engine, providers, refs, years, flush_every or default_flush_every())
 
 
-def _load_financials(engine: Engine, providers: Providers, refs: list, years: int) -> dict[str, str]:
-    statuses = {}
-    for ref in refs:
-        p = providers.financial(ref.country)
-        source = p.source if p else ("DART" if ref.country == "KR" else "SEC")
-        with job_log(engine, source=source, job_type="FINANCIALS", stock_id=ref.stock_id, label=ref.ticker) as res:
-            if p is None:
-                raise ProviderError(f"{source} 설정 없음(API 키/User-Agent)")
-            if ref.country == "KR" and not ref.corp_code or ref.country == "US" and not ref.cik:
-                raise ProviderError("corp_code/CIK 미매핑 — master 먼저 실행")
-            fins = p.get_annual_financials(ref, years)
-            if ref.country == "US" and providers.us_financial_supplement:
-                try:
-                    fins = merge_supplement(fins, providers.us_financial_supplement.get_annual_financials(ref, years))
-                except ProviderError as e:
-                    res.notes.append(f"yfinance 보완 실패: {e}")
-                fins = fins[-years:]
-            with engine.begin() as conn:
-                res.rows = upsert(conn, "financial_statements", [
-                    {"stock_id": ref.stock_id, "period_end": f.period_end, "period_type": f.period_type,
-                     **{k: getattr(f, k) for k in FIN_FIELDS},
-                     "data_source": f.data_source, "accounting_std": f.accounting_std} for f in fins],
-                    ["stock_id", "period_end", "period_type"])
-            for f in fins:
-                missing = [k for k in FIN_FIELDS if getattr(f, k) is None]
-                if f.notes or missing:
-                    res.notes.append(f"{f.period_end.year}: " + ", ".join(f.notes + [f"{m} 없음" for m in missing]))
-            if len(fins) < years:
-                res.notes.append(f"FY {len(fins)}/{years}개")
-            if ref.country == "US" and ref.cik and providers.us_reference is not None:
-                _load_valuation_base(engine, providers, ref, res.notes)
-        # ── [S5-D] 재무 유효기간 ──
-        with engine.begin() as conn:
-            until = freshness.mark(conn, "financials", ref.stock_id, res.status == "SUCCESS", country=ref.country,
-                                   error=None if res.status == "SUCCESS" else "재무 수집 실패")
-        log.debug("재무 유효기간 %s → %s", ref.ticker, until)
-        statuses[ref.ticker] = res.status
-    return statuses
+def _load_financials(engine: Engine, providers: Providers, refs: list, years: int, flush_every: int) -> dict[str, str]:
+    def on_flush(units: list[Unit]) -> None:          # 미국: 기초값 저장 뒤 기초값 × 종가 밸류에이션
+        ids = [u.stock_id for u in units if any(t == "fundamental_bases" for t, _, _ in u.writes)]
+        if ids:
+            derive_us_valuations(engine, ids)
+
+    writer = BatchWriter(engine, flush_every, on_flush=on_flush)
+    with LockSession(engine) as locks:
+        try:
+            for ref in refs:
+                writer.add(_fetch_financials(providers, locks, ref, years))
+        finally:
+            writer.flush()
+    return {u.label: u.status for u in writer.done}
 
 
-def _load_valuation_base(engine: Engine, providers: Providers, ref: StockRef, notes: list[str]) -> None:
-    """미국 기초값(발행주식수·주당 배당)을 재무와 같은 SEC 응답에서 꺼내 저장하고, 기초값 × 종가 밸류에이션을 만든다."""
+def _fetch_financials(providers: Providers, locks: LockSession, ref: StockRef, years: int) -> Unit:
+    """회사 1개 재무를 받아 저장할 행을 만든다(DB 쓰기 없음). 실패는 Unit.error에 남기고 예외를 올리지 않는다."""
+    p = providers.financial(ref.country)
+    source = p.source if p else ("DART" if ref.country == "KR" else "SEC")
+    u = Unit(source=source, job_type="FINANCIALS", stock_id=ref.stock_id, label=ref.ticker, country=ref.country,
+             kind="financials", started_at=datetime.now(timezone.utc))
     try:
-        base = providers.us_reference.get_valuation_base(ref)
-    except ProviderError as e:
-        notes.append(f"기초값 실패: {e}")
-        return
-    if base.shares_outstanding is None and base.dps is None:
-        notes.append("기초값 없음")
-        return
-    with engine.begin() as conn:
-        upsert(conn, "fundamental_bases", [{
-            "stock_id": ref.stock_id, "shares_outstanding": base.shares_outstanding, "shares_as_of": base.shares_as_of,
-            "dps": base.dps, "dps_period_end": base.dps_period_end, "source": providers.us_reference.source,
-            "updated_at": datetime.now(timezone.utc)}], ["stock_id"])
-    derive_us_valuations(engine, [ref.stock_id])
+        if p is None:
+            raise ProviderError(f"{source} 설정 없음(API 키/User-Agent)")
+        if ref.country == "KR" and not ref.corp_code or ref.country == "US" and not ref.cik:
+            raise ProviderError("corp_code/CIK 미매핑 — master 먼저 실행")
+        base = None
+        with locks.hold(provider_lock_key(ref.country)) as waited:     # DART·SEC를 부르는 구간만
+            fins = p.get_annual_financials(ref, years)
+            # 미국 기초값(발행주식수·주당 배당)은 재무와 같은 SEC 응답에서 꺼낸다
+            if ref.country == "US" and ref.cik and providers.us_reference is not None:
+                try:
+                    base = providers.us_reference.get_valuation_base(ref)
+                except ProviderError as e:
+                    u.notes.append(f"기초값 실패: {e}")
+        if waited >= LOCK_WAIT_NOTE_SECONDS:
+            u.notes.append(f"잠금 대기 {waited:.1f}초")
+        if ref.country == "US" and providers.us_financial_supplement:     # yfinance 보완은 잠금 밖
+            try:
+                fins = merge_supplement(fins, providers.us_financial_supplement.get_annual_financials(ref, years))
+            except ProviderError as e:
+                u.notes.append(f"yfinance 보완 실패: {e}")
+            fins = fins[-years:]
+        rows = [{"stock_id": ref.stock_id, "period_end": f.period_end, "period_type": f.period_type,
+                 **{k: getattr(f, k) for k in FIN_FIELDS},
+                 "data_source": f.data_source, "accounting_std": f.accounting_std} for f in fins]
+        u.writes.append(("financial_statements", rows, ["stock_id", "period_end", "period_type"]))
+        u.rows = len(rows)
+        for f in fins:
+            missing = [k for k in FIN_FIELDS if getattr(f, k) is None]
+            if f.notes or missing:
+                u.notes.append(f"{f.period_end.year}: " + ", ".join(f.notes + [f"{m} 없음" for m in missing]))
+        if len(fins) < years:
+            u.notes.append(f"FY {len(fins)}/{years}개")
+        if base is not None:
+            if base.shares_outstanding is None and base.dps is None:
+                u.notes.append("기초값 없음")
+            else:
+                u.writes.append(("fundamental_bases", [{
+                    "stock_id": ref.stock_id, "shares_outstanding": base.shares_outstanding,
+                    "shares_as_of": base.shares_as_of, "dps": base.dps, "dps_period_end": base.dps_period_end,
+                    "source": providers.us_reference.source, "updated_at": datetime.now(timezone.utc)}], ["stock_id"]))
+    except Exception as e:  # noqa: BLE001 — 회사 하나 실패는 기록하고 다음 회사로
+        u.error = error_text(e)
+        log.error("FINANCIALS %s 실패: %s", ref.ticker, u.error)
+    return u
 
 
 def load_disclosures(engine: Engine, providers: Providers, *, days: int = DISCLOSURE_DAYS,
                      tickers: list[str] | None = None, today: date | None = None,
-                     stock_ids: list[int] | None = None) -> dict[str, str]:
-    """최근 days일 공시 — 국내 DART, 미국 SEC."""
+                     stock_ids: list[int] | None = None, flush_every: int | None = None) -> dict[str, str]:
+    """최근 days일 공시 — 국내 DART, 미국 SEC. 잠금은 회사 단위, 저장은 묶음."""
     today = today or date.today()
     with engine.connect() as conn:
         refs = stock_refs(conn, tickers, stock_ids=stock_ids)
-    with advisory_lock(engine, DART_LOCK_KEY):
-        return _load_disclosures(engine, providers, refs, days, today)
+    return _load_disclosures(engine, providers, refs, days, today, flush_every or default_flush_every())
 
 
-def _load_disclosures(engine: Engine, providers: Providers, refs: list, days: int, today: date) -> dict[str, str]:
-    statuses = {}
-    for ref in refs:
-        p = providers.disclosure(ref.country)
-        source = p.source if p else ("DART" if ref.country == "KR" else "SEC")
-        with job_log(engine, source=source, job_type="DISCLOSURES", stock_id=ref.stock_id, label=ref.ticker) as res:
-            if p is None:
-                raise ProviderError(f"{source} 설정 없음(API 키/User-Agent)")
+def _load_disclosures(engine: Engine, providers: Providers, refs: list, days: int, today: date,
+                      flush_every: int) -> dict[str, str]:
+    writer = BatchWriter(engine, flush_every)
+    with LockSession(engine) as locks:
+        try:
+            for ref in refs:
+                writer.add(_fetch_disclosures(providers, locks, ref, days, today))
+        finally:
+            writer.flush()
+    return {u.label: u.status for u in writer.done}
+
+
+def _expire_fin_on_annual_report(conn: Connection, u: Unit) -> None:
+    # ── [S5-D] 받아 둔 재무 뒤에 사업보고서·10-K가 새로 올라왔으면 재무 유효기간을 바로 끝낸다 ──
+    if freshness.invalidate_on_annual_report(conn, u.stock_id):
+        u.notes.append("새 사업보고서 → 재무 유효기간 만료")
+
+
+def _fetch_disclosures(providers: Providers, locks: LockSession, ref: StockRef, days: int, today: date) -> Unit:
+    p = providers.disclosure(ref.country)
+    source = p.source if p else ("DART" if ref.country == "KR" else "SEC")
+    u = Unit(source=source, job_type="DISCLOSURES", stock_id=ref.stock_id, label=ref.ticker, country=ref.country,
+             kind="disclosures", started_at=datetime.now(timezone.utc))
+    try:
+        if p is None:
+            raise ProviderError(f"{source} 설정 없음(API 키/User-Agent)")
+        with locks.hold(provider_lock_key(ref.country)) as waited:
             items = p.get_disclosures(ref, today - timedelta(days=days), today)
-            with engine.begin() as conn:
-                res.rows = upsert(conn, "disclosures", [
-                    {"stock_id": ref.stock_id, "rcept_no": d.rcept_no, "title": d.title, "report_type": d.report_type,
-                     "filed_at": d.filed_at, "url": d.url, "data_source": source} for d in items], ["rcept_no"])
-                # ── [S5-D] 받아 둔 재무 뒤에 사업보고서·10-K가 새로 올라왔으면 재무 유효기간을 바로 끝낸다 ──
-                if freshness.invalidate_on_annual_report(conn, ref.stock_id):
-                    res.notes.append("새 사업보고서 → 재무 유효기간 만료")
-        with engine.begin() as conn:
-            freshness.mark(conn, "disclosures", ref.stock_id, res.status == "SUCCESS")
-        statuses[ref.ticker] = res.status
-    return statuses
+        if waited >= LOCK_WAIT_NOTE_SECONDS:
+            u.notes.append(f"잠금 대기 {waited:.1f}초")
+        rows = [{"stock_id": ref.stock_id, "rcept_no": d.rcept_no, "title": d.title, "report_type": d.report_type,
+                 "filed_at": d.filed_at, "url": d.url, "data_source": source} for d in items]
+        u.writes.append(("disclosures", rows, ["rcept_no"]))
+        u.rows = len(rows)
+        u.after.append(_expire_fin_on_annual_report)
+    except Exception as e:  # noqa: BLE001
+        u.error = error_text(e)
+        log.error("DISCLOSURES %s 실패: %s", ref.ticker, u.error)
+    return u
 
 
 # ---------------------------------------------------------------- 데모 사용자

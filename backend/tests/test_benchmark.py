@@ -176,3 +176,25 @@ def test_migration_003_is_idempotent(engine):
         check = conn.execute(text("""SELECT pg_get_constraintdef(oid) FROM pg_constraint
                                      WHERE conname = 'ingestion_logs_job_type_check'""")).scalar()
     assert {"coverage", "detail_synced_at"} <= cols and "BENCHMARK" in check and "HYDRATE" in check
+
+
+# ------------------------------------------------------------------ 업종 섹터 분류 (시장·섹터 점수의 섹터 흐름 표본)
+def test_classify_sectors_maps_krx_industry_and_sic(engine):
+    from dataclasses import replace
+
+    from app.providers.base import Classification
+    from tests.fakes import FakeKrBulk, FakeReference
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE stocks SET cik = '0000320193' WHERE stock_id = 3"))
+        conn.execute(text("UPDATE stocks SET cik = '0001045810', industry_checked_at = now() WHERE stock_id = 4"))  # 최근 확인 → 건너뜀
+    ref = FakeReference(sic={"0000320193": 3571})
+    pv = replace(make_providers(), us_reference=ref,
+                 kr_bulk=FakeKrBulk([Classification("005930", "전기·전자", None), Classification("000660", "금융", None)]))
+    notes: list[str] = []
+    benchmark.classify_sectors(engine, pv, date.today(), notes)
+    with engine.connect() as conn:
+        rows = {r.stock_id: (r.industry, r.sector, r.sic) for r in conn.execute(text("SELECT stock_id, industry, sector, sic FROM stocks"))}
+    assert rows[1] == ("전기·전자", "반도체·전자", None)
+    assert rows[2] == ("금융", None, None)                               # 매핑 없는 업종(금융)은 섹터 NULL
+    assert rows[3][1:] == ("반도체·전자", 3571) and rows[4][1] is None
+    assert ref.count == 1 and notes == ["업종 섹터: 국내 2 · 미국 SIC 1"]

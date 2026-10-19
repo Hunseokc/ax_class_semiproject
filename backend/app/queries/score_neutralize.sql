@@ -4,8 +4,9 @@
 --   n = 같은 국가의 주 그룹 구성원 중 그 지표의 z가 있는 종목 수. 그룹 평균에는 자기 자신도 포함된다
 --   z는 국가 안에서 표준화한 값이라, 다른 국가 구성원의 z와 섞어 평균 내지 않는다
 --   주 그룹이 없거나 n = 1이면 z_adj = z. z_adj는 다시 자르지 않는다
+--   안정성(safety) 지표는 중립화하지 않는다(z_adj = z) — 업종 특성으로 출렁이는 것도 그대로 반영 (docs/09 4절)
 WITH g AS (
-    SELECT mv.stock_id, mv.metric, mv.z_raw, gm.group_id, mk.country
+    SELECT mv.stock_id, mv.metric, mv.factor, mv.z_raw, gm.group_id, mk.country
     FROM stock_metric_values mv
     JOIN stocks s   ON s.stock_id = mv.stock_id
     JOIN markets mk ON mk.market_id = s.market_id
@@ -19,7 +20,7 @@ s AS (
     FROM g
 )
 UPDATE stock_metric_values t
-SET z_adj = CASE WHEN s.group_id IS NULL OR s.n = 1 THEN s.z_raw
+SET z_adj = CASE WHEN s.factor = 'safety' OR s.group_id IS NULL OR s.n = 1 THEN s.z_raw
                  ELSE s.z_raw - CAST(s.n AS numeric) / (s.n + :k) * s.group_mean END
 FROM s
 WHERE t.as_of = :as_of AND t.stock_id = s.stock_id AND t.metric = s.metric

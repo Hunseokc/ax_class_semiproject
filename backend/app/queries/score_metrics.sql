@@ -1,11 +1,14 @@
 -- 매력도 1단계: 종목별 지표 원값 (기준: 종목별 최신 거래일 종가·최신 밸류에이션·최신 FY 재무)
--- 대상: 활성 종목 전체 (비교군·상장 목록 구분(coverage)과 단일 종목 참고 점수(stock_id 파라미터)는 Stage 4-D·6)
+-- 대상: 파라미터 stock_id가 NULL이면 매력도 유니버스(활성 노출 종목 + 비교군, listed 제외)
+--       stock_id를 주면 그 종목만(상장 종목 목록의 참고 점수 계산용 — app/services/reference_score.py)
 -- 지표 정의·NULL 사유는 docs/09 1절. 한 종목당 9행(값이 없으면 raw_value NULL)
--- z_fixed: 정규화 없이 Z를 고정하는 경우(자본 ≤ 0인 부채비율 → −3). note: 대체 계산·고정 사유
+-- z_fixed: 정규화 없이 Z를 고정하는 경우(지금 쓰는 지표 없음 — 규칙만 남김). note: 대체 계산·고정 사유
 WITH base AS (
-    SELECT vm.stock_id, vm.close, vm.eps, vm.bps, vm.volatility_1y, vm.market_cap, vs.shares_outstanding
+    SELECT vm.stock_id, vm.close, vm.eps, vm.bps, vm.volatility_1y, vm.max_drawdown_1y, vm.market_cap, vs.shares_outstanding
     FROM v_stock_metrics vm
-    JOIN stocks st ON st.stock_id = vm.stock_id AND st.is_active
+    JOIN stocks st ON st.stock_id = vm.stock_id
+     AND CASE WHEN CAST(:stock_id AS int) IS NULL THEN st.is_active AND st.coverage <> 'listed'
+              ELSE st.stock_id = :stock_id END
     LEFT JOIN LATERAL (SELECT x.shares_outstanding FROM valuation_snapshots x
                        WHERE x.stock_id = vm.stock_id ORDER BY x.as_of DESC LIMIT 1) vs ON true
 ),
@@ -27,6 +30,7 @@ fin AS (                              -- 최신 FY + 직전 FY(결산일 간격�
 px AS (                               -- 최신 거래일부터 거꾸로 번호(rn = 1이 t)
     SELECT d.stock_id, d.close, ROW_NUMBER() OVER (PARTITION BY d.stock_id ORDER BY d.trade_date DESC) AS rn
     FROM daily_prices d
+    WHERE CAST(:stock_id AS int) IS NULL OR d.stock_id = :stock_id
 ),
 mom AS (                              -- t−21, t−126, t−252 거래일 종가
     SELECT px.stock_id,
@@ -38,7 +42,7 @@ mom AS (                              -- t−21, t−126, t−252 거래일 종�
     GROUP BY px.stock_id
 ),
 inp AS (
-    SELECT b.stock_id, b.close, b.bps, b.volatility_1y, f.revenue, f.operating_income, f.net_income,
+    SELECT b.stock_id, b.close, b.bps, b.volatility_1y, b.max_drawdown_1y, f.revenue, f.operating_income, f.net_income,
            f.total_equity, f.total_debt, f.has_prev, f.prev_revenue, f.prev_net_income,
            m.c_21, m.c_126, m.c_252,
            -- EPS 환산용 주식수: 상장주식수, 없으면 시가총액 / 종가
@@ -69,9 +73,7 @@ CROSS JOIN LATERAL (VALUES
     ('eps_change_yield', 'growth',   CASE WHEN c.has_prev AND c.shares > 0
                                           THEN (c.net_income - c.prev_net_income) / c.shares / NULLIF(c.close, 0) END,
         NULL, NULL),
-    ('debt_ratio',       'safety',   CASE WHEN c.total_equity > 0 THEN c.total_debt / c.total_equity END,
-        CASE WHEN c.total_equity <= 0 THEN CAST(-3 AS numeric) END,
-        CASE WHEN c.total_equity <= 0 THEN '자본 ≤ 0 → Z = −3 고정' END),
+    ('max_drawdown',     'safety',   c.max_drawdown_1y, NULL, NULL),
     ('volatility',       'safety',   c.volatility_1y, NULL, NULL),
     ('momentum',         'momentum', CASE WHEN c.c_252 IS NOT NULL THEN c.c_21 / c.c_252 - 1
                                           WHEN c.c_126 IS NOT NULL THEN c.c_21 / c.c_126 - 1 END,

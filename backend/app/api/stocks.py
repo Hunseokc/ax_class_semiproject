@@ -4,14 +4,16 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import text
+from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
-from app.api.deps import MarketPath, TickerPath, get_current_user_id, get_db, get_hydrator, get_preset, resolve_stock
+from app.api.deps import (MarketPath, TickerPath, get_current_user_id, get_db, get_engine_dep, get_hydrator, get_preset,
+                          resolve_stock)
 from app.core.errors import NotFound, Unprocessable
 from app.queries import raw, sql
 from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, SearchOut, StockDetailOut, StockListOut
 from app.services.hydration import Hydrator
+from app.services.market_condition import get_condition
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -66,7 +68,7 @@ def search_stocks(q: str = Query(min_length=1, max_length=50, description="이�
 @router.get("/{market}/{ticker}", response_model=StockDetailOut, summary="종목 기본 정보 + 최신 시세·밸류에이션")
 def stock_detail(market: MarketPath, ticker: TickerPath, user_id: int = Depends(get_current_user_id),
                  preset: dict = Depends(get_preset), db: Session = Depends(get_db),
-                 hydrator: Hydrator = Depends(get_hydrator)):
+                 hydrator: Hydrator = Depends(get_hydrator), engine: Engine = Depends(get_engine_dep)):
     row = db.execute(sql("stock_detail"), {"market": market.upper(), "ticker": ticker.upper(),
                                            "user_id": user_id, "preset": preset["code"]}).mappings().first()
     if row is None:
@@ -76,6 +78,9 @@ def stock_detail(market: MarketPath, ticker: TickerPath, user_id: int = Depends(
     out["preset"] = preset["code"]
     # 매력도 비교군 종목은 상세를 열 때 공시·2년 일봉·5개년 재무를 받는다(백그라운드)
     out["detail_status"] = hydrator.request(out["stock_id"], out["coverage"], out.pop("detail_synced_at"))
+    # 시장·섹터 점수 — 매력 점수 아래 위험 표시(매력도와 별개). 섹터는 이 계산에만 쓰고 응답 최상위에는 내지 않는다
+    out["market_condition"] = get_condition(engine, stock_id=out["stock_id"], country=out["country"],
+                                            sector=out.pop("sector"))
     out["fx_stale"] = False          # Stage 1은 DB 값만 읽는다. TTL 외부 호출(FxService)은 Stage 2에서 교체
     return out
 

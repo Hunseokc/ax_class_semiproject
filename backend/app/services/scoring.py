@@ -42,7 +42,7 @@ METRICS: dict[str, Metric] = {
     "operating_margin": Metric("quality", "영업이익률", 1, "재무 없음 또는 매출 0"),
     "revenue_yoy":      Metric("growth", "매출 YoY", 1, "직전 FY 없음 또는 직전 매출 ≤ 0"),
     "eps_change_yield": Metric("growth", "EPS 변화/주가", 1, "직전 FY 없음 또는 주식수 없음"),
-    "debt_ratio":       Metric("safety", "부채비율", -1, "재무(부채·자본) 없음"),
+    "max_drawdown":     Metric("safety", "1년 최대 낙폭", 1, "일봉 252개 미만"),
     "volatility":       Metric("safety", "변동성(1년)", -1, "일봉 253개 미만"),
     "momentum":         Metric("momentum", "12-1개월 수익률", 1, "일봉 127개 미만"),
 }
@@ -103,7 +103,7 @@ def sync_presets(conn: Connection, cfg: dict | None = None) -> None:
 # ------------------------------------------------------------------ 계산 단계
 def insert_metric_values(conn: Connection, as_of: date) -> dict[int, list[str]]:
     """1단계. 반환: 종목별 메모(대체 계산·고정 사유)."""
-    rows = conn.execute(sql("score_metrics")).mappings().all()
+    rows = conn.execute(sql("score_metrics"), {"stock_id": None}).mappings().all()
     if rows:
         conn.execute(text("""INSERT INTO stock_metric_values (stock_id, as_of, metric, factor, raw_value, z_raw)
                              VALUES (:stock_id, :as_of, :metric, :factor, :raw_value, :z_fixed)"""),

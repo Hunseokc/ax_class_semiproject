@@ -396,3 +396,20 @@ def test_disclosures_endpoint_returns_newest_first_with_limit(client, engine):
     assert set(b["items"][0]) == {"rcept_no", "title", "report_type", "filed_at", "url", "data_source"}
     assert b["items"][1]["url"] is None and b["as_of"] == b["items"][0]["filed_at"]
     assert [i["rcept_no"] for i in get(client, "/stocks/NASDAQ/AAPL/disclosures")[1]["items"]] == ["a1"]   # 종목별로 분리
+
+
+# ------------------------------------------------------------------ 시장·섹터 점수 (상세 응답)
+MC_KEYS = {"score", "label", "sentiment", "sector_name", "sector_flow", "sector_sample", "sector_as_of", "index_code",
+           "stock_r5", "sector_r5", "index_r5", "as_of"}
+
+
+def test_stock_detail_includes_market_condition(client, engine):
+    _, d = get(client, "/stocks/KOSPI/005930")
+    mc = d["market_condition"]
+    assert set(mc) == MC_KEYS and mc["index_code"] == "KOSPI" and "sector" not in d
+    assert mc["score"] is None and mc["label"] == "데이터 부족"           # 시장 심리 저장값 없음
+    with engine.begin() as conn:
+        conn.execute(text("""INSERT INTO market_sentiment_daily (market, trade_date, score, label, formula_version)
+                             VALUES ('KR', :d, 62.00, '탐욕', 1)"""), {"d": D})
+    _, d = get(client, "/stocks/KOSPI/005930")
+    assert d["market_condition"]["score"] == 62 and d["market_condition"]["label"] == "높음"   # 섹터 NULL → 시장만

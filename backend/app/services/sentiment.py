@@ -140,7 +140,8 @@ def ensure_sentiment(engine: Engine, market: str, now: datetime | None = None) -
     return out
 
 
-def _latest_stored(engine: Engine, market: str) -> dict | None:
+def latest_stored(engine: Engine, market: str) -> dict | None:
+    """가장 최근 저장 행(계산·저장 없음) — 상세 화면 시장·섹터 점수(market_condition)도 이것만 읽는다."""
     with engine.connect() as conn:
         r = conn.execute(text("""
             SELECT trade_date, score, label, price_position, ma_gap_score, rsi_score, vix_score, formula_version
@@ -164,7 +165,7 @@ def get_sentiment(engine: Engine, market: str, now: datetime | None = None) -> d
     except Exception:  # noqa: BLE001
         log.exception("시장 심리 지수 계산 실패(%s) — 마지막 저장값으로 대체", market)
         points = {}
-    cur = points.get("current") or _latest_stored(engine, market)
+    cur = points.get("current") or latest_stored(engine, market)
     as_of = cur["trade_date"] if cur else None
     return {
         "market": market,

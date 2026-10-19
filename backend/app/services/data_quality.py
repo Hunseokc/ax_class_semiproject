@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import Connection
 
@@ -37,3 +37,9 @@ def data_quality(conn: Connection, *, days: int, ttl_hours: float, now: datetime
     totals["quarantined_rows"] = sum(j["quarantined_rows"] for j in jobs)
     return {"days": days, "since": since, "generated_at": now, "ttl_hours": ttl_hours,
             "stale_after_hours": ttl_hours * 2, "totals": totals, "jobs": jobs, "stale_jobs": stale}
+
+
+def fiscal_year_mix(conn: Connection, country: str, as_of: date) -> list[dict]:
+    """매력도 표본의 최신 FY 결산 연도별 종목 수. [{"fiscal_year": 2025, "stocks": 41}, ...] 연도 내림차순.
+    실적 시즌에 새 연도·지난 연도 재무가 섞여 비교되는 정도를 보여 준다. as_of에 지표가 없으면 []."""
+    return [dict(r) for r in conn.execute(sql("fin_basis"), {"country": country, "as_of": as_of}).mappings()]
