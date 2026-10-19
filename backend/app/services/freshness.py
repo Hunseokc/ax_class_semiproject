@@ -99,3 +99,13 @@ def invalidate_on_annual_report(conn: Connection, stock_id: int) -> int:
                       WHERE d.stock_id = f.stock_id AND d.filed_at > f.fetched_at
                         AND (d.title LIKE '%사업보고서%' OR d.report_type = ANY(:forms)))"""),
         {"s": stock_id, "forms": list(ANNUAL_FORMS)}).rowcount
+
+
+def expire_financials(conn: Connection, stock_ids: list[int], now: datetime | None = None) -> int:
+    """새 사업보고서가 확인된 종목의 재무 유효기간을 지금 끝낸다(공시 목록 증분 — 다음 재무 작업 대상이 됨).
+    기록이 없거나 이미 지난 종목은 그대로. 반환: 바꾼 행 수."""
+    if not stock_ids:
+        return 0
+    return conn.execute(text("""UPDATE data_freshness SET valid_until = fetched_at
+                                WHERE kind = 'financials' AND stock_id = ANY(:ids) AND valid_until > :now"""),
+                        {"ids": stock_ids, "now": now or datetime.now(timezone.utc)}).rowcount

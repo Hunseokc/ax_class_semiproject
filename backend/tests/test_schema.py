@@ -18,7 +18,8 @@ STAGE3_TABLES = {"financial_statements", "disclosures"}
 STAGE4_TABLES = {"scoring_presets", "scoring_weights", "stock_metric_values", "stock_scores"}
 STAGE5_TABLES = {"data_freshness", "fundamental_bases"}
 STAGE6_TABLES = {"sector_performance_daily", "market_sentiment_daily"}
-ALL_TABLES = STAGE1_TABLES | STAGE2_TABLES | STAGE3_TABLES | STAGE4_TABLES | STAGE5_TABLES | STAGE6_TABLES
+EXTRA_TABLES = {"ingest_cursor"}                     # 추가 기능 4-1
+ALL_TABLES = STAGE1_TABLES | STAGE2_TABLES | STAGE3_TABLES | STAGE4_TABLES | STAGE5_TABLES | STAGE6_TABLES | EXTRA_TABLES
 
 
 def test_orm_matches_schema(engine):
