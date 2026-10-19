@@ -109,3 +109,10 @@ def expire_financials(conn: Connection, stock_ids: list[int], now: datetime | No
     return conn.execute(text("""UPDATE data_freshness SET valid_until = fetched_at
                                 WHERE kind = 'financials' AND stock_id = ANY(:ids) AND valid_until > :now"""),
                         {"ids": stock_ids, "now": now or datetime.now(timezone.utc)}).rowcount
+
+
+def mark_provisional(conn: Connection, kind: str, stock_id: int, ttl: timedelta, now: datetime | None = None) -> datetime:
+    """일괄 수집한 임시 값(SEC frames 등)을 기록한다 — 유효기간을 ttl로 짧게 둬서 그 뒤 상세를 열면 회사별로 다시 받는다."""
+    now = now or datetime.now(timezone.utc)
+    _upsert(conn, kind, stock_id, now, now + ttl, "SUCCESS", "일괄 임시 값")
+    return now + ttl
