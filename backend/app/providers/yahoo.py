@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import logging
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from app.providers.base import Bar, Financial, FxPoint, IndexRef, StockRef, Valuation
+from app.providers.base import Bar, Financial, FxPoint, IndexRef, ProviderError, StockRef, Valuation
 from app.providers.convert import positive_or_none, to_dec, to_int
 from app.providers.http import Throttle, call_with_retry
 
@@ -19,6 +22,41 @@ BATCH = 100                      # 묶음 다운로드 한 번의 종목 수
 def _yf():
     import yfinance as yf
     return yf
+
+
+# yf.download는 실패(차단·429 등)를 예외 대신 'yfinance' 로거 ERROR로만 알린다. 그 로거는 logging.py에서 꺼 두었으므로
+# 다운로드하는 동안만 호출한 스레드의 ERROR 메시지를 모은다(화면 출력은 계속 끈다).
+_capture_lock = threading.Lock()
+
+
+class _ErrorCapture(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.ERROR)
+        self.thread = threading.get_ident()
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.thread == self.thread:
+            msg = record.getMessage().strip()
+            if msg:
+                self.messages.append(msg)
+
+
+@contextmanager
+def _capture_yf_errors() -> Iterator[list[str]]:
+    lg = logging.getLogger("yfinance")
+    with _capture_lock:
+        h = _ErrorCapture()
+        level, propagate = lg.level, lg.propagate
+        lg.addHandler(h)
+        lg.setLevel(logging.ERROR)
+        lg.propagate = False
+        try:
+            yield h.messages
+        finally:
+            lg.removeHandler(h)
+            lg.setLevel(level)
+            lg.propagate = propagate
 
 
 SHORT_RANGE = timedelta(days=7)   # 이 이하 증분 구간의 '데이터 없음'은 휴장일로 본다
@@ -70,10 +108,19 @@ class YahooProvider:
         for i in range(0, len(stocks), BATCH):
             chunk = stocks[i:i + BATCH]
             symbols = [s.yf_symbol for s in chunk]
-            df = call_with_retry(
-                lambda: yf.download(symbols, start=start.isoformat(), end=(end + timedelta(days=1)).isoformat(),
-                                    auto_adjust=True, progress=False, threads=True, group_by="ticker"),
-                throttle=_throttle, what=f"yfinance download {len(symbols)}종목")
+
+            def fetch():
+                with _capture_yf_errors() as errors:
+                    df = yf.download(symbols, start=start.isoformat(), end=(end + timedelta(days=1)).isoformat(),
+                                     auto_adjust=True, progress=False, threads=True, group_by="ticker")
+                # 묶음 전체가 비면 차단·장애로 보고 실패로 올린다 → 재시도 후 ingestion_logs에 FAILED + 원인
+                if df is None or df.empty:
+                    raise ProviderError(" ".join(errors)[:400] or "빈 응답")
+                if errors:
+                    log.warning("yfinance download 일부 실패: %s", " ".join(errors)[:500])
+                return df
+
+            df = call_with_retry(fetch, throttle=_throttle, what=f"yfinance download {len(symbols)}종목")
             for st in chunk:
                 try:
                     sub = df[st.yf_symbol] if len(symbols) > 1 else df
