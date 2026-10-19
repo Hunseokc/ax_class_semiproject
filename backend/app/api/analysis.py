@@ -19,7 +19,7 @@ from app.core.errors import NotFound, Unprocessable
 from app.queries import sql
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN, Num, Schema
 from app.core.config import get_settings
-from app.services.data_quality import data_quality
+from app.services.data_quality import data_quality, fiscal_year_mix
 from app.services.reference_score import reference_score
 from app.services.scoring import FACTORS, METRICS, default_preset
 
@@ -80,6 +80,11 @@ class PeerAverageOut(Schema):
     factors: dict[str, Num | None]    # 팩터 점수(Z) 평균
 
 
+class FinBasisOut(Schema):
+    fiscal_year: int                  # 최신 FY 결산일의 연도
+    stocks: int                       # 그 연도 재무로 비교된 종목 수
+
+
 class ScoreOut(Schema):
     as_of: Any = None
     preset: PresetRef
@@ -95,6 +100,7 @@ class ScoreOut(Schema):
     peer_average: PeerAverageOut | None = None   # 레이더 비교용 주 그룹 평균
     reference: bool = False                      # 상장 목록 종목의 참고 점수(유니버스 밖)
     reference_note: str | None = None
+    fin_basis: list[FinBasisOut] = []            # 같은 시장 비교 표본의 재무 기준 연도별 종목 수(연도 내림차순)
 
 
 class PresetOut(PresetRef):
@@ -203,7 +209,8 @@ def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row)
     return {**out, "as_of": row["score_as_of"], "score": row["score"], "composite": row["composite"],
             "factor_coverage": row["factor_coverage"], "rank": rank, "factors": factors, "metrics": metrics,
             "data_quality": row["data_quality"] or {},
-            "peer_average": _peer_average(db, stock_id, country, preset["preset_id"], row["score_as_of"])}
+            "peer_average": _peer_average(db, stock_id, country, preset["preset_id"], row["score_as_of"]),
+            "fin_basis": fiscal_year_mix(db.connection(), country, row["score_as_of"])}
 
 
 def _peer_average(db: Session, stock_id: int, country: str, preset_id: int, as_of) -> dict | None:

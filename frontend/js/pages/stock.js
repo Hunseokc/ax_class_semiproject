@@ -345,6 +345,7 @@ function renderScore(a) {
   const basis = h(`<details class="score-method"><summary>계산 근거 보기 <span class="subtle">팩터 기여도 · 지표 원값과 표준점수(Z)</span></summary>
       <div class="score-basis">
         <p class="subtle">데이터 충족도 ${s.factor_coverage}/${s.factor_total} 요소${s.rank ? ` · 백분위 ${num(s.rank.percentile, 0)}` : ""}</p>
+        ${s.fin_basis?.length ? `<p class="subtle">재무 기준 ${s.fin_basis.map((x) => `FY${x.fiscal_year} ${x.stocks}개`).join(" · ")}</p>` : ""}
         <div class="score-panel__factors">
           <h3>팩터 기여도 <span class="subtle">(유효 팩터 가중치 × 팩터 점수, 합 = 종합 ${zFmt(s.composite)})</span></h3>
           ${factors.map(([k, f]) => contribRow(k, f, maxAbs)).join("")}

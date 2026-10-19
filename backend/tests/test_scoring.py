@@ -527,3 +527,12 @@ def test_refresh_runs_scorer(client, engine, universe):
     body = client.get(f"{API}/stocks/KOSPI/005930/analysis").json()
     assert body["attractiveness"]["score"] is not None and "투자 권유가 아닙니다" in body["disclaimer"]
     assert client.get(f"{API}/statistics/overview").json()["stock_scores"] == 8 * 4
+
+def test_analysis_includes_fin_basis(client, engine, universe):
+    before = client.get(f"{API}/stocks/KOSPI/005930/analysis").json()["attractiveness"]
+    assert before["fin_basis"] == []                                    # 점수가 없으면 빈 배열
+    compute_scores(engine, as_of=D)
+    kr = client.get(f"{API}/stocks/KOSPI/005930/analysis").json()["attractiveness"]
+    us = client.get(f"{API}/stocks/NASDAQ/AAPL/analysis").json()["attractiveness"]
+    assert kr["fin_basis"] == [{"fiscal_year": 2024, "stocks": 5}]       # KR 재무 있는 5종목 모두 FY2024
+    assert us["fin_basis"] == [{"fiscal_year": 2025, "stocks": 1}, {"fiscal_year": 2024, "stocks": 1}]
