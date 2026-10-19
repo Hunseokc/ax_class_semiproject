@@ -172,7 +172,7 @@ def load_benchmark(engine: Engine, providers: Providers, *, today: date | None =
     with engine.connect() as conn:
         ids = [r.stock_id for r in stock_refs(conn, scope="benchmark")]
         frequent = [r.stock_id for r in stock_refs(conn, scope="frequent")]
-        due_bench = freshness.due(conn, "financials", ids)
+        due_bench = freshness.due(conn, "financials", ids, limit=cfg["fin_daily_budget"])   # 실적 시즌에도 하루 작업량 일정
         due_freq = freshness.due(conn, "financials", frequent)
     out: dict = {"stocks": len(ids)}
     out["prices"] = jobs.load_prices_bulk(engine, providers, ids, history_days=cfg["price_days"], today=today)

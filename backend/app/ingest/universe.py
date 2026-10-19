@@ -58,6 +58,7 @@ class Universe:
     benchmark: dict                 # [S4-D] 비교군 설정 (per_sector·price_days·fin_years·reselect_days …)
     benchmark_candidates: dict      # [S4-D] 경쟁 그룹 → 국가 → 후보 [{market, ticker, name}]
     sectors: list                   # [S5-D] 점수 비교 표본의 섹터 [{name, krx, sic}] (app/ingest/sectors.py)
+    ingest: dict                    # 수집 적재 공통 (flush_every)
 
 
 @lru_cache
@@ -75,6 +76,7 @@ def load_universe() -> Universe:
         benchmark=raw["benchmark"],
         benchmark_candidates=raw["benchmark_candidates"],
         sectors=raw["sectors"],
+        ingest=raw.get("ingest") or {},
     )
 
 

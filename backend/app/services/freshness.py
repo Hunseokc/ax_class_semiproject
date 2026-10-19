@@ -43,11 +43,21 @@ def financials_valid_until(country: str, latest_fy_end: date | None, fetched_at:
     return min(fetched_at + FIN_CAP - timedelta(days=stock_id % STAGGER_DAYS), next_due)
 
 
-def due(conn: Connection, kind: str, stock_ids: list[int], now: datetime | None = None) -> list[int]:
-    """유효기간이 지났거나 기록이 없는 종목."""
-    if not stock_ids:
+def due(conn: Connection, kind: str, stock_ids: list[int], now: datetime | None = None,
+        *, limit: int | None = None) -> list[int]:
+    """유효기간이 지났거나 기록이 없는 종목.
+    limit=None: 입력 순서 그대로. limit 지정: 기록 없음 → valid_until 오래된 순 → stock_id 순으로 앞 limit개(하루 예산)."""
+    if not stock_ids or (limit is not None and limit <= 0):
         return []
     now = now or datetime.now(timezone.utc)
+    if limit is not None:
+        return list(conn.execute(text("""
+            SELECT s.id
+            FROM unnest(CAST(:ids AS int[])) AS s(id)
+            LEFT JOIN data_freshness f ON f.stock_id = s.id AND f.kind = :k
+            WHERE f.valid_until IS NULL OR f.valid_until <= :now
+            ORDER BY f.valid_until ASC NULLS FIRST, s.id
+            LIMIT :limit"""), {"ids": stock_ids, "k": kind, "now": now, "limit": limit}).scalars())
     fresh = set(conn.execute(text("""SELECT stock_id FROM data_freshness
                                      WHERE kind = :k AND stock_id = ANY(:ids) AND valid_until > :now"""),
                              {"k": kind, "ids": stock_ids, "now": now}).scalars())
