@@ -1275,7 +1275,10 @@ def run_background(engine: Engine, providers: Providers, *, now: datetime | None
 - 잠금: `BACKGROUND_LOCK_KEY = 7_301_013`(`wait=False` — 겹치면 건너뜀). 예산이 남지 않으면 순위 조회도 하지 않아요(외부 호출 0).
 - 로그: `job_log(source="INTERNAL", job_type="BENCHMARK", label="background")` 1행, 비고는 `백그라운드:`로 시작해요. 스케줄러는 비교군 성공을 `일일:` 비고로만 세서 둘이 섞이지 않아요.
 - 스케줄러: `services/scheduler.py`의 `tick`에서 비교군 다음으로 `run_at_kst`(08:00) 이후 하루 1회(`last_background_success`). CLI `python -m app.ingest background`.
-- **미국은 D11 결정 전이라 건너뛰어요**(`queued: 0`, 비고 "순위 소스 미정"). 팀 코드에는 미국 시가총액 순위를 구하는 단계(semi의 `classify_us`)가 없어서, D11을 정할 때 함께 들여와야 해요.
+- **미국(D11 확정 2026-10-19)**: `rank_us`가 SEC 발행주식수(frames) × 최근 종가(DB, 없으면 yfinance 묶음)로 시가총액을 구해 상위 `us_rank_pool`(1,500)개에 `stocks.cap_rank`(migration 009)를 매겨요. `us_rank_days`(30일)마다만 다시 매기고, 큐는 순위가 있는 listed만 순위대로(`ranked_only`).
+  - 측정: 발행주식수 2.1초(5,118개) + 종가 묶음 91~123초(5,641/5,646개) → 1,500위 매김. 상위: NVDA·AAPL·GOOGL·GOOG·MSFT·AMZN…
+  - 버린 대안: frames `dei/EntityPublicFloat`(1회 호출) — 값 단위가 회사마다 달라(1위가 Universal Display 6.8조 달러) 쓸 수 없고 listed 5,646개 중 3,387개만 있어요
+  - 한계: ADR(TM·ONC 등)은 발행주식수가 원주 기준이라 순위가 부풀어요. 20-F 회사는 US-GAAP 재무가 없어 첫 시도에서 FAILED가 되고, 기록이 생겨 다음 큐에서 빠져요(매일 재시도하지 않음)
 - 개발 DB 확인(2026-10-19): `listing` 뒤 국내 listed 2,509개(corp_code 전부), 예산을 5로 잡아 실행 → 거래대금 상위 5개 SUCCESS.
 
 | 우선순위 | 국내 (KR) | 미국 (US) |
@@ -1297,24 +1300,41 @@ def run_background(engine: Engine, providers: Providers, *, now: datetime | None
 
 ---
 
-## 8. 4-2 — 미국 재무 일괄 수집 (D8 결정 뒤)
+## 8. 4-2 — 미국 재무 일괄 수집 (D8 확정 2026-10-19: frames, 임시 값)
 
-지금 정하는 것은 인터페이스뿐이에요. 방식은 smoke 결과로 정하고 이 절을 채워요.
+### 8-1. smoke 결과
+
+| 후보 | 크기·호출 | 정확도(노출·비교군 76개 × 3개년, 회사별 companyfacts 대비) | 판단 |
+| --- | --- | --- | --- |
+| companyfacts.zip | **1.41GB** 한 파일(10-17 생성) | 회사별 API와 같은 원본 | Cloud Run 1~2GiB에서 받아 풀기 어려워 채택 안 함 |
+| frames API | 개념·기간당 1회 0.3~0.9MB, 0.2~0.5초. 3개년 84~92회 · 34~38초로 미국 4,400여 개 회사 | 1,368칸 중 **1,329칸(97%)** 같음 | **채택 — 임시 값으로** |
+
+frames와 회사별 값이 다른 경우: ① frames는 서식과 상관없이 최근 제출값을 골라 위임장(DEF 14A)의 반올림 값이 들어감(MVST 순이익 −106,336,000 → −106,000,000) ② 52/53주 회계연도는 한 달력연도 frame에 두 해가 겹쳐 한 해가 빠짐(LRCX FY2024) ③ 순간값 frame(`CY{y}Q{n}I`)은 달력 분기 기준이라 12월 결산이 아닌 회사는 10-Q 값이 섞임 → **결산일과 같은 날짜 값만** 써서 해결.
+
+### 8-2. 구현
 
 ```python
-# backend/app/providers/sec_bulk.py (새) — 방식과 상관없이 이 시그니처를 지킨다
-def get_annual_financials_bulk(ciks: set[str], years: int) -> dict[str, list[Financial]]:
-    """CIK → FY 재무 목록(결산일 오름차순). sec.py get_annual_financials와 같은 태그 대체 규칙·같은 Financial 모양.
-    data_source="SEC". 받지 못한 CIK는 결과에 없음."""
+# backend/app/providers/sec_bulk.py
+class SecFrames:                                    # frames 호출(초당 약 4건), calls = 호출 수
+    def frame(self, concept: str, period: str) -> list[dict]: ...
+
+def get_annual_financials_bulk(ciks: set[str], years: int, *, last_year: int | None = None,
+                               frames: SecFrames | None = None) -> dict[str, list[Financial]]:
+    """CIK → FY 재무 목록(결산일 오름차순). sec.py와 같은 태그 대체 규칙(CONCEPTS)·같은 Financial 모양.
+    기간형은 CY{last_year-years}~CY{last_year}(기본 올해까지 — 6·9월 결산 회사), 순간형은 결산일이 든 분기 frame만."""
+
+# backend/app/ingest/us_bulk.py
+PROVISIONAL_TTL = timedelta(days=7)
+def load_us_bulk(engine, *, years=3, frames=None, now=None) -> dict:
+    """재무 기록이 없는 활성 미국 listed(CIK 있음)에 넣고 freshness.mark_provisional(7일). 로그 source='SEC_BULK'."""
 ```
 
-- `jobs.merge_supplement`(yfinance 보완) 규칙은 그대로.
-- smoke 비교 기준: 받는 크기, 최대 메모리(Cloud Run 1~2GiB), 태그 대체 규칙을 옮길 수 있는지, 호출 수. 결과는 `docs/smoke_test_result.md`.
-- 적재는 `BatchWriter`(4-2절), 잠금은 `SEC_LOCK_KEY`를 파일 받는 동안 1회.
+- **임시 값**: 유효기간 7일 뒤 상세를 열면 회사별 API(정확한 10-K + yfinance 보완)로 다시 받아요. 노출 종목·비교군은 지금처럼 회사별 API만 써요. yfinance 보완(`merge_supplement`)은 회사마다 호출이라 일괄에서는 하지 않아요.
+- CLI `python -m app.ingest us-bulk [--years 3]`. 개발 DB: 대상 5,370 → 4,441개 회사 13,065행, 34초.
 
 ---
 
-## 9. 4-4 — 노출 종목 확장 (D5 결정 뒤)
+## 9. 4-4 — 노출 종목 확장 (D5 확정 2026-10-19: 리스트 = 노출 + 비교군)
 
 ### 9-1. `GET /stocks` — `sector` 필터
 
@@ -1323,16 +1343,22 @@ def get_annual_financials_bulk(ciks: set[str], years: int) -> dict[str, list[Fin
 | `sector` | string, 선택, 1~32자 | `stocks.sector`와 정확히 일치. `universe.yaml`의 `sectors[].name`(점수 섹터 9개) 밖이면 422 `VALIDATION_ERROR` |
 
 - 기존 파라미터와 AND. `total`은 필터 뒤 개수.
-- `StockRow`에 `sector: str | None`(마지막 필드), `stock_list.sql`에 `s.sector` + `AND (CAST(:sector AS text) IS NULL OR s.sector = :sector)`.
+- `StockRow`에 `sector: str | None`, `coverage: str`(featured·benchmark·listed — 갱신 주기가 달라 화면이 구분할 수 있게), `stock_list.sql`에 `s.sector, s.coverage` + `AND (CAST(:sector AS text) IS NULL OR s.sector = :sector)`.
+- 기본 목록 대상: `s.coverage IN ('featured', 'benchmark')`(전에는 featured만). listed는 검색어(q)가 있을 때만.
 
 ### 9-2. 화면 (`stocks.js`)
 
 - 페이지 나누기: `limit=25`, `offset`, `total`로 페이지 수. URL `?page=`로 새로고침해도 유지.
 - 필터: 국가 탭(기존) + 섹터 선택(9개 + "전체"). 섹터 목록은 화면 상수 — 이름은 `universe.yaml sectors[].name`과 같아야 해요.
+- 필터·정렬·검색을 바꾸면 1페이지로, 투자 성향을 바꾸면 같은 페이지로 다시 조회해요. 순위는 전체 기준이라 2페이지는 26위부터.
+- 행 부제에 섹터 배지(한 줄, 넘치면 말줄임).
+- 확인(Playwright 1280·390px): 국내 70종목 3페이지, 2페이지 첫 순위 26, 반도체·전자 13종목, 가로 스크롤 0, 콘솔 에러 0.
 
-### 9-3. 노출 규칙
+### 9-3. 노출 규칙 (D5)
 
-D5 수치가 나오면 `universe.yaml stocks` 확장 또는 "노출 = 시가총액 상위 N" 중 하나를 정해 이 절에 적어요. 영향: `peer_groups`(테마), 첫 적재 시간, DB 용량(무료 500MB).
+측정(2026-10-19): 4시간 갱신은 노출 25종목에 시세 18초 + 밸류에이션 11초(종목당 약 1.2초), 07:00 비교군 갱신은 121종목 평균 2분, DB 28MB(listed 재무 일괄 적재 뒤).
+
+**결정: 노출 종목(4시간 갱신)은 25개 그대로 두고, 리스트에는 비교군 121개를 함께 보여 줘요(146개).** 비교군은 이미 매일 시세·밸류에이션·점수·섹터가 갱신돼서 수집 비용이 0이에요. 노출 종목을 늘리면 4시간마다 종목당 약 1.2초씩 늘어나는데, 그만큼의 차이(장중 4시간 vs 하루 1회)는 일봉 기준 서비스에서 크지 않아요. 비교군 행은 `as_of`로 기준일이 드러나요.
 
 ---
 
@@ -1340,10 +1366,10 @@ D5 수치가 나오면 `universe.yaml stocks` 확장 또는 "노출 = 시가총�
 
 | # | 질문 | 권하는 답 | 왜 |
 | --- | --- | --- | --- |
-| D11 | 미국 listed 우선순위 소스 | `us_rank_pool`(1,500) 안에서 `classify_us`가 매달 구하는 시가총액 순. `stocks`에 순위 열 1개 추가(마이그레이션) | 미국은 전 종목 일괄 시세 무료 소스가 없어 거래대금을 매일 구하면 호출이 커요 |
-| D12 | 백그라운드 하루 예산 값 | DART 2,000행 · SEC 1,000행으로 시작, 첫 주 `ingestion_logs`로 조정 | DART 키 1개 하루 약 2만 번 중 절반 이하(행당 2~5번) |
-| D5 | 노출 종목 수 | 4-1 뒤 측정 | — |
-| D8 | 미국 일괄 방식 | smoke 뒤 | — |
+| D11 | 미국 listed 우선순위 소스 | **확정**: 상위 1,500개 안에서 시가총액(SEC 발행주식수 × 종가) 순, 30일마다 `stocks.cap_rank`에 저장(migration 009) | 7-2 측정 — 전 종목 종가 묶음 조회 약 2분이라 매일 하지 않아요 |
+| D12 | 백그라운드 하루 예산 값 | **확정(시작값)**: DART 2,000행 · SEC 1,000행, 첫 주 `ingestion_logs`로 조정 | DART 키 1개 하루 약 2만 번 중 절반 이하(행당 2~5번) |
+| D5 | 노출 종목 수 | **확정**: 4시간 갱신 노출은 25개 그대로, 리스트는 노출 + 비교군(146개) | 9-3 측정 — 비교군은 이미 매일 갱신돼 비용 0 |
+| D8 | 미국 일괄 방식 | **확정**: SEC frames, listed 첫 적재용 임시 값(7일) | 8-1 smoke — zip 1.4GB, frames 97% 일치·38초 |
 
 ---
 

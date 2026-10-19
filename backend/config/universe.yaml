@@ -287,5 +287,7 @@ ingest:
 # 단위: ingestion_logs 행 수(회사 1건 = 1행 ≈ DART 호출 2~5번). 상세 화면·07:00 갱신이 쓴 행도 같이 센다
 background:
   dart_calls_per_day: 2000   # 오늘(서울 0시부터) source='DART' 재무·공시 행이 이 수에 닿으면 멈춤 — 키 1개 하루 약 2만 번의 절반 이하 (D12 시작값)
-  sec_calls_per_day: 1000    # source='SEC' 같은 기준 (미국은 순위 소스 D11 결정 뒤 사용)
+  sec_calls_per_day: 1000    # source='SEC' 같은 기준
+  us_rank_pool: 1500         # 미국은 시가총액(SEC 발행주식수 × 종가) 상위 이만큼 안에서만 순위대로 받는다 (D11)
+  us_rank_days: 30           # 미국 순위를 다시 매기는 주기 — 전 종목 종가 묶음 조회가 약 2분이라 매일 하지 않는다
   run_at_kst: "08:00"        # 07:00 비교군 갱신 뒤

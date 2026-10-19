@@ -1,4 +1,4 @@
-/* 디자인 토큰 — 다크 핀테크 (docs/assets/design_reference.png 기준)
+/* 디자인 토큰 — 다크 핀테크 (docs/assets/design_reference.png 기준), 라이트는 맨 아래 흰 바탕 + 코발트 블루
    면의 명도 차이로 구분하고 그림자는 쓰지 않는다. 파스텔 위 글자는 어두운 색. */
 :root {
   color-scheme: dark;
@@ -42,6 +42,8 @@
   --us-down-on-pastel: var(--down-on-pastel);
   --heat-up: var(--up-on-pastel);           /* 섹터 히트맵 타일(흰 글자) */
   --heat-down: var(--down-on-pastel);
+  --heat-min: 18%;                          /* 히트맵 타일 농도: 0%에 가까울 때 ~ ±3% 이상일 때 (min + range) */
+  --heat-range: 72%;
   --price-up: var(--up-on-pastel);
   --price-down: var(--down-on-pastel);
 
@@ -61,6 +63,18 @@
   --danger: #ff6b6b;
   --warning: #f5c26b;
   --success: #3ddc97;
+
+  /* 테마마다 달라지는 보조 색 (라이트 값은 아래 [data-theme="light"]) */
+  --on-lavender: var(--text-on-pastel);     /* --lavender 면 위 글자 */
+  --lavender-fill: rgba(230, 221, 242, .22); /* 차트 반투명 채움 */
+  --btn-hover: #444444;
+  --star: #ffd166;
+  --tooltip-bg: #ffffff;
+  --tooltip-text: #141414;
+  --badge-kr-bg: rgba(255, 107, 107, .14); --badge-kr-text: #ffb3b3;
+  --badge-us-bg: rgba(94, 168, 255, .14);  --badge-us-text: #b9d8ff;
+  --danger-bg: rgba(255, 107, 107, .16);   --danger-text: #ffb3b3;
+  --warn-bg: rgba(245, 194, 107, .12);     --warn-text: #f5d9a8;
 
   /* 모서리 */
   --r-card: 28px;
@@ -100,4 +114,53 @@
   --content-max: 1280px;
   --focus: 0 0 0 3px rgba(230, 221, 242, 0.55);
   --ease: cubic-bezier(.2, .7, .2, 1);
+}
+
+/* 라이트 모드(기본) — <html data-theme="light">. 설정에서 다크를 고른 경우만 빠진다 (각 HTML head의 인라인 스크립트가 첫 그리기 전에 적용) */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #e9ebea;
+  --surface: #f6f7f7;
+  --card: #ffffff;
+  --card-hover: #eef1f8;
+  --card-active: #e1e7f6;
+  --line: #d2d7df;
+
+  --text: #0d1633;
+  --text-2: #434b60;
+  --text-3: #5b6377;        /* 대비 5.1:1 on --bg */
+  --text-on-pastel: #0d1633;
+  --text-on-pastel-2: #3b4565;
+
+  /* 강조: 옅은 파랑 면 + 코발트 블루 (--lavender가 주 강조색) */
+  --ice: #dce4fa;
+  --ice-strong: #c3d1f6;
+  --lavender: #1034b3;
+  --lavender-strong: #0b2789;
+  --on-lavender: #ffffff;
+  --lavender-fill: rgba(16, 52, 179, .14);
+
+  --up: #d6303a;
+  --down: #1d5bbf;
+  --flat: #5b6377;
+  --up-on-pastel: #c0262d;
+  --down-on-pastel: #1d4fb0;
+  --heat-min: 10%;          /* 흰 면에서는 진한 빨강·파랑 덩어리가 튀므로 최대 50%까지만 */
+  --heat-range: 40%;
+
+  --danger: #d6303a;
+  --warning: #b7791f;
+  --success: #1f8a5b;
+
+  --btn-hover: #d3dcf3;
+  --star: #e0a100;
+  --tooltip-bg: #0d1633;
+  --tooltip-text: #ffffff;
+  --badge-kr-bg: rgba(214, 48, 58, .10); --badge-kr-text: #b0242c;
+  --badge-us-bg: rgba(29, 91, 191, .10); --badge-us-text: #1d4fb0;
+  --danger-bg: rgba(214, 48, 58, .10);   --danger-text: #b0242c;
+  --warn-bg: rgba(183, 121, 31, .12);    --warn-text: #7a4f0e;
+
+  --focus: 0 0 0 3px rgba(16, 52, 179, .35);
 }

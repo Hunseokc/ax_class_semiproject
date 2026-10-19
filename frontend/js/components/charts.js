@@ -10,7 +10,7 @@ if (Chart) {
   Chart.defaults.color = color("--text-3");
   Chart.defaults.borderColor = color("--line");
   Object.assign(Chart.defaults.plugins.tooltip, {
-    backgroundColor: "#ffffff", titleColor: "#141414", bodyColor: "#141414",
+    backgroundColor: color("--tooltip-bg"), titleColor: color("--tooltip-text"), bodyColor: color("--tooltip-text"),
     padding: 10, cornerRadius: 12, displayColors: false,
     titleFont: { weight: "700" }, bodyFont: { weight: "600" },
   });

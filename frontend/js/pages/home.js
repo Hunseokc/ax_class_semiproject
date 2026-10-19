@@ -1,7 +1,7 @@
 // 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
 import { PRESET_EVENT, getFx, getIndices, getPortfolioSummary, getPortfolios, getPreset, getHomeRanking, getSectors, getSentiment, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S6-A] getHomeRanking·getSectors·getSentiment · 포트폴리오 요약
 import { DASH, changeHtml, changeLabel, date, dateTime, esc, krw, num, pct, price, shortDate, signedKrw, stockUrl, usd } from "../format.js";   // [S5-A] pct
-import { color, destroyCharts, scoreBand, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
+import { color, destroyCharts, draw, scoreBand, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
 import { emptyState, errorState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";   // [S5-A] marketBadge
 import { loadPresets, mountPresetMenu } from "../components/preset-menu.js";   // [S4-A]
@@ -224,7 +224,7 @@ function mountPicker() {
 loadMarket();
 
 // ---------------------------------------------------------------- 내 관심종목 [S2-A]
-// [S6-A] 기본은 컴팩트 한 줄 목록, 카드 보기로 바꿀 수 있다. 순서 바꾸기(▲▼)는 홈에서 뺐다(주식 리스트에서 한다)
+// [S6-A] 기본은 리스트(한 줄 목록, 값은 저장 호환을 위해 "compact"), 카드 보기로 바꿀 수 있다. 순서 바꾸기(▲▼)는 홈에서 뺐다(주식 리스트에서 한다)
 let watchItems = null;
 
 // [S5-A] 목표가 줄 — 괴리율(target_gap)은 서버가 계산한 값을 그대로 쓴다
@@ -249,41 +249,45 @@ function editButton(w) {
   return b;
 }
 
+// 카드 보기 = 요약: 게이지 · 티커 · 현재가·등락률 · 종목명 (목표가·메모는 리스트 보기에서)
 function watchCard(w) {
-  const target = watchTarget(w);
-  const el = h(`<div class="wl-item"><a class="wl-card card--link card--ice"
+  const el = h(`<div class="wl-item"><a class="wl-card card--link"
         href="${watchHref(w)}" aria-label="${esc(watchLabel(w))}">
       <div class="wl-card__gauge">${scoreGauge(w.score)}</div>
       <div class="wl-card__ticker">${esc(w.ticker)} · ${esc(w.market)}</div>
       <div class="wl-card__price num">${price(w.close, w.currency)}</div>
       <div class="wl-card__chg num">${changeHtml(w.change_rate, w.country)}</div>
-      ${target ? `<div class="wl-card__note">${esc(target)}</div>` : ""}
-      ${w.memo ? `<div class="wl-card__note wl-card__memo" title="${esc(w.memo)}">${esc(w.memo)}</div>` : ""}
       <div class="wl-card__foot"><span class="wl-card__name">${esc(w.name)}</span></div>
     </a></div>`);
   el.append(editButton(w));
   return el;
 }
 
-// 컴팩트 보기 한 줄: 종목명(코드·시장) | 소형 매력도 게이지 | 현재가 | 등락률 | 편집
+// 리스트 보기 한 줄 = 자세히: 종목명(코드·시장) | 매력도 게이지 | 현재가·전일 대비(금액·등락률) | 목표가·괴리율 | 메모 | 편집
 function watchRow(w) {
+  const diff = isNum(w.change) ? `${w.change > 0 ? "+" : ""}${price(w.change, w.currency)}` : DASH;
+  const target = w.target_price != null
+    ? `<span class="wl-compact__main">${price(w.target_price, w.currency)}</span><span class="wl-compact__sub">괴리 ${w.target_gap != null ? pct(w.target_gap, { sign: true, digits: 1 }) : DASH}</span>`
+    : `<span class="wl-compact__main subtle">${DASH}</span><span class="wl-compact__sub">목표가 없음</span>`;
   const el = h(`<li class="wl-crow"><a class="row" href="${watchHref(w)}" aria-label="${esc(watchLabel(w))}">
       <span class="row__main"><span class="row__title">${esc(w.name)}</span>
         <span class="row__sub">${esc(w.ticker)} ${marketBadge(w.market, w.country)}</span></span>
       <span class="wl-compact__score">${scoreGauge(w.score)}</span>
-      <span class="wl-compact__price num">${price(w.close, w.currency)}</span>
-      <span class="wl-compact__chg num">${changeHtml(w.change_rate, w.country)}</span>
+      <span class="wl-compact__price num"><span class="wl-compact__main">${price(w.close, w.currency)}</span>
+        <span class="wl-compact__sub">${changeHtml(w.change_rate, w.country)}<span class="wl-compact__diff"> · ${diff}</span></span></span>
+      <span class="wl-compact__target num">${target}</span>
+      <span class="wl-compact__memo${w.memo ? "" : " subtle"}" title="${esc(w.memo || "")}">${w.memo ? esc(w.memo) : "메모 없음"}</span>
     </a></li>`);
   el.append(editButton(w));
   return el;
 }
 
-// 모드별 표시 한도 — 컴팩트 최대 8행, 카드 4열×2줄(중간 폭 3열, 좁은 화면 2열). 넘으면 정렬 순서대로 자르고 '+N개 더'
+// 모드별 표시 한도 — 리스트 최대 8행, 카드 4열×2줄(중간 폭 3열, 좁은 화면 2열). 넘으면 정렬 순서대로 자르고 '+N개 더'
 const COMPACT_LIMIT = 8;
 const cardCols = () => (window.innerWidth < 600 ? 2 : window.innerWidth < 1024 ? 3 : 4);   // .wl-grid--home 미디어 쿼리와 맞춤
 const watchLimit = () => (watchView === "compact" ? COMPACT_LIMIT : cardCols() * 2);
 
-// 보기 방식은 브라우저에 저장 — 기본은 컴팩트. 이전 키(watchView)의 값이 새 기본값을 덮지 않도록 새 키를 쓴다
+// 보기 방식은 브라우저에 저장 — 기본은 리스트. 이전 키(watchView)의 값이 새 기본값을 덮지 않도록 새 키를 쓴다
 const WATCH_VIEW_KEY = "watchViewHome";
 function storedWatchView() {
   try { return localStorage.getItem(WATCH_VIEW_KEY) === "card" ? "card" : "compact"; } catch { return "compact"; }
@@ -313,7 +317,7 @@ function renderWatch(items) {
   return grid;
 }
 
-$("#watch-view").append(segmented([{ value: "compact", label: "컴팩트" }, { value: "card", label: "카드" }], watchView, (v) => {
+$("#watch-view").append(segmented([{ value: "compact", label: "리스트" }, { value: "card", label: "카드" }], watchView, (v) => {
   watchView = v;
   try { localStorage.setItem(WATCH_VIEW_KEY, v); } catch { /* 저장 불가면 이번 화면에서만 유지 */ }
   if (watchItems && watchItems.length) $("#watchlist").replaceChildren(renderWatch(watchItems));
@@ -370,7 +374,7 @@ mountSearch();   // .main__inner 맨 앞에 .topbar(검색바)를 붙인다
 const topbar = $(".topbar");
 if (topbar) { topbar.classList.add("topbar--home"); topbar.append(presetBox); }
 mountPresetMenu(presetBox);
-document.addEventListener(PRESET_EVENT, () => { loadWatchlist(); if (topKind === "attractiveness") loadTop(); });   // 지수·환율은 성향과 무관해서 관심종목(과 매력도 순위)만 다시 조회
+document.addEventListener(PRESET_EVENT, () => { loadWatchlist(); loadTop("attractiveness"); });   // 지수·환율은 성향과 무관해서 관심종목(과 매력도 순위)만 다시 조회
 
 // ── [S6-A] 섹터 히트맵 · 시장 심리 지수 ──
 // ---------------------------------------------------------------- 섹터 히트맵 (GET /home/sectors — DB만 읽음, 수집은 갱신 작업)
@@ -383,8 +387,8 @@ function heatTile(s) {
   const label = isNum(c) ? `${s.name} ${changeLabel(c / 100)}` : `${s.name} 데이터 없음`;
   let bg = "var(--card-active)";
   if (isNum(c) && c !== 0) {
-    const mix = Math.round(18 + 72 * Math.min(Math.abs(c) / HEAT_FULL, 1));
-    bg = `color-mix(in srgb, var(${c > 0 ? "--heat-up" : "--heat-down"}) ${mix}%, var(--surface))`;
+    const k = Math.min(Math.abs(c) / HEAT_FULL, 1).toFixed(2);   // 농도 범위(--heat-min·--heat-range)는 테마별 토큰
+    bg = `color-mix(in srgb, var(${c > 0 ? "--heat-up" : "--heat-down"}) calc(var(--heat-min) + var(--heat-range) * ${k}), var(--surface))`;
   }
   const chg = !isNum(c) ? "–" : `${c > 0 ? "▲" : c < 0 ? "▼" : ""}${pct(Math.abs(c) / 100)}`;
   return `<div class="heat__tile" role="listitem" aria-label="${esc(label)}"
@@ -477,9 +481,10 @@ loadSectors({ fallback: true });
 loadSentiment();
 
 // ---------------------------------------------------------------- 내 포트폴리오 요약 (GET /portfolios · /portfolios/{id}/summary — 포트폴리오 화면과 같은 값)
-// 총 평가금액(담은 종목 + 현금) · 평가손익 · 시드 사용률 · 원가 비중 상위 종목 쌓은 막대. 편집은 포트폴리오 화면에서 한다
-const PF_TOP = 3;
+// 총 평가금액(담은 종목 + 현금) · 평가손익 + 종목·현금 비중 도넛과 범례 · 시드 사용률. 편집은 포트폴리오 화면에서 한다
+const PF_TOP = 9;   // 범례·도넛에 따로 보여 줄 종목 수 — 나머지는 "외 n개"로 묶는다
 const PF_KEY = "homePortfolio";   // 고른 포트폴리오는 브라우저에 저장(없거나 지워졌으면 첫 번째)
+const PF_COLORS = ["#2bb3a3", "#5ea8ff", "#b39ddb", "#f5c26b", "#f0729a", "#4fd1c5", "#9ccc65", "#ff9f5a", "#7986cb", color("--lavender")];
 const pfPnlClass = (v) => (v > 0 ? "chg chg--kr-up" : v < 0 ? "chg chg--kr-down" : "chg chg--flat");   // 원화 손익은 국내 관례 색(포트폴리오 화면과 같음)
 const pfPnlHtml = (v, rate) => (v === null ? DASH : `<span class="${pfPnlClass(v)}">${signedKrw(v)}${isNum(rate) ? ` (${pct(rate, { sign: true })})` : ""}</span>`);
 let pfId = null;
@@ -488,40 +493,53 @@ function storedPortfolioId() {
   try { return Number(localStorage.getItem(PF_KEY)) || null; } catch { return null; }
 }
 
-// 시드 사용 막대 한 칸: 칸 안 = 이름, 칸 아래 = 수익률. 너비 = 시드 대비 금액(비중은 그림으로만), 상위 종목은 상세로 가는 링크
-function pfSeg(it, i) {
-  const pnl = it.pnl_rate == null ? "" : `<span class="${pfPnlClass(it.pnl_rate)}">(${pct(it.pnl_rate, { sign: true })})</span>`;
-  const inner = `<span class="home-pf__seg-bar"><span class="home-pf__seg-name">${esc(it.name)}</span></span>
-      <span class="home-pf__seg-pnl num">${pnl}</span>`;
-  const style = `flex:${it.share} 1 0;--seg:var(--pf-seg-${i + 1})`;
-  const label = `${it.name} 원가 비중 ${pct(it.weight, { digits: 1 })}${it.pnl_rate == null ? "" : ` 수익률 ${pct(it.pnl_rate, { sign: true })}`}`;
-  return it.ticker
-    ? `<a class="home-pf__seg" role="listitem" href="${stockUrl(it.market, it.ticker)}" style="${style}" title="${esc(label)}" aria-label="${esc(label)}">${inner}</a>`
-    : `<span class="home-pf__seg" role="listitem" style="${style}" title="${esc(label)}" aria-label="${esc(label)}">${inner}</span>`;
+// 도넛·범례 조각 = 평가금액 큰 순 종목(시세 없으면 원가) + "외 n개" + 현금. 비중 = 총 평가금액(현금 포함) 대비
+function pfSlices(s) {
+  const items = s.items.map((it) => ({ ...it, amount: it.value_krw ?? it.cost_krw })).sort((a, b) => b.amount - a.amount);
+  const slices = items.slice(0, PF_TOP).map((it, i) => ({ name: it.name, market: it.market, ticker: it.ticker, amount: it.amount, color: PF_COLORS[i % PF_COLORS.length] }));
+  const rest = items.slice(PF_TOP);
+  if (rest.length) slices.push({ name: `외 ${rest.length}개`, amount: rest.reduce((a, it) => a + it.amount, 0), color: color("--text-2") });
+  if (s.remaining_krw > 0) slices.push({ name: "현금", amount: s.remaining_krw, color: color("--card-active") });
+  const total = slices.reduce((a, x) => a + x.amount, 0);
+  return slices.map((x) => ({ ...x, share: total > 0 ? x.amount / total : 0 }));
+}
+
+// 범례 한 줄: 색 · 이름(길면 말줄임, 전체는 툴팁) · 비중. 종목은 상세로 가는 링크
+function pfLegendRow(x) {
+  const inner = `<i style="background:${x.color}"></i><span class="home-pf__legend-name">${esc(x.name)}</span><span class="home-pf__legend-pct num">${pct(x.share, { digits: 1 })}</span>`;
+  const title = esc(`${x.name} ${krw(x.amount)} (${pct(x.share, { digits: 1 })})`);
+  return x.ticker
+    ? `<a class="home-pf__legend-row" role="listitem" href="${stockUrl(x.market, x.ticker)}" title="${title}">${inner}</a>`
+    : `<span class="home-pf__legend-row" role="listitem" title="${title}">${inner}</span>`;
+}
+
+function drawPfDonut(canvas, slices) {
+  draw(canvas, {
+    type: "doughnut",
+    data: { labels: slices.map((x) => x.name), datasets: [{ data: slices.map((x) => x.amount), backgroundColor: slices.map((x) => x.color), borderWidth: 0, spacing: 1 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: "58%",
+      plugins: { tooltip: { callbacks: { label: (ctx) => `${ctx.label} ${krw(ctx.raw)} (${pct(slices[ctx.dataIndex].share, { digits: 1 })})` } } } },
+  });
 }
 
 function renderPortfolioWidget(s) {
   const usage = Math.min(1, s.usage_rate ?? 0);
-  const items = [...s.items].sort((a, b) => b.weight - a.weight);
-  // 시드 사용 막대 = 상위 3종목 + "외 n개" + 남은 현금. 칸 너비는 원가 비중 × 사용률(시드 대비)
-  const segs = items.slice(0, PF_TOP).map((it) => ({ ...it, share: it.weight * usage }));
-  const rest = items.slice(PF_TOP);
-  if (rest.length) {
-    const weight = rest.reduce((a, it) => a + it.weight, 0);
-    segs.push({ name: `외 ${rest.length}개`, weight, share: weight * usage, pnl_rate: null });
-  }
-  const cash = 1 - usage > 0 ? `<span class="home-pf__seg home-pf__seg--cash" role="listitem" style="flex:${1 - usage} 1 0"
-      title="현금 ${esc(krw(s.remaining_krw))}" aria-label="현금 ${esc(krw(s.remaining_krw))}"><span class="home-pf__seg-bar"></span></span>` : "";
+  const items = s.items;
+  const slices = pfSlices(s);
   const el = h(`<div class="home-pf__inner">
-      <div class="home-pf__hero">
-        <span class="subtle">총 평가금액</span>
-        <strong class="home-pf__big num">${krw(s.total_value_krw + s.remaining_krw)}</strong>
-        <span class="home-pf__total-pnl num">${items.length ? pfPnlHtml(s.total_pnl_krw, s.total_pnl_rate) : "담은 종목 없음"}</span>
+      <div class="home-pf__main">
+        <div class="home-pf__left">
+          <div class="home-pf__hero">
+            <span class="subtle">총 평가금액</span>
+            <strong class="home-pf__big num">${krw(s.total_value_krw + s.remaining_krw)}</strong>
+            <span class="home-pf__total-pnl num">${items.length ? pfPnlHtml(s.total_pnl_krw, s.total_pnl_rate) : "담은 종목 없음"}</span>
+          </div>
+          ${items.length ? `<div class="home-pf__legend" role="list" aria-label="평가금액 비중">${slices.map(pfLegendRow).join("")}</div>` : ""}
+        </div>
+        ${items.length ? `<div class="home-pf__donut"><canvas role="img" aria-label="종목·현금 평가금액 비중 도넛 차트"></canvas>
+          <div class="home-pf__donut-center"><span class="subtle">종목 평가</span><strong class="num">${krw(s.total_value_krw, { compact: true })}</strong></div></div>` : ""}
       </div>
-      <div class="home-pf__usage">
-        <div class="home-pf__stack" role="list" aria-label="시드 사용률 ${pct(usage, { digits: 1 })} — 담은 종목 원가 비중 순">${segs.map(pfSeg).join("")}${cash}</div>
-        <span class="subtle">시드 ${krw(s.seed_krw, { compact: true })} 중 ${pct(usage, { digits: 1 })} 사용 · 현금 ${krw(s.remaining_krw, { compact: true })}</span>
-      </div>
+      <span class="home-pf__usage subtle">시드 ${krw(s.seed_krw, { compact: true })} 중 ${pct(usage, { digits: 1 })} 사용 · 현금 ${krw(s.remaining_krw, { compact: true })}</span>
     </div>`);
   if (!items.length) {
     el.append(emptyState({ title: "아직 담은 종목이 없습니다", body: "주식 리스트나 종목 상세에서 종목을 담아 보세요.",
@@ -535,9 +553,13 @@ function renderPortfolioWidget(s) {
 async function loadPortfolioSummary() {
   const box = $("#pf-summary");
   $("#pf-more").href = `/portfolio?id=${pfId}`;
+  destroyCharts(box);
   box.replaceChildren(skeleton("row", 4));
   try {
-    box.replaceChildren(renderPortfolioWidget(await getPortfolioSummary(pfId)));
+    const s = await getPortfolioSummary(pfId);
+    box.replaceChildren(renderPortfolioWidget(s));
+    const canvas = box.querySelector(".home-pf__donut canvas");   // 도넛은 화면에 붙은 뒤 그려야 크기를 잡는다
+    if (canvas) drawPfDonut(canvas, pfSlices(s));
   } catch (err) {
     box.replaceChildren(errorState(err, loadPortfolioSummary));
   }
@@ -575,54 +597,54 @@ async function loadPortfolioWidget() {
 loadPortfolioWidget();
 
 // ---------------------------------------------------------------- 시장 주목 종목 TOP 5 (GET /home/ranking)
-// 행 = 순위 · 종목명(종목코드·시장 배지, 관심종목이면 ★) · 그 탭의 순위 근거 값 하나. 가격·등락률은 관심종목·리스트에 있으므로 넣지 않는다
-const TOP_KINDS = [
-  { value: "volume_surge", label: "거래량 급증", empty: "20거래일 거래량이 쌓인 종목이 없습니다" },
-  { value: "attractiveness", label: "매력도 순위", empty: "매력도 점수가 계산된 종목이 없습니다",
-    note: "현재는 공개 재무·시세로 계산한 규칙 기반 점수이며 투자 권유가 아닙니다." },
-];
-let topCountry = "KR";
-let topKind = "volume_surge";
+// 카드 4장 = 순위 기준(거래량 급증·매력도) × 시장(국내·미국). 탭을 오가지 않고 한눈에 비교한다.
+// 행 = 순위 · 종목명(종목코드·시장 배지, 관심종목이면 ★) · 그 카드의 순위 근거 값 하나. 가격·등락률은 관심종목·리스트에 있으므로 넣지 않는다
+const TOP_KINDS = {
+  volume_surge: { eyebrow: "VOLUME SURGE", title: "거래량 급증", empty: "20거래일 거래량이 쌓인 종목이 없습니다" },
+  attractiveness: { eyebrow: "TOP SCORE", title: "매력도 순위", empty: "매력도 점수가 계산된 종목이 없습니다" },
+};
+const TOP_COUNTRIES = { KR: "국내", US: "미국" };
+const TOP_CARDS = ["volume_surge", "attractiveness"].flatMap((kind) => ["KR", "US"].map((country) => ({ kind, country })));
 
-function topValue(s) {
-  if (topKind === "volume_surge") {
+function topValue(kind, s) {
+  if (kind === "volume_surge") {
     return `<span class="row__value num" title="당일 거래량 ÷ 직전 20거래일 평균 (기준일 ${esc(shortDate(s.as_of))})">${num(s.value, 1)}배</span>`;
   }
   const band = scoreBand(s.value);
-  return `<span class="row__value top-score"><strong class="num">${Math.round(s.value)}</strong>${band
-    ? `<span class="wl-compact__band"><i style="background:var(--gauge-${band.index})"></i>${band.label}</span>` : ""}</span>`;
+  return `<span class="row__value top-score"${band ? ` title="${esc(band.label)}"` : ""}>${band
+    ? `<i style="background:var(--gauge-${band.index})" aria-hidden="true"></i>` : ""}<strong class="num">${Math.round(s.value)}</strong>${band
+    ? `<span class="sr-only">${esc(band.label)}</span>` : ""}</span>`;
 }
 
-function topRow(s) {
+function topRow(kind, s) {
   return h(`<li><a class="row" href="${stockUrl(s.market, s.ticker)}">
       <span class="rank">${s.rank}</span>
       <span class="row__main"><span class="row__title">${esc(s.name)}${s.is_watched
         ? ' <span class="top-star" role="img" aria-label="관심종목">★</span>' : ""}</span>
         <span class="row__sub">${esc(s.ticker)} ${marketBadge(s.market, s.country)}</span></span>
-      ${topValue(s)}
+      ${topValue(kind, s)}
     </a></li>`);
 }
 
-function loadTop() {
-  const kind = TOP_KINDS.find((k) => k.value === topKind);
-  $("#top-more").href = `/stocks?country=${topCountry}`;
-  $("#top-note").textContent = kind.note || "";
-  $("#top-note").hidden = !kind.note;
-  return load($("#top-list"), {
-    skeleton: skeleton("row", 5),
-    fetch: async () => (await getHomeRanking(topKind, topCountry, 5)).items,
-    render: (items) => {
-      const ul = h('<ul class="list card card--flush"></ul>');
-      ul.append(...items.map(topRow));
-      return ul;
-    },
-    empty: emptyState({ title: kind.empty, body: "데이터 적재 후 다시 확인해 주세요." }),
-  });
-}
+// 카드 뼈대는 한 번만 만든다. onlyKind를 주면 그 기준 카드만 다시 불러온다(투자 성향 변경 → 매력도만)
+$("#top-list").replaceChildren(...TOP_CARDS.map(({ kind, country }) => h(`<section class="card top-card" aria-labelledby="h-top-${kind}-${country}">
+    <p class="top-card__eyebrow">${TOP_KINDS[kind].eyebrow} · ${country}</p>
+    <h3 class="top-card__title" id="h-top-${kind}-${country}">${TOP_KINDS[kind].title} <span>${TOP_COUNTRIES[country]}</span></h3>
+    <div class="top-card__body" data-top="${kind}-${country}"></div>
+  </section>`)));
 
-$("#top-metric").append(segmented(TOP_KINDS, topKind,
-  (v) => { topKind = v; loadTop(); }, { label: "순위 기준 선택" }));
-$("#top-tabs").append(segmented([{ value: "KR", label: "국내" }, { value: "US", label: "미국" }], topCountry,
-  (v) => { topCountry = v; loadTop(); }, { label: "순위 시장 선택" }));
+function loadTop(onlyKind) {
+  return Promise.all(TOP_CARDS.filter((c) => !onlyKind || c.kind === onlyKind).map(({ kind, country }) =>
+    load($("#top-list").querySelector(`[data-top="${kind}-${country}"]`), {
+      skeleton: skeleton("row", 5),
+      fetch: async () => (await getHomeRanking(kind, country, 5)).items,
+      render: (items) => {
+        const ul = h('<ul class="list"></ul>');
+        ul.append(...items.map((s) => topRow(kind, s)));
+        return ul;
+      },
+      empty: emptyState({ title: TOP_KINDS[kind].empty, body: "데이터 적재 후 다시 확인해 주세요." }),
+    })));
+}
 
 loadTop();

@@ -486,7 +486,7 @@
 ## 4. 화면 목록과 API 연결 (Stage 3)
 | 화면 | URL | 영역 | 호출 API |
 |---|---|---|---|
-| 공통 | 모든 화면 | 사이드바(대시보드·주식 리스트·모의 포트폴리오), 마지막 갱신 시각·작업별 상태 점(오래되면 강조)·새로고침 버튼 | `GET /market/refresh/status`, 새로고침: `POST /market/refresh` 후 현재 화면 다시 불러오기 |
+| 공통 | 모든 화면 | 사이드바(대시보드·주식 리스트·모의 포트폴리오·설정), 마지막 갱신 시각·작업별 상태 점(오래되면 강조)·새로고침 버튼 | `GET /market/refresh/status`, 새로고침: `POST /market/refresh` 후 현재 화면 다시 불러오기 |
 | 대시보드 홈 | `/` | 지수·환율 카드 | `GET /market/indices`, `GET /market/fx` |
 | | | 관심종목 카드·▲▼ 순서 변경 | `GET /watchlist`, `PATCH /watchlist/order` |
 | 주식 리스트 | `/stocks` | 순위 리스트·탭·정렬 | `GET /stocks?country=&sort=&order=&group=&q=` (offset이 끝을 넘어도 `total`은 전체 개수) |
@@ -499,6 +499,7 @@
 | | | ★·포트폴리오에 담기 | ★: 상세의 `is_watched` → `POST`·`DELETE /watchlist`. 담기: 담기 팝업(아래) |
 | 모의 포트폴리오 | `/portfolio` | 포트폴리오 선택·생성·수정·삭제 | `GET·POST /portfolios`, `PUT·DELETE /portfolios/{id}` |
 | | | 요약·비중 차트·담은 종목 표, 항목 수정·삭제 | `GET /portfolios/{id}/summary`, `PUT·DELETE /portfolios/{id}/items/{item_id}` |
+| 설정 | `/settings` | 화면 테마(라이트 기본 / 다크) — 2026-10-19 추가 | 없음 (브라우저 localStorage `stockmind:theme`) |
 | 담기 팝업 | 리스트·상세에서 열림 | 포트폴리오 선택, 수량·금액·비중 모드 미리보기, 시드 초과 안내 | `GET /portfolios`, `GET /market/fx`(USD 종목), `POST /portfolios/{id}/items` |
 
 ## 5. 에러 코드 (Stage 0~3)

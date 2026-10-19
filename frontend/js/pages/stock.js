@@ -62,7 +62,7 @@ function loadCandles() {
           labels: c.map((x) => x.date),
           datasets: [
             { type: "line", label: "종가", data: c.map((x) => x.close), borderColor: line, borderWidth: 2, pointRadius: 0, tension: 0.2, yAxisID: "y", order: 1 },
-            { type: "bar", label: "거래량", data: c.map((x) => x.volume), backgroundColor: "rgba(230,221,242,.28)", borderRadius: 4, yAxisID: "v", order: 2 },
+            { type: "bar", label: "거래량", data: c.map((x) => x.volume), backgroundColor: color("--lavender-fill"), borderRadius: 4, yAxisID: "v", order: 2 },
           ],
         },
         options: {
@@ -277,7 +277,7 @@ function summarySentence(pos) {
 
 function drawRadar(canvas, pos, peer) {
   const datasets = [{
-    label: "이 종목", data: FACTORS.map((f) => pos[f.key]), borderColor: color("--lavender"), backgroundColor: "rgba(230,221,242,.22)",
+    label: "이 종목", data: FACTORS.map((f) => pos[f.key]), borderColor: color("--lavender"), backgroundColor: color("--lavender-fill"),
     borderWidth: 2, pointRadius: 3, pointBackgroundColor: color("--lavender"), spanGaps: true,
   }];
   if (peer) {
@@ -556,7 +556,7 @@ const PEER_COLS = [
   { key: "score", label: "매력도(균형)", fmt: (v) => (v === null ? DASH : num(v, 0)) },
 ];
 // 경쟁 비교 선 색: 대상 종목은 라벤더 굵은 선, 나머지는 등락 의미가 없는 구분색
-const TARGET_COLOR = "#e6ddf2";
+const TARGET_COLOR = color("--lavender");
 const PEER_COLORS = ["#5ea8ff", "#f5c26b", "#4fd1c5", "#f0a6ca", "#9ccc65", "#b39ddb"];
 let peers = null, groupId = null, peerRange = "3m", peerMetric = "return_3m";
 

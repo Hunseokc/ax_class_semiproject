@@ -50,7 +50,8 @@ def _logs(engine, source: str, n: int, when: datetime) -> None:
 @pytest.fixture
 def budget(monkeypatch):
     def set_(kr: int, us: int = 0):
-        monkeypatch.setattr(background, "config", lambda: {"dart_calls_per_day": kr, "sec_calls_per_day": us})
+        monkeypatch.setattr(background, "config", lambda: {"dart_calls_per_day": kr, "sec_calls_per_day": us,
+                                                         "us_rank_pool": 1500, "us_rank_days": 30})
     return set_
 
 
@@ -105,3 +106,43 @@ def test_no_budget_left_makes_no_external_calls(engine, budget):
     pv = replace(make_providers(), kr_financial=FakeFinancial("DART"), kr_bulk=bulk)
     assert run_background(engine, pv)["KR"]["queued"] == 0
     assert bulk.count == 0 and pv.kr_financial.count == 0
+
+
+# ------------------------------------------------------------------ 미국: 시가총액(SEC 발행주식수 × 종가) 순위 (D11)
+def _us_listed(engine, n: int, start: int = 201) -> list[int]:
+    ids = list(range(start, start + n))
+    with engine.begin() as conn:
+        conn.execute(text("""INSERT INTO stocks (stock_id, market_id, ticker, name, coverage, cik)
+                             VALUES (:i, 2, :t, :t, 'listed', :c)"""), [{"i": i, "t": f"U{i}", "c": f"{i:010d}"} for i in ids])
+    return ids
+
+
+def _us_providers(ids, shares: dict[int, int], closes: dict[int, int]):
+    from tests.fakes import FakeReference, FakeUsBatch
+    batch = FakeUsBatch()
+    batch.closes = {f"U{i}": Decimal(c) for i, c in closes.items()}
+    ref = FakeReference(shares={f"{i:010d}": s for i, s in shares.items()})
+    return replace(make_providers(), us_financial=FakeFinancial("SEC"), us_reference=ref, us_batch_price=batch)
+
+
+def test_rank_us_orders_by_shares_times_close_and_keeps_pool(engine, monkeypatch):
+    ids = _us_listed(engine, 4)
+    monkeypatch.setattr(background, "config", lambda: {"us_rank_pool": 2, "us_rank_days": 30})
+    pv = _us_providers(ids, {ids[0]: 10, ids[1]: 1000, ids[2]: 100}, {ids[0]: 50, ids[1]: 1, ids[2]: 20})   # ids[3]: 주식수 없음
+    assert background.rank_us(engine, pv) == 2
+    with engine.connect() as conn:
+        ranks = dict(conn.execute(text("SELECT stock_id, cap_rank FROM stocks WHERE stock_id >= 201")).all())
+    assert ranks == {ids[2]: 1, ids[1]: 2, ids[0]: None, ids[3]: None}   # 2000 > 1000 > 500, 상위 2개만
+    assert background.rank_us(engine, pv) is None and pv.us_reference.count == 1   # 30일 안에는 다시 매기지 않음
+
+
+def test_us_background_takes_only_ranked_stocks(engine, budget):
+    budget(kr=0, us=10)
+    ids = _us_listed(engine, 3)
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE stocks SET cap_rank = 2, cap_ranked_at = now() WHERE stock_id = :i"), {"i": ids[0]})
+        conn.execute(text("UPDATE stocks SET cap_rank = 1, cap_ranked_at = now() WHERE stock_id = :i"), {"i": ids[2]})
+    with engine.connect() as conn:
+        assert priority_queue(conn, "US", 10, background._us_ranking(conn), ranked_only=True) == [ids[2], ids[0]]   # 순위 순
+    out = run_background(engine, _us_providers(ids, {}, {}))
+    assert out["US"]["queued"] == 2 and set(out["US"]["statuses"]) == {f"U{ids[2]}", f"U{ids[0]}"}   # 순위 없는 종목 제외

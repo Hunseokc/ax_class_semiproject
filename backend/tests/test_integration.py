@@ -11,7 +11,7 @@ from tests.conftest import TABLES
 API = "/api/v1"
 
 
-@pytest.mark.parametrize("path", ["/", "/stocks", "/stocks/KOSPI/005930", "/portfolio"])
+@pytest.mark.parametrize("path", ["/", "/stocks", "/stocks/KOSPI/005930", "/portfolio", "/settings"])
 def test_pages_are_served(client, path):
     r = client.get(path)
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")

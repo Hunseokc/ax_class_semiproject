@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>let t = null; try { t = localStorage.getItem("stockmind:theme"); } catch {} if (t !== "dark") document.documentElement.dataset.theme = "light";</script>   <!-- 테마(기본 라이트): 첫 그리기 전에 적용 (깜빡임 방지) -->
   <link rel="stylesheet" href="/static/css/tokens.css">
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/components.css">
@@ -70,9 +71,9 @@
 
         <section class="section" aria-labelledby="h-top">
           <div class="section__head"><h2 id="h-top">시장 주목 종목 TOP 5</h2>
-            <div class="section__tools"><div id="top-metric"></div><div id="top-tabs"></div><a class="section__link" id="top-more" href="/stocks">더 보기 →</a></div></div>
-          <div id="top-list"></div>
-          <p class="top-note" id="top-note"></p>
+            <div class="section__tools"><a class="section__link" href="/stocks">주식 리스트 →</a></div></div>
+          <div class="top-grid" id="top-list"></div>
+          <p class="top-note">매력도는 공개 재무·시세로 계산한 규칙 기반 점수(투자 성향 기준)이며 투자 권유가 아닙니다.</p>
         </section>
 
         <p class="disclaimer">시세는 일봉 기준이며 장중 실시간이 아닙니다. 이 화면의 어떤 정보도 투자 권유가 아닙니다.<br>시장 심리 지수는 StockMind가 지수 가격·변동성 데이터로 계산한 간이 지표이며 CNN Fear &amp; Greed 지수와 다릅니다.</p>
