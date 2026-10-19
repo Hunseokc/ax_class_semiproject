@@ -42,7 +42,7 @@ METRICS: dict[str, Metric] = {
     "operating_margin": Metric("quality", "영업이익률", 1, "재무 없음 또는 매출 0"),
     "revenue_yoy":      Metric("growth", "매출 YoY", 1, "직전 FY 없음 또는 직전 매출 ≤ 0"),
     "eps_change_yield": Metric("growth", "EPS 변화/주가", 1, "직전 FY 없음 또는 주식수 없음"),
-    "debt_ratio":       Metric("safety", "부채비율", -1, "재무(부채·자본) 없음"),
+    "max_drawdown":     Metric("safety", "1년 최대 낙폭", 1, "일봉 252개 미만"),
     "volatility":       Metric("safety", "변동성(1년)", -1, "일봉 253개 미만"),
     "momentum":         Metric("momentum", "12-1개월 수익률", 1, "일봉 127개 미만"),
 }

@@ -89,12 +89,13 @@ class FakeValuation(CallLog):
 class FakeFinancial(CallLog):
     """직전 연도·그 전 연도 FY 2개."""
 
-    def __init__(self, source: str):
+    def __init__(self, source: str, delay: float = 0.0):
         super().__init__()
-        self.source = source
+        self.source, self.delay = source, delay      # delay: 호출마다 기다리는 초(잠금 대기 테스트용)
 
     def get_annual_financials(self, stock: StockRef, years: int) -> list[Financial]:
         self.record(stock.ticker, years)
+        time.sleep(self.delay)
         y = date.today().year - 1
         return [Financial(date(yy, 12, 31), "FY", revenue=Decimal(100 + i * 10), operating_income=Decimal(10),
                           net_income=Decimal(8 + i), total_assets=Decimal(300), total_equity=Decimal(100),
@@ -106,12 +107,13 @@ class FakeFinancial(CallLog):
 
 
 class FakeDisclosure(CallLog):
-    def __init__(self, source: str):
+    def __init__(self, source: str, delay: float = 0.0):
         super().__init__()
-        self.source = source
+        self.source, self.delay = source, delay
 
     def get_disclosures(self, stock: StockRef, start: date, end: date) -> list[Disclosure]:
         self.record(stock.ticker, start, end)
+        time.sleep(self.delay)
         return [Disclosure(rcept_no=f"{stock.ticker}-1", title="사업보고서", report_type="정기공시",
                            filed_at=datetime.now(timezone.utc) - timedelta(days=30), url=None)]   # 재무를 받기 전에 낸 보고서
 

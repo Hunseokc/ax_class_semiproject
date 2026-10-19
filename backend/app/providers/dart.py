@@ -27,8 +27,9 @@ log = logging.getLogger(__name__)
 BASE = "https://opendart.fss.or.kr/api"
 SEOUL = ZoneInfo("Asia/Seoul")
 _throttle = Throttle(0.6)
-# OpenDART는 분당 100회 이상 호출하면 이용이 제한될 수 있다 → 재시도를 포함해 60초에 90회 이하로 막는다
-_limiter = WindowLimiter(90, 60.0)
+# OpenDART는 분당 100회 이상 호출하면 이용이 제한될 수 있다. 잠금이 회사 단위라 프로세스 2개(API 서비스 + Job)가
+# 번갈아 부를 수 있어 프로세스마다 절반(45)으로 막는다 → 합계 90 이하 (D2). 프로세스가 3개 이상이 되면 다시 검토
+_limiter = WindowLimiter(45, 60.0)
 
 STATUS_OK, STATUS_NO_DATA = "000", "013"
 

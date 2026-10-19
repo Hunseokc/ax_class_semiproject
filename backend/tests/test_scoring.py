@@ -210,6 +210,15 @@ def universe(engine):
     return closes
 
 
+def _mdd(closes) -> float:
+    # 누적 최고가 대비 낙폭의 최솟값(views.sql mdd와 같은 정의)
+    peak, worst = closes[0], 0.0
+    for c in closes:
+        peak = max(peak, c)
+        worst = min(worst, c / peak - 1)
+    return worst
+
+
 def reference_raw(closes) -> dict[int, dict[str, float | None]]:
     out = {}
     for s, cl in closes.items():
@@ -228,7 +237,7 @@ def reference_raw(closes) -> dict[int, dict[str, float | None]]:
             "operating_margin": cur[2] / cur[1] if cur and cur[1] else None,
             "revenue_yoy": cur[1] / prev[1] - 1 if prev and prev[1] > 0 else None,
             "eps_change_yield": (cur[3] - prev[3]) / shares / close if prev else None,
-            "debt_ratio": cur[5] / cur[4] if cur and cur[4] > 0 else None,
+            "max_drawdown": _mdd(cl[-252:]) if len(cl) >= 252 else None,
             "volatility": (statistics.stdev([cl[-253:][i] / cl[-253:][i - 1] - 1 for i in range(1, 253)]) * math.sqrt(252)
                            if len(cl) >= 253 else None),
             "momentum": (cl[-22] / cl[-253] - 1 if len(cl) >= 253 else cl[-22] / cl[-127] - 1 if len(cl) >= 127 else None),
@@ -253,9 +262,6 @@ def reference_scores(raw):
             vals = {s: raw[s][metric] for s in raw if COUNTRY[s] == c and raw[s][metric] is not None}
             for s, z in (zs(vals) if vals else {}).items():
                 z_raw[s][metric] = round(max(-3, min(3, z * d.direction)), 4)
-        for s in raw:                                                   # 자본 ≤ 0 부채비율
-            if metric == "debt_ratio" and FIN.get(s) and FIN[s][-1][4] <= 0:
-                z_raw[s][metric] = -3.0
     z_adj = {s: {} for s in raw}
     for metric in METRICS:
         for s in raw:
@@ -265,6 +271,9 @@ def reference_scores(raw):
             mates = [t for t in raw if g is not None and PRIMARY.get(t) == g and COUNTRY[t] == COUNTRY[s] and metric in z_raw[t]]
             n = len(mates)
             z = z_raw[s][metric]
+            if METRICS[metric].factor == "safety":                    # 안정성은 섹터 중립화하지 않는다
+                z_adj[s][metric] = z
+                continue
             z_adj[s][metric] = round(z - n / (n + K) * sum(z_raw[t][metric] for t in mates) / n if n > 1 else z, 4)
     fac = {s: {f: statistics.mean(v for m, v in z_adj[s].items() if METRICS[m].factor == f)
                for f in FACTORS if any(METRICS[m].factor == f for m in z_adj[s])} for s in raw}
@@ -319,14 +328,14 @@ def test_boundary_cases(engine, universe):
     compute_scores(engine, as_of=D)
     with engine.connect() as conn:
         ep = read(conn, "z_raw", "earnings_yield")
-        debt, roe = read(conn, "z_raw", "debt_ratio"), read(conn, "raw_value", "roe")
+        roe = read(conn, "raw_value", "roe")
         sc = scores_by(conn)
     positive_eps = [s for s in (1, 6, 7, 8)]
     # 적자(EPS < 0 제공 / EPS 미제공 + 순이익 < 0 → 대체 계산)는 E/P 하위
     assert max(ep[2], ep[5]) < min(ep[s] for s in positive_eps)
     assert any("EPS 미제공" in n for n in sc[5]["data_quality"]["notes"])
-    # 자본 ≤ 0: ROE NULL, 부채비율 Z = −3 고정
-    assert roe[6] is None and debt[6] == -3
+    # 자본 ≤ 0: ROE NULL
+    assert roe[6] is None
     assert sc[6]["data_quality"]["missing_metrics"]["roe"] == METRICS["roe"].null_reason
     # 직전 매출 ≤ 0 → 매출 YoY NULL
     assert "revenue_yoy" in sc[5]["data_quality"]["missing_metrics"]
@@ -335,6 +344,27 @@ def test_boundary_cases(engine, universe):
     assert "momentum" in sc[7]["data_quality"]["missing_metrics"] and "notes" not in sc[1]["data_quality"]
     # 유효 팩터 1개(value)뿐인 카카오(8) → 점수 NULL
     assert sc[8]["factor_coverage"] == 1 and sc[8]["score"] is None
+
+
+def test_safety_factor_is_not_sector_neutralized(engine, universe):
+    """안정성 지표는 z_adj = z_raw, 다른 팩터는 주 그룹(n > 1)이면 중립화가 그대로 걸린다."""
+    compute_scores(engine, as_of=D)
+    with engine.connect() as conn:
+        safety = conn.execute(text("""SELECT z_raw, z_adj FROM stock_metric_values
+                                      WHERE as_of = :d AND factor = 'safety' AND z_raw IS NOT NULL"""), {"d": D}).all()
+        roe_raw, roe_adj = read(conn, "z_raw", "roe"), read(conn, "z_adj", "roe")
+    assert safety and all(r.z_adj == r.z_raw for r in safety)
+    assert roe_adj[1] != roe_raw[1] and roe_adj[2] != roe_raw[2]       # 반도체(1, 2) 수익성은 중립화
+
+
+def test_max_drawdown_null_reason_is_short_history(engine, universe):
+    """일봉 252개 미만(종목 7: 100개)이면 낙폭이 없고 사유가 '일봉 252개 미만'. 일봉 300개인 종목 1은 값이 있다."""
+    compute_scores(engine, as_of=D)
+    with engine.connect() as conn:
+        mdd = read(conn, "raw_value", "max_drawdown")
+        sc = scores_by(conn)
+    assert sc[7]["data_quality"]["missing_metrics"]["max_drawdown"] == "일봉 252개 미만"
+    assert mdd[7] is None and mdd[1] is not None and mdd[1] <= 0
 
 
 def test_listed_stocks_are_excluded_from_universe(engine, universe):
@@ -450,8 +480,8 @@ def test_analysis_api_returns_contributions_metrics_and_rank(client, engine, uni
     assert [m["metric"] for m in a["metrics"]] == list(METRICS) and a["metrics"][0]["label"] == "이익수익률 E/P"
     vol = next(m for m in a["metrics"] if m["metric"] == "volatility")
     assert vol["direction"] == -1 and vol["raw_value"] is not None and vol["z_adj"] is not None
-    # 국가 내 순위: KR에서 점수가 있는 종목(1, 2, 5, 6, 7) 중
-    assert a["rank"]["country"] == "KR" and a["rank"]["total"] == 5 and 1 <= a["rank"]["position"] <= 5
+    # 국가 내 순위: KR에서 점수가 있는 종목(1, 2, 5, 6) 중 — 7은 일봉 100개라 안정성(낙폭·변동성)이 없어 유효 팩터 2개
+    assert a["rank"]["country"] == "KR" and a["rank"]["total"] == 4 and 1 <= a["rank"]["position"] <= 4
     none = client.get(f"{API}/stocks/KOSPI/035720/analysis").json()["attractiveness"]
     assert none["score"] is None and none["rank"] is None and none["preset"]["code"] == "balanced"
     assert all(f["contribution"] is None for f in none["factors"].values())
@@ -497,3 +527,12 @@ def test_refresh_runs_scorer(client, engine, universe):
     body = client.get(f"{API}/stocks/KOSPI/005930/analysis").json()
     assert body["attractiveness"]["score"] is not None and "투자 권유가 아닙니다" in body["disclaimer"]
     assert client.get(f"{API}/statistics/overview").json()["stock_scores"] == 8 * 4
+
+def test_analysis_includes_fin_basis(client, engine, universe):
+    before = client.get(f"{API}/stocks/KOSPI/005930/analysis").json()["attractiveness"]
+    assert before["fin_basis"] == []                                    # 점수가 없으면 빈 배열
+    compute_scores(engine, as_of=D)
+    kr = client.get(f"{API}/stocks/KOSPI/005930/analysis").json()["attractiveness"]
+    us = client.get(f"{API}/stocks/NASDAQ/AAPL/analysis").json()["attractiveness"]
+    assert kr["fin_basis"] == [{"fiscal_year": 2024, "stocks": 5}]       # KR 재무 있는 5종목 모두 FY2024
+    assert us["fin_basis"] == [{"fiscal_year": 2025, "stocks": 1}, {"fiscal_year": 2024, "stocks": 1}]
