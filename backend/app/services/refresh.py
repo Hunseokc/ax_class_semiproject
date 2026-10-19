@@ -20,6 +20,7 @@ from sqlalchemy import Connection, Engine, text
 from app.ingest import jobs
 from app.ingest.universe import FREQUENT_SQL
 from app.providers.factory import Providers
+from app.services import sentiment
 from app.services.fx import FxService, utcnow
 
 log = logging.getLogger(__name__)
@@ -145,7 +146,13 @@ class RefreshService:
             status = "SUCCESS" if not quote.stale and daily == "SUCCESS" else ("FAILED" if quote.stale and daily != "SUCCESS" else "PARTIAL")
             return status, {}, f"USD/KRW {quote.usd_krw}" + (" (stale)" if quote.stale else "")
         if job_type == "INDICES":
-            return (*_summarize(jobs.load_indices(self.engine, self.providers)), None)
+            result = _summarize(jobs.load_indices(self.engine, self.providers))
+            for market in sentiment.INDEX_CODE:      # 시장 심리 저장(홈 방문과 무관) — 상세 시장·섹터 점수의 재료
+                try:
+                    sentiment.ensure_sentiment(self.engine, market, self.clock())
+                except Exception:  # noqa: BLE001 — 심리 계산 실패가 지수 작업 상태를 바꾸지 않는다
+                    log.exception("시장 심리 저장 실패(%s)", market)
+            return (*result, None)
         if job_type == "PRICES":
             return (*_summarize(jobs.load_prices(self.engine, self.providers, stock_ids=stock_ids)), None)
         if job_type == "VALUATION":
