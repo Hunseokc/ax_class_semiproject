@@ -282,3 +282,10 @@ sectors:
 # 수집 적재 공통
 ingest:
   flush_every: 20         # 재무·공시 적재를 몇 개 회사마다 한 트랜잭션으로 저장할지 (D3). 상세 수집(회사 1개)은 결과가 같다
+
+# 백그라운드 재무 적재(상장 목록 종목을 우선순위대로 미리 받기, app/ingest/background.py)
+# 단위: ingestion_logs 행 수(회사 1건 = 1행 ≈ DART 호출 2~5번). 상세 화면·07:00 갱신이 쓴 행도 같이 센다
+background:
+  dart_calls_per_day: 2000   # 오늘(서울 0시부터) source='DART' 재무·공시 행이 이 수에 닿으면 멈춤 — 키 1개 하루 약 2만 번의 절반 이하 (D12 시작값)
+  sec_calls_per_day: 1000    # source='SEC' 같은 기준 (미국은 순위 소스 D11 결정 뒤 사용)
+  run_at_kst: "08:00"        # 07:00 비교군 갱신 뒤

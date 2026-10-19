@@ -1,7 +1,8 @@
 """앱 안 스케줄러 — 서버가 떠 있는 동안 주기 작업을 실행한다(SCHEDULER_ENABLED=false로 끌 수 있음).
 
 - 노출 종목(+관심종목·포트폴리오 종목) 갱신: REFRESH_TTL_HOURS(4시간)마다 POST /market/refresh와 같은 작업
-- 비교군 갱신: 매일 daily_at_kst(07:00 KST) 이후 1회 — 선정(30일마다)·평시 데이터·점수
+- 비교군 갱신: 매일 daily_at_kst(07:00 KST) 이후 1회 — 공시 증분·선정(30일마다)·평시 데이터·점수
+- 백그라운드 재무 적재: 매일 background.run_at_kst(08:00 KST) 이후 1회 — listed 종목을 하루 예산만큼(app/ingest/background.py)
 - check_minutes(5분)마다 할 일이 있는지만 확인한다. 실제 작업은 별도 스레드에서 돌아 API 응답을 막지 않는다.
 - 같은 작업이 여러 프로세스(워커 여러 개, CLI 수동 실행)에서 겹치지 않도록 PostgreSQL advisory lock을 쓴다.
 서버를 띄우지 않는 환경이면 같은 작업을 cron·작업 스케줄러로 `python -m app.ingest refresh` / `benchmark`로 돌린다.
@@ -16,12 +17,12 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Engine, text
 
 from app.core.config import get_settings
-from app.ingest import benchmark
+from app.ingest import background, benchmark
 
 log = logging.getLogger(__name__)
 SEOUL = ZoneInfo("Asia/Seoul")
 # 작업이 실패하면 성공 기록이 없어 매 확인마다 '해야 할 일'이 된다 → 시도 사이 최소 간격으로 외부 호출 폭주를 막는다
-MIN_RETRY = {"refresh": timedelta(minutes=30), "benchmark": timedelta(minutes=60)}
+MIN_RETRY = {"refresh": timedelta(minutes=30), "benchmark": timedelta(minutes=60), "background": timedelta(minutes=60)}
 
 
 def daily_boundary(now: datetime, at: time) -> datetime:
@@ -41,6 +42,12 @@ def last_benchmark_success(engine: Engine) -> datetime | None:
                                     WHERE job_type = 'BENCHMARK' AND status = 'SUCCESS' AND error LIKE '일일:%'""")).scalar()
 
 
+def last_background_success(engine: Engine) -> datetime | None:
+    with engine.connect() as conn:
+        return conn.execute(text("""SELECT MAX(finished_at) FROM ingestion_logs
+                                    WHERE job_type = 'BENCHMARK' AND status = 'SUCCESS' AND error LIKE '백그라운드:%'""")).scalar()
+
+
 class Scheduler:
     def __init__(self, engine: Engine, refresh_service_factory, providers_factory, scorer):
         self.engine = engine
@@ -49,6 +56,8 @@ class Scheduler:
         self.scorer = scorer
         hh, mm = benchmark.config()["daily_at_kst"].split(":")
         self.daily_at = time(int(hh), int(mm))
+        bh, bm = background.config().get("run_at_kst", "08:00").split(":")
+        self.background_at = time(int(bh), int(bm))
         self._attempted: dict[str, datetime] = {}
 
     def _may_try(self, job: str, now: datetime) -> bool:
@@ -69,6 +78,9 @@ class Scheduler:
         if benchmark_due(last_benchmark_success(self.engine), now, self.daily_at) and self._may_try("benchmark", now):
             if benchmark.run_benchmark(self.engine, self.providers(), self.scorer) is not None:
                 ran.append("benchmark")
+        if benchmark_due(last_background_success(self.engine), now, self.background_at) and self._may_try("background", now):
+            if background.run_background(self.engine, self.providers(), now=now) is not None:
+                ran.append("background")
         return ran
 
     async def run_forever(self) -> None:
