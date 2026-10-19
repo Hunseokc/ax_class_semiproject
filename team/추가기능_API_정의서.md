@@ -1275,7 +1275,10 @@ def run_background(engine: Engine, providers: Providers, *, now: datetime | None
 - 잠금: `BACKGROUND_LOCK_KEY = 7_301_013`(`wait=False` — 겹치면 건너뜀). 예산이 남지 않으면 순위 조회도 하지 않아요(외부 호출 0).
 - 로그: `job_log(source="INTERNAL", job_type="BENCHMARK", label="background")` 1행, 비고는 `백그라운드:`로 시작해요. 스케줄러는 비교군 성공을 `일일:` 비고로만 세서 둘이 섞이지 않아요.
 - 스케줄러: `services/scheduler.py`의 `tick`에서 비교군 다음으로 `run_at_kst`(08:00) 이후 하루 1회(`last_background_success`). CLI `python -m app.ingest background`.
-- **미국은 D11 결정 전이라 건너뛰어요**(`queued: 0`, 비고 "순위 소스 미정"). 팀 코드에는 미국 시가총액 순위를 구하는 단계(semi의 `classify_us`)가 없어서, D11을 정할 때 함께 들여와야 해요.
+- **미국(D11 확정 2026-10-19)**: `rank_us`가 SEC 발행주식수(frames) × 최근 종가(DB, 없으면 yfinance 묶음)로 시가총액을 구해 상위 `us_rank_pool`(1,500)개에 `stocks.cap_rank`(migration 009)를 매겨요. `us_rank_days`(30일)마다만 다시 매기고, 큐는 순위가 있는 listed만 순위대로(`ranked_only`).
+  - 측정: 발행주식수 2.1초(5,118개) + 종가 묶음 91~123초(5,641/5,646개) → 1,500위 매김. 상위: NVDA·AAPL·GOOGL·GOOG·MSFT·AMZN…
+  - 버린 대안: frames `dei/EntityPublicFloat`(1회 호출) — 값 단위가 회사마다 달라(1위가 Universal Display 6.8조 달러) 쓸 수 없고 listed 5,646개 중 3,387개만 있어요
+  - 한계: ADR(TM·ONC 등)은 발행주식수가 원주 기준이라 순위가 부풀어요. 20-F 회사는 US-GAAP 재무가 없어 첫 시도에서 FAILED가 되고, 기록이 생겨 다음 큐에서 빠져요(매일 재시도하지 않음)
 - 개발 DB 확인(2026-10-19): `listing` 뒤 국내 listed 2,509개(corp_code 전부), 예산을 5로 잡아 실행 → 거래대금 상위 5개 SUCCESS.
 
 | 우선순위 | 국내 (KR) | 미국 (US) |
@@ -1340,8 +1343,8 @@ D5 수치가 나오면 `universe.yaml stocks` 확장 또는 "노출 = 시가총�
 
 | # | 질문 | 권하는 답 | 왜 |
 | --- | --- | --- | --- |
-| D11 | 미국 listed 우선순위 소스 | `us_rank_pool`(1,500) 안에서 `classify_us`가 매달 구하는 시가총액 순. `stocks`에 순위 열 1개 추가(마이그레이션) | 미국은 전 종목 일괄 시세 무료 소스가 없어 거래대금을 매일 구하면 호출이 커요 |
-| D12 | 백그라운드 하루 예산 값 | DART 2,000행 · SEC 1,000행으로 시작, 첫 주 `ingestion_logs`로 조정 | DART 키 1개 하루 약 2만 번 중 절반 이하(행당 2~5번) |
+| D11 | 미국 listed 우선순위 소스 | **확정**: 상위 1,500개 안에서 시가총액(SEC 발행주식수 × 종가) 순, 30일마다 `stocks.cap_rank`에 저장(migration 009) | 7-2 측정 — 전 종목 종가 묶음 조회 약 2분이라 매일 하지 않아요 |
+| D12 | 백그라운드 하루 예산 값 | **확정(시작값)**: DART 2,000행 · SEC 1,000행, 첫 주 `ingestion_logs`로 조정 | DART 키 1개 하루 약 2만 번 중 절반 이하(행당 2~5번) |
 | D5 | 노출 종목 수 | 4-1 뒤 측정 | — |
 | D8 | 미국 일괄 방식 | smoke 뒤 | — |
 
