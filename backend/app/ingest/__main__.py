@@ -126,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("listing")
     # ── 추가 기능 4-1: 공시 목록 증분 · 재무 일괄 첫 적재 ──
     sub.add_parser("dart-feed")
+    p = sub.add_parser("us-bulk", help="미국 listed 재무 첫 적재 — SEC frames로 회사별 호출 없이(임시 값, 7일)")
+    p.add_argument("--years", type=int, default=3)
     sub.add_parser("background", help="listed 종목 재무를 하루 예산만큼 우선순위대로 (평소에는 스케줄러가 08:00 이후)")
     p = sub.add_parser("dart-bulk", help="OpenDART 재무정보 일괄다운로드(사업보고서 BS·PL zip/txt) 첫 적재")
     p.add_argument("--as-of", type=date.fromisoformat, required=True, help="파일 기준일 — 공시 증분이 이 날부터 이어 받는다")
@@ -229,6 +231,9 @@ def main(argv: list[str] | None = None) -> int:
             print(country, res)
     elif args.cmd == "dart-feed":
         print(jobs.load_dart_feed(engine, providers()))
+    elif args.cmd == "us-bulk":
+        from app.ingest.us_bulk import load_us_bulk
+        print(load_us_bulk(engine, years=args.years))
     elif args.cmd == "background":
         from app.ingest.background import run_background
         print(run_background(engine, providers()))
