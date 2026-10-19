@@ -11,7 +11,8 @@ from tests.conftest import D, DAYS
 
 API = "/api/v1"
 LIST_KEYS = {"rank", "stock_id", "market", "country", "currency", "ticker", "name", "name_en", "as_of",
-             "close", "change", "change_rate", "volume", "market_cap", "market_cap_krw", "score", "is_watched"}
+             "close", "change", "change_rate", "volume", "market_cap", "market_cap_krw", "score", "is_watched",
+             "sector", "coverage"}
 
 
 def get(client, path):
@@ -413,3 +414,32 @@ def test_stock_detail_includes_market_condition(client, engine):
                              VALUES ('KR', :d, 62.00, '탐욕', 1)"""), {"d": D})
     _, d = get(client, "/stocks/KOSPI/005930")
     assert d["market_condition"]["score"] == 62 and d["market_condition"]["label"] == "높음"   # 섹터 NULL → 시장만
+
+
+# ------------------------------------------------------------------ 추가 기능 4-4: 비교군도 목록에, 섹터 필터, 페이지
+def test_default_list_includes_benchmark_but_not_listed(client, engine):
+    with engine.begin() as conn:
+        conn.execute(text("""INSERT INTO stocks (stock_id, market_id, ticker, name, coverage, sector) VALUES
+                             (11, 1, '900011', '비교군', 'benchmark', '반도체·전자'), (12, 1, '900012', '상장', 'listed', NULL)"""))
+    _, d = get(client, "/stocks?country=KR")
+    assert {i["ticker"] for i in d["items"]} == {"005930", "000660", "900011"}
+    assert next(i for i in d["items"] if i["ticker"] == "900011")["coverage"] == "benchmark"
+    _, d = get(client, "/stocks?q=상장")                                       # listed는 검색할 때만
+    assert [i["ticker"] for i in d["items"]] == ["900012"]
+
+
+def test_sector_filter_and_unknown_sector(client, engine):
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE stocks SET sector = '반도체·전자' WHERE stock_id IN (1, 4)"))
+    _, d = get(client, "/stocks?sector=반도체·전자")
+    assert {i["ticker"] for i in d["items"]} == {"005930", "NVDA"} and d["total"] == 2
+    assert all(i["sector"] == "반도체·전자" for i in d["items"])
+    r, d = get(client, "/stocks?sector=없는섹터")
+    assert r.status_code == 422 and d["error"]["code"] == "VALIDATION_ERROR" and "반도체·전자" in d["error"]["detail"]["allowed"]
+
+
+def test_pagination_keeps_global_rank(client):
+    _, p1 = get(client, "/stocks?limit=2&offset=0")
+    _, p2 = get(client, "/stocks?limit=2&offset=2")
+    assert p1["total"] == p2["total"] == 4
+    assert [i["rank"] for i in p1["items"] + p2["items"]] == [1, 2, 3, 4]

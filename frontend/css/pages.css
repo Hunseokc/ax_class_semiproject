@@ -549,3 +549,9 @@ a.home-pf__seg:hover .home-pf__seg-bar { filter: brightness(1.08); }
 .score-row__tip-head { margin-top: 4px; }
 .score-row__tip-note { margin-top: 4px; font-weight: var(--fw-regular); opacity: .75; }
 @media (max-width: 767px) { .score-panel { grid-template-columns: 1fr; } }
+
+
+/* ── 추가 기능 4-4: 주식 리스트 페이지 이동 ── */
+.pager { display: flex; justify-content: center; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); }
+.pager__pos { color: var(--text-2); font-size: var(--fs-sm); min-width: 4em; text-align: center; }
+.stock-row .row__sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* 섹터 배지가 길어도 행 높이 그대로 */
