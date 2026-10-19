@@ -60,7 +60,7 @@ button { cursor: pointer; }
   transition: background .15s var(--ease), color .15s var(--ease);
 }
 .nav__item:hover { background: var(--card); color: var(--text); }
-.nav__item[aria-current="page"] { background: var(--lavender); color: var(--text-on-pastel); }
+.nav__item[aria-current="page"] { background: var(--lavender); color: var(--on-lavender); }
 .nav__icon { width: 22px; height: 22px; flex: none; }
 .sidebar__foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); background: var(--card); border-radius: var(--r-card-sm); }
 .sidebar__foot .label { font-size: var(--fs-xs); color: var(--text-3); }
@@ -82,7 +82,7 @@ button { cursor: pointer; }
   .nav { flex-direction: row; justify-content: space-around; flex: 1; gap: 0; }
   .nav__item { flex-direction: column; gap: 2px; padding: var(--sp-2); font-size: 11px; border-radius: var(--r-row); background: none; }
   .nav__item[aria-current="page"] { background: none; color: var(--text); }
-  .nav__item[aria-current="page"] .nav__icon-wrap { background: var(--lavender); color: var(--text-on-pastel); }
+  .nav__item[aria-current="page"] .nav__icon-wrap { background: var(--lavender); color: var(--on-lavender); }
   .nav__icon-wrap { width: 44px; height: 32px; border-radius: var(--r-pill); display: grid; place-items: center; }
   .sidebar__foot { margin: 0; padding: 0; background: none; flex-direction: row; align-items: center; }
   .sidebar__foot .label, .sidebar__foot .value, .sidebar__foot .basis { display: none; }

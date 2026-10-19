@@ -51,8 +51,8 @@
 /* ---------------------------------------------------------------- 뱃지·버튼·입력 */
 .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--r-pill); font-size: 11px; font-weight: var(--fw-bold); letter-spacing: .02em; }
 .badge--market { background: var(--card-active); color: var(--text-2); }
-.badge--kr { background: rgba(255, 107, 107, .14); color: #ffb3b3; }
-.badge--us { background: rgba(94, 168, 255, .14); color: #b9d8ff; }
+.badge--kr { background: var(--badge-kr-bg); color: var(--badge-kr-text); }
+.badge--us { background: var(--badge-us-bg); color: var(--badge-us-text); }
 .badge--sector { background: transparent; border: 1px solid var(--line); color: var(--text-2); }
 .row__sub .badge { padding: 0 6px; font-size: 10px; line-height: 16px; }   /* 행 부제(티커 옆) 시장 표기는 티커 글자 크기에 맞춰 작게 */
 
@@ -63,18 +63,18 @@
   background: var(--card-active); color: var(--text);
   transition: background .15s var(--ease), opacity .15s var(--ease);
 }
-.btn:hover:not(:disabled) { background: #444; }
+.btn:hover:not(:disabled) { background: var(--btn-hover); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn--primary { background: var(--ice); color: var(--text-on-pastel); }
 .btn--primary:hover:not(:disabled) { background: var(--ice-strong); }
-.btn--accent { background: var(--lavender); color: var(--text-on-pastel); }
+.btn--accent { background: var(--lavender); color: var(--on-lavender); }
 .btn--accent:hover:not(:disabled) { background: var(--lavender-strong); }
 .btn--sm { padding: 6px var(--sp-3); font-size: var(--fs-xs); }
 .btn--icon { width: 40px; height: 40px; padding: 0; }
-.btn--danger { background: rgba(255, 107, 107, .16); color: #ffb3b3; }
+.btn--danger { background: var(--danger-bg); color: var(--danger-text); }
 .star { border: 0; background: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: var(--text-3); }
 .star:hover { background: var(--card-active); color: var(--text); }
-.star[aria-pressed="true"] { color: #ffd166; }
+.star[aria-pressed="true"] { color: var(--star); }
 .star svg { width: 20px; height: 20px; }
 
 .input, .select {
@@ -116,7 +116,7 @@ textarea.input { font: inherit; resize: vertical; }
 .state__title { color: var(--text); font-weight: var(--fw-bold); }
 .state--error .state__icon { background: rgba(255, 107, 107, .16); color: var(--danger); }
 .notice { display: flex; gap: var(--sp-2); align-items: flex-start; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-row); background: var(--surface); color: var(--text-2); font-size: var(--fs-sm); }
-.notice--warn { background: rgba(245, 194, 107, .12); color: #f5d9a8; }
+.notice--warn { background: var(--warn-bg); color: var(--warn-text); }
 .disclaimer { color: var(--text-3); font-size: var(--fs-xs); text-align: center; padding: var(--sp-4) 0; }
 
 /* ---------------------------------------------------------------- 모달 */

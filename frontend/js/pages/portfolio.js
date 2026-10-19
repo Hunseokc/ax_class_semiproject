@@ -11,7 +11,7 @@ import { emptyState, errorState, h, openModal, segmented, skeleton, toast } from
 
 mountSidebar("portfolio");
 const $ = (sel) => document.querySelector(sel);
-const DONUT = ["#e6f4fa", "#e6ddf2", "#5ea8ff", "#f5c26b", "#4fd1c5", "#f0a6ca", "#9ccc65", "#b39ddb"];
+const DONUT = [color("--ice"), color("--lavender"), "#5ea8ff", "#f5c26b", "#4fd1c5", "#f0a6ca", "#9ccc65", "#b39ddb"];
 
 let portfolios = [];
 let currentId = Number(new URLSearchParams(location.search).get("id")) || null;

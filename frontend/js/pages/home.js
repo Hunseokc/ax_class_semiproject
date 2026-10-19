@@ -374,7 +374,7 @@ mountSearch();   // .main__inner 맨 앞에 .topbar(검색바)를 붙인다
 const topbar = $(".topbar");
 if (topbar) { topbar.classList.add("topbar--home"); topbar.append(presetBox); }
 mountPresetMenu(presetBox);
-document.addEventListener(PRESET_EVENT, () => { loadWatchlist(); if (topKind === "attractiveness") loadTop(); });   // 지수·환율은 성향과 무관해서 관심종목(과 매력도 순위)만 다시 조회
+document.addEventListener(PRESET_EVENT, () => { loadWatchlist(); loadTop("attractiveness"); });   // 지수·환율은 성향과 무관해서 관심종목(과 매력도 순위)만 다시 조회
 
 // ── [S6-A] 섹터 히트맵 · 시장 심리 지수 ──
 // ---------------------------------------------------------------- 섹터 히트맵 (GET /home/sectors — DB만 읽음, 수집은 갱신 작업)
@@ -387,8 +387,8 @@ function heatTile(s) {
   const label = isNum(c) ? `${s.name} ${changeLabel(c / 100)}` : `${s.name} 데이터 없음`;
   let bg = "var(--card-active)";
   if (isNum(c) && c !== 0) {
-    const mix = Math.round(18 + 72 * Math.min(Math.abs(c) / HEAT_FULL, 1));
-    bg = `color-mix(in srgb, var(${c > 0 ? "--heat-up" : "--heat-down"}) ${mix}%, var(--surface))`;
+    const k = Math.min(Math.abs(c) / HEAT_FULL, 1).toFixed(2);   // 농도 범위(--heat-min·--heat-range)는 테마별 토큰
+    bg = `color-mix(in srgb, var(${c > 0 ? "--heat-up" : "--heat-down"}) calc(var(--heat-min) + var(--heat-range) * ${k}), var(--surface))`;
   }
   const chg = !isNum(c) ? "–" : `${c > 0 ? "▲" : c < 0 ? "▼" : ""}${pct(Math.abs(c) / 100)}`;
   return `<div class="heat__tile" role="listitem" aria-label="${esc(label)}"
@@ -484,7 +484,7 @@ loadSentiment();
 // 총 평가금액(담은 종목 + 현금) · 평가손익 + 종목·현금 비중 도넛과 범례 · 시드 사용률. 편집은 포트폴리오 화면에서 한다
 const PF_TOP = 9;   // 범례·도넛에 따로 보여 줄 종목 수 — 나머지는 "외 n개"로 묶는다
 const PF_KEY = "homePortfolio";   // 고른 포트폴리오는 브라우저에 저장(없거나 지워졌으면 첫 번째)
-const PF_COLORS = ["#2bb3a3", "#5ea8ff", "#b39ddb", "#f5c26b", "#f0729a", "#4fd1c5", "#9ccc65", "#ff9f5a", "#7986cb", "#e6ddf2"];
+const PF_COLORS = ["#2bb3a3", "#5ea8ff", "#b39ddb", "#f5c26b", "#f0729a", "#4fd1c5", "#9ccc65", "#ff9f5a", "#7986cb", color("--lavender")];
 const pfPnlClass = (v) => (v > 0 ? "chg chg--kr-up" : v < 0 ? "chg chg--kr-down" : "chg chg--flat");   // 원화 손익은 국내 관례 색(포트폴리오 화면과 같음)
 const pfPnlHtml = (v, rate) => (v === null ? DASH : `<span class="${pfPnlClass(v)}">${signedKrw(v)}${isNum(rate) ? ` (${pct(rate, { sign: true })})` : ""}</span>`);
 let pfId = null;
@@ -597,54 +597,54 @@ async function loadPortfolioWidget() {
 loadPortfolioWidget();
 
 // ---------------------------------------------------------------- 시장 주목 종목 TOP 5 (GET /home/ranking)
-// 행 = 순위 · 종목명(종목코드·시장 배지, 관심종목이면 ★) · 그 탭의 순위 근거 값 하나. 가격·등락률은 관심종목·리스트에 있으므로 넣지 않는다
-const TOP_KINDS = [
-  { value: "volume_surge", label: "거래량 급증", empty: "20거래일 거래량이 쌓인 종목이 없습니다" },
-  { value: "attractiveness", label: "매력도 순위", empty: "매력도 점수가 계산된 종목이 없습니다",
-    note: "현재는 공개 재무·시세로 계산한 규칙 기반 점수이며 투자 권유가 아닙니다." },
-];
-let topCountry = "KR";
-let topKind = "volume_surge";
+// 카드 4장 = 순위 기준(거래량 급증·매력도) × 시장(국내·미국). 탭을 오가지 않고 한눈에 비교한다.
+// 행 = 순위 · 종목명(종목코드·시장 배지, 관심종목이면 ★) · 그 카드의 순위 근거 값 하나. 가격·등락률은 관심종목·리스트에 있으므로 넣지 않는다
+const TOP_KINDS = {
+  volume_surge: { eyebrow: "VOLUME SURGE", title: "거래량 급증", empty: "20거래일 거래량이 쌓인 종목이 없습니다" },
+  attractiveness: { eyebrow: "TOP SCORE", title: "매력도 순위", empty: "매력도 점수가 계산된 종목이 없습니다" },
+};
+const TOP_COUNTRIES = { KR: "국내", US: "미국" };
+const TOP_CARDS = ["volume_surge", "attractiveness"].flatMap((kind) => ["KR", "US"].map((country) => ({ kind, country })));
 
-function topValue(s) {
-  if (topKind === "volume_surge") {
+function topValue(kind, s) {
+  if (kind === "volume_surge") {
     return `<span class="row__value num" title="당일 거래량 ÷ 직전 20거래일 평균 (기준일 ${esc(shortDate(s.as_of))})">${num(s.value, 1)}배</span>`;
   }
   const band = scoreBand(s.value);
-  return `<span class="row__value top-score"><strong class="num">${Math.round(s.value)}</strong>${band
-    ? `<span class="wl-compact__band"><i style="background:var(--gauge-${band.index})"></i>${band.label}</span>` : ""}</span>`;
+  return `<span class="row__value top-score"${band ? ` title="${esc(band.label)}"` : ""}>${band
+    ? `<i style="background:var(--gauge-${band.index})" aria-hidden="true"></i>` : ""}<strong class="num">${Math.round(s.value)}</strong>${band
+    ? `<span class="sr-only">${esc(band.label)}</span>` : ""}</span>`;
 }
 
-function topRow(s) {
+function topRow(kind, s) {
   return h(`<li><a class="row" href="${stockUrl(s.market, s.ticker)}">
       <span class="rank">${s.rank}</span>
       <span class="row__main"><span class="row__title">${esc(s.name)}${s.is_watched
         ? ' <span class="top-star" role="img" aria-label="관심종목">★</span>' : ""}</span>
         <span class="row__sub">${esc(s.ticker)} ${marketBadge(s.market, s.country)}</span></span>
-      ${topValue(s)}
+      ${topValue(kind, s)}
     </a></li>`);
 }
 
-function loadTop() {
-  const kind = TOP_KINDS.find((k) => k.value === topKind);
-  $("#top-more").href = `/stocks?country=${topCountry}`;
-  $("#top-note").textContent = kind.note || "";
-  $("#top-note").hidden = !kind.note;
-  return load($("#top-list"), {
-    skeleton: skeleton("row", 5),
-    fetch: async () => (await getHomeRanking(topKind, topCountry, 5)).items,
-    render: (items) => {
-      const ul = h('<ul class="list card card--flush"></ul>');
-      ul.append(...items.map(topRow));
-      return ul;
-    },
-    empty: emptyState({ title: kind.empty, body: "데이터 적재 후 다시 확인해 주세요." }),
-  });
-}
+// 카드 뼈대는 한 번만 만든다. onlyKind를 주면 그 기준 카드만 다시 불러온다(투자 성향 변경 → 매력도만)
+$("#top-list").replaceChildren(...TOP_CARDS.map(({ kind, country }) => h(`<section class="card top-card" aria-labelledby="h-top-${kind}-${country}">
+    <p class="top-card__eyebrow">${TOP_KINDS[kind].eyebrow} · ${country}</p>
+    <h3 class="top-card__title" id="h-top-${kind}-${country}">${TOP_KINDS[kind].title} <span>${TOP_COUNTRIES[country]}</span></h3>
+    <div class="top-card__body" data-top="${kind}-${country}"></div>
+  </section>`)));
 
-$("#top-metric").append(segmented(TOP_KINDS, topKind,
-  (v) => { topKind = v; loadTop(); }, { label: "순위 기준 선택" }));
-$("#top-tabs").append(segmented([{ value: "KR", label: "국내" }, { value: "US", label: "미국" }], topCountry,
-  (v) => { topCountry = v; loadTop(); }, { label: "순위 시장 선택" }));
+function loadTop(onlyKind) {
+  return Promise.all(TOP_CARDS.filter((c) => !onlyKind || c.kind === onlyKind).map(({ kind, country }) =>
+    load($("#top-list").querySelector(`[data-top="${kind}-${country}"]`), {
+      skeleton: skeleton("row", 5),
+      fetch: async () => (await getHomeRanking(kind, country, 5)).items,
+      render: (items) => {
+        const ul = h('<ul class="list"></ul>');
+        ul.append(...items.map((s) => topRow(kind, s)));
+        return ul;
+      },
+      empty: emptyState({ title: TOP_KINDS[kind].empty, body: "데이터 적재 후 다시 확인해 주세요." }),
+    })));
+}
 
 loadTop();

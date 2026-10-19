@@ -1,4 +1,4 @@
-"""FastAPI 앱. API는 /api/v1, 정적 파일은 /static, 화면은 /, /stocks, /stocks/{market}/{ticker}, /portfolio.
+"""FastAPI 앱. API는 /api/v1, 정적 파일은 /static, 화면은 /, /stocks, /stocks/{market}/{ticker}, /portfolio, /settings.
 
 실행: uvicorn app.main:app --reload
 """
@@ -145,3 +145,8 @@ def page_stock(market: str, ticker: str):
 @app.get("/portfolio", include_in_schema=False)
 def page_portfolio():
     return _page("portfolio.html")
+
+
+@app.get("/settings", include_in_schema=False)
+def page_settings():
+    return _page("settings.html")

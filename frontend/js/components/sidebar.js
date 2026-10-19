@@ -9,6 +9,7 @@ const NAV = [
   { key: "home", href: "/", label: "대시보드", icon: icons.home },
   { key: "stocks", href: "/stocks", label: "주식 리스트", icon: icons.list },
   { key: "portfolio", href: "/portfolio", label: "모의 포트폴리오", icon: icons.wallet },
+  { key: "settings", href: "/settings", label: "설정", icon: icons.settings },
 ];
 
 export const REFRESHED_EVENT = "market:refreshed";   // [S3-A] 갱신이 끝나면 각 화면이 데이터를 다시 불러오는 신호

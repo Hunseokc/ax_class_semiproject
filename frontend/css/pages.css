@@ -83,6 +83,7 @@
 .field__label { font-size: var(--fs-sm); color: var(--text-2); font-weight: var(--fw-semibold); }
 .bar { height: 10px; border-radius: var(--r-pill); background: var(--card-active); overflow: hidden; }
 .bar__fill { height: 100%; border-radius: var(--r-pill); background: var(--ice); }
+:root[data-theme="light"] .bar__fill { background: var(--lavender); }   /* 라이트: 옅은 파랑 트랙과 구분되게 */
 
 .pf { display: flex; flex-direction: column; gap: var(--sp-6); }
 .pf-picker { overflow-x: auto; }
@@ -164,9 +165,10 @@
 .gauge-mini__band .gauge-mini__ring { background: none; border: 1.5px dashed var(--text-on-pastel-2); }
 
 /* 매력도 점수 뱃지 */
-.score { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; padding: 4px 10px; border-radius: var(--r-pill); font-weight: var(--fw-extra); font-size: var(--fs-sm); background: var(--lavender); color: var(--text-on-pastel); }
+.score { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; padding: 4px 10px; border-radius: var(--r-pill); font-weight: var(--fw-extra); font-size: var(--fs-sm); background: var(--lavender); color: var(--on-lavender); }
 .score--none { background: var(--card-active); color: var(--text-3); font-weight: var(--fw-semibold); }
 .card--ice .score, .card--lavender .score { background: var(--text-on-pastel); color: var(--text); }
+:root[data-theme="light"] :is(.card--ice, .card--lavender) .score { background: var(--lavender); color: var(--on-lavender); }   /* 라이트: 옅은 파랑 카드 위에서도 기본 코발트 알약 */
 
 /* 상세 매력도 반원 게이지 */
 .gauge { width: 168px; height: 100px; }
@@ -219,7 +221,7 @@
 .wx-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-3); }
 .wx { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-row); background: var(--surface); }
 .wx__icon { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--card-active); }
-.wx--sun .wx__icon { color: #ffd166; }
+.wx--sun .wx__icon { color: var(--star); }
 .wx--cloud .wx__icon { color: var(--ice-strong); }
 .wx--rain .wx__icon { color: var(--kr-down); }
 .wx--na .wx__icon { color: var(--text-3); }
@@ -305,7 +307,7 @@
   font-weight: var(--fw-semibold); font-size: var(--fs-sm);
   transition: background .15s var(--ease), color .15s var(--ease);
 }
-.chip:hover:not([aria-pressed="true"]):not(:disabled) { background: #444; }
+.chip:hover:not([aria-pressed="true"]):not(:disabled) { background: var(--btn-hover); }
 .chip[aria-pressed="true"] { background: var(--ice); color: var(--text-on-pastel); }
 .chip:disabled { cursor: not-allowed; }
 .chip__check { display: none; }
@@ -360,6 +362,7 @@
 .wl-compact .wl-card__edit:hover { background: var(--card-active); color: var(--text); }
 /* 어두운 배경(관심종목 리스트·카드·시장 심리 지수)용 밝은 구간 색 */
 .wl-compact__score, .wl-card__gauge, .senti { --gauge-1: #FF8A70; --gauge-2: #FFC35C; --gauge-3: #D3DBDD; --gauge-4: #4FD8C4; --gauge-5: #3DDC97; }
+:root[data-theme="light"] :is(.wl-compact__score, .wl-card__gauge, .senti) { --gauge-1: #C8553D; --gauge-2: #E39B3A; --gauge-3: #9AA5A8; --gauge-4: #2A9D8F; --gauge-5: #1E6B57; }   /* 라이트: 흰 면이라 기본 구간 색으로 되돌린다 */
 .wl-compact__score .gauge-mini__arc path:not([opacity="1"]), .wl-card__gauge .gauge-mini__arc path:not([opacity="1"]), .senti .gauge-mini__arc path:not([opacity="1"]) { opacity: .6; }
 .wl-compact__score .gauge-mini { width: auto; flex-direction: row; gap: var(--sp-2); }
 .wl-compact__score .gauge-mini svg { width: 48px; height: 28px; }
@@ -487,8 +490,22 @@ a.home-pf__legend-row:hover .home-pf__legend-name { text-decoration: underline; 
 .market-brief__date { color: var(--text-3); font-weight: var(--fw-regular); }
 .market-brief__sep { color: var(--text-3); }
 /* 시장 주목 종목: 관심종목 ★, 매력도 점수·라벨, 탭 하단 안내 */
-.top-star { color: #ffd166; font-size: var(--fs-sm); margin-left: 2px; }
+.top-star { color: var(--star); font-size: var(--fs-sm); margin-left: 2px; }
 .top-score { display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; }
+.top-score i { width: 8px; height: 8px; border-radius: 50%; }
+/* 시장 주목 종목: 기준 × 시장 카드 4장 (넓으면 4열 → 2열 → 1열) */
+.top-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-4); }
+@media (max-width: 1279px) { .top-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 639px) { .top-grid { grid-template-columns: minmax(0, 1fr); } }
+.top-card { min-width: 0; padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-3); }
+.top-card__eyebrow { margin: 0; color: var(--lavender); font-size: var(--fs-xs); font-weight: var(--fw-bold); letter-spacing: .06em; }
+:root:not([data-theme="light"]) .top-card__eyebrow { color: var(--text-3); }   /* 다크: 파스텔 글자는 튀어서 회색 */
+.top-card__title { margin: 0; font-size: var(--fs-lg); font-weight: var(--fw-extra); }
+.top-card__title span { color: var(--text-3); font-weight: var(--fw-semibold); font-size: var(--fs-md); }
+.top-card .list { gap: 0; }
+.top-card .row { grid-template-columns: 20px minmax(0, 1fr) auto; gap: var(--sp-3); padding: var(--sp-3) var(--sp-2); border-radius: 0; border-top: 1px solid var(--line); }
+.top-card li:first-child .row { border-top: 0; }
+.top-card .row:hover { border-radius: var(--r-row); }
 .top-score strong { font-size: var(--fs-md); font-weight: var(--fw-extra); }
 .top-note { color: var(--text-3); font-size: var(--fs-xs); margin: calc(-1 * var(--sp-2)) 0 0; }
 
@@ -525,7 +542,7 @@ a.home-pf__legend-row:hover .home-pf__legend-name { text-decoration: underline; 
 .senti__tip {
   position: absolute; left: 50%; top: 100%; translate: -50% 6px; z-index: 20; width: max-content; max-width: 260px;
   display: none; grid-template-columns: 1fr auto; gap: 4px var(--sp-4);
-  padding: var(--sp-3) var(--sp-4); border-radius: 12px; background: #ffffff; color: var(--text-on-pastel);
+  padding: var(--sp-3) var(--sp-4); border-radius: 12px; background: var(--tooltip-bg); color: var(--tooltip-text);
   font-size: var(--fs-xs); font-weight: var(--fw-semibold);
 }
 .senti__tip strong { grid-column: 1 / -1; }
@@ -559,3 +576,7 @@ a.home-pf__legend-row:hover .home-pf__legend-name { text-decoration: underline; 
 .pager { display: flex; justify-content: center; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); }
 .pager__pos { color: var(--text-2); font-size: var(--fs-sm); min-width: 4em; text-align: center; }
 .stock-row .row__sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* 섹터 배지가 길어도 행 높이 그대로 */
+
+/* ---------------------------------------------------------------- 설정 */
+.settings__row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+.settings__title { font-size: var(--fs-md); margin: 0 0 var(--sp-1); }
