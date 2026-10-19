@@ -9,7 +9,7 @@ from datetime import date, datetime, time, timedelta, timezone
 import pytest
 from sqlalchemy import text
 
-from app.ingest import benchmark, jobs
+from app.ingest import background, benchmark, jobs
 from app.ingest.benchmark import run_benchmark
 from app.ingest.store import BENCHMARK_LOCK_KEY, advisory_lock
 from app.services import hydration
@@ -133,11 +133,19 @@ def test_scheduler_tick_runs_due_jobs_once(engine, monkeypatch):
                                  VALUES ('INTERNAL', 'BENCHMARK', 'SUCCESS', '일일: test', now(), now())"""))
         return {}
 
+    def fake_background(engine_, providers, now=None):
+        ran.append("background")
+        with engine_.begin() as conn:
+            conn.execute(text("""INSERT INTO ingestion_logs (source, job_type, status, error, started_at, finished_at)
+                                 VALUES ('INTERNAL', 'BENCHMARK', 'SUCCESS', '백그라운드: test', now(), now())"""))
+        return {}
+
     monkeypatch.setattr(benchmark, "run_benchmark", fake_run)
+    monkeypatch.setattr(background, "run_background", fake_background)
     sch = Scheduler(engine, lambda: RefreshService(engine, p, FxService(engine, p.fx, 4), 4), lambda: p, None)
-    assert sch.tick() == ["refresh", "benchmark"]
-    assert sch.tick() == []                                            # 4시간 TTL·오늘 07:00 이후 이미 실행
-    assert ran == ["benchmark"]
+    assert sch.tick() == ["refresh", "benchmark", "background"]
+    assert sch.tick() == []                                            # 4시간 TTL·오늘 07:00·08:00 이후 이미 실행
+    assert ran == ["benchmark", "background"]
 
 
 def test_scheduler_backs_off_failing_jobs(engine, monkeypatch):
@@ -147,6 +155,7 @@ def test_scheduler_backs_off_failing_jobs(engine, monkeypatch):
     p = make_providers()
     calls = []
     monkeypatch.setattr(benchmark, "run_benchmark", lambda *a: calls.append(1) or {})   # 성공 기록 없음 = 실패
+    monkeypatch.setattr(background, "run_background", lambda *a, **kw: {})
     sch = Scheduler(engine, lambda: RefreshService(engine, p, FxService(engine, p.fx, 4), 4), lambda: p, None)
     t0 = datetime.now(timezone.utc)
     assert "benchmark" in sch.tick(t0)
