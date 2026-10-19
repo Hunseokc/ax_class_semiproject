@@ -164,9 +164,11 @@ def main(argv: list[str] | None = None) -> int:
         from app.api.deps import get_scorer
         from app.services.fx import FxService
         from app.services.refresh import RefreshService
+        from app.services.sectors import load_sectors
         pv = providers()
         ttl = get_settings().refresh_ttl_hours
-        result = RefreshService(engine, pv, FxService(engine, pv.fx, ttl), ttl, scorer=get_scorer()).refresh()
+        result = RefreshService(engine, pv, FxService(engine, pv.fx, ttl), ttl, scorer=get_scorer(),
+                                sector_loader=load_sectors).refresh()
         for j in result.jobs:
             print(f"{j.job_type:<10} {j.status:<8} {j.detail or ''}")
         print("next_refresh_available_at:", result.next_refresh_available_at.isoformat())

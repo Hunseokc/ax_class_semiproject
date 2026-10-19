@@ -7,6 +7,8 @@ from sqlalchemy import text
 
 from app.providers.base import Bar
 from app.services import sentiment as S
+from app.services.fx import FxService
+from app.services.refresh import RETRY_AFTER, RefreshService
 from app.services.sectors import SECTORS, load_sectors, read_sectors
 from tests.conftest import scalar
 from tests.fakes import CallLog, make_providers
@@ -206,6 +208,21 @@ def test_old_sector_rows_are_pruned(engine):
                              VALUES ('US', 'XLK', '정보기술', '2026-08-01', 1)"""))
     load_sectors(engine, _providers(), "US", NOW)
     assert scalar(engine, "SELECT count(*) FROM sector_performance_daily WHERE trade_date < '2026-09-01'") == 0
+
+
+def test_refresh_runs_sector_jobs_with_ttl_and_retry(engine):
+    p = _providers(kr_index=FailingIndex())
+    clock = [NOW]
+    svc = RefreshService(engine, p, FxService(engine, p.fx, 4), 4, clock=lambda: clock[0], sector_loader=load_sectors)
+    first = {j.job_type: j.status for j in svc.refresh().jobs}
+    assert first["SECTORS_US"] == "SUCCESS" and first["SECTORS_KR"] == "FAILED"
+    clock[0] = NOW + timedelta(minutes=10)                               # TTL·재시도 간격 안 → 외부 호출 없음
+    second = {j.job_type: j.status for j in svc.refresh().jobs}
+    assert second["SECTORS_US"] == "SKIPPED" and second["SECTORS_KR"] == "SKIPPED"
+    assert p.us_batch_price.count == 1 and p.kr_index.sector_calls == 1
+    clock[0] = NOW + RETRY_AFTER + timedelta(minutes=1)                 # 실패한 국내만 30분 뒤 재시도
+    third = {j.job_type: j.status for j in svc.refresh().jobs}
+    assert third["SECTORS_US"] == "SKIPPED" and p.kr_index.sector_calls == 2
 
 
 def test_read_sectors_without_data(engine):
