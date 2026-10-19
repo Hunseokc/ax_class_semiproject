@@ -15,7 +15,7 @@
 [이번 단계] Stage 5 — 고도화
 [내 파트] 관심종목 PUT(메모·목표가·target_gap) → 월별 집계 → 지표별 랭킹 → 데이터 품질 API → 입력 검증 상한
 [브랜치] feat/s5-b-memo-stats
-[참조 원본] ../ax_class_semiproject/backend/app/api/{watchlist,analysis}.py, queries/{watchlist,stats_monthly,stats_ranking,stats_data_quality}.sql, docs/06 (PUT watchlist, statistics/monthly·ranking·data-quality) (읽기 전용)
+[참조 원본] ../ax_class_stockmind/backend/app/api/{watchlist,analysis}.py, queries/{watchlist,stats_monthly,stats_ranking,stats_data_quality}.sql, docs/06 (PUT watchlist, statistics/monthly·ranking·data-quality) (읽기 전용)
 
 [담당 파일 — 이 순서대로]
 1. backend/app/queries/watchlist.sql + api/watchlist.py — PUT /watchlist/{market}/{ticker}: 보낸 필드만 변경, null이면 지움, 빈 본문 422, memo 200자, target_price > 0 소수 4자리. GET 응답에 memo·target_price·target_gap = (목표가 − 현재가) / 현재가
@@ -54,7 +54,7 @@
 [이번 단계] Stage 5 — 고도화
 [내 파트] 균등 배분 계산 → 엔드포인트 → 데이터 품질 집계 서비스 → CLI status → 포트폴리오 가중 매력도 → 테스트
 [브랜치] feat/s5-c-equal-weight-quality
-[참조 원본] ../ax_class_semiproject/backend/app/services/{portfolio,data_quality}.py, api/portfolios.py, tests/{test_equal_weight,test_data_quality}.py, docs/06 (preview/equal-weight, data-quality) (읽기 전용)
+[참조 원본] ../ax_class_stockmind/backend/app/services/{portfolio,data_quality}.py, api/portfolios.py, tests/{test_equal_weight,test_data_quality}.py, docs/06 (preview/equal-weight, data-quality) (읽기 전용)
 
 [담당 파일 — 이 순서대로]
 1. backend/app/services/portfolio.py — preview_equal_weight: 예산 ÷ 대상 수 = 균등 몫 → 1주 원화 원가로 내림한 정수 수량(담기 금액 모드와 같은 환산), 남는 금액, 제외 종목과 사유(ALREADY_IN_PORTFOLIO·NO_PRICE·PRICE_ABOVE_SHARE). **저장하지 않는 계산 전용**
@@ -93,7 +93,7 @@
 [이번 단계] Stage 5 — 고도화 화면
 [내 파트] 메모·목표가 편집 → 지수·환율 표시 지표 설정 → 월별 요약 → 균등 배분 패널 → 홈 순위 상위 5 → 모바일 점검
 [브랜치] feat/s5-a-edit-settings
-[참조 원본] ../ax_class_semiproject/frontend/js/components/{watch-note,metric-picker}.js, js/pages/{home,stock,portfolio}.js, docs/screenshots/{06_mobile_home,07_mobile_stocks,08_mobile_portfolio}.png (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
+[참조 원본] ../ax_class_stockmind/frontend/js/components/{watch-note,metric-picker}.js, js/pages/{home,stock,portfolio}.js, docs/screenshots/{06_mobile_home,07_mobile_stocks,08_mobile_portfolio}.png (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S5-A] 구역: putWatchlist·getMonthly·getRanking·previewEqualWeight

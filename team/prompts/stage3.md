@@ -16,7 +16,7 @@
 [이번 단계] Stage 3 — 실데이터. 외부 호출은 수집 쪽에서만 한다.
 [내 파트] Stage 1-D가 만든 수집(일봉·지수·환율) 위에 확장: 호출 한도 → pykrx·yfinance 밸류에이션·대량 조회 → 팩토리 확장 → 적재 작업(대량 일봉·밸류에이션) → CLI → 가짜 Provider·테스트
 [브랜치] feat/s3-c-price-providers
-[참조 원본] ../ax_class_semiproject/backend/app/providers/{http,convert,factory,krx,yahoo}.py, ingest/jobs.py, tests/{fakes,test_ingest}.py, docs/03_데이터_조사_정의서.md, docs/troubleshooting.md (읽기 전용)
+[참조 원본] ../ax_class_stockmind/backend/app/providers/{http,convert,factory,krx,yahoo}.py, ingest/jobs.py, tests/{fakes,test_ingest}.py, docs/03_데이터_조사_정의서.md, docs/troubleshooting.md (읽기 전용)
 
 [담당 파일 — 이 순서대로]
 (이미 있음 — Stage 1-D: http.py(Throttle·call_with_retry), convert.py, krx.py·yahoo.py의 일봉·지수·환율, factory.py(7필드), jobs.py [S1-D]의 stock_refs·index_refs·load_prices·load_indices·load_fx_daily, CLI prices·indices·fx, tests/fakes.py)
@@ -61,7 +61,7 @@
 [이번 단계] Stage 3 — 실데이터. 국내는 OpenDART, 미국은 SEC EDGAR.
 [내 파트] DART Provider → SEC Provider → 재무·공시 적재 작업 → 조회 SQL → 엔드포인트 → 테스트
 [브랜치] feat/s3-b-financials
-[참조 원본] ../ax_class_semiproject/backend/app/providers/{dart,sec}.py, ingest/jobs.py(load_financials·load_disclosures·merge_supplement), queries/{financials,disclosures}.sql, docs/03, docs/06 3-2 (읽기 전용)
+[참조 원본] ../ax_class_stockmind/backend/app/providers/{dart,sec}.py, ingest/jobs.py(load_financials·load_disclosures·merge_supplement), queries/{financials,disclosures}.sql, docs/03, docs/06 3-2 (읽기 전용)
 
 [담당 파일 — 이 순서대로]
 1. backend/app/providers/dart.py — corp_code 매핑, FY 재무(계정 ID 매핑 + 계정명 대체), 최근 공시. 분당 호출 제한 주의
@@ -104,7 +104,7 @@
 [이번 단계] Stage 3 — 실데이터 화면
 [내 파트] api.js 확장 → 상세 재무 추이 → 상세 최근 공시 → 사이드바 갱신 상태 → stale 표시
 [브랜치] feat/s3-a-financial-screens
-[참조 원본] ../ax_class_semiproject/frontend/js/pages/stock.js(재무·공시 부분), js/components/sidebar.js, docs/screenshots/{03_stock_detail,04_stock_detail_us}.png, docs/06 3-1 refresh·3-2 (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
+[참조 원본] ../ax_class_stockmind/frontend/js/pages/stock.js(재무·공시 부분), js/components/sidebar.js, docs/screenshots/{03_stock_detail,04_stock_detail_us}.png, docs/06 3-1 refresh·3-2 (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S3-A] 구역: getFinancials·getDisclosures·getRefreshStatus·postRefresh

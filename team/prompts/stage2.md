@@ -14,7 +14,7 @@
 [이번 단계] Stage 2 — 사용자 기능. 모의 포트폴리오는 "시드 안에서 담아보는 계산기 겸 장바구니"다(거래 원장 아님).
 [내 파트] 환율 TTL 서비스 → 포트폴리오 계산 서비스 → 포트폴리오 API → 테스트
 [브랜치] feat/s2-c-portfolio
-[참조 원본] ../ax_class_semiproject/backend/app/services/{fx,portfolio}.py, api/portfolios.py, docs/06 3-5, docs/05 5-1(의도적 비정규화) (읽기 전용)
+[참조 원본] ../ax_class_stockmind/backend/app/services/{fx,portfolio}.py, api/portfolios.py, docs/06 3-5, docs/05 5-1(의도적 비정규화) (읽기 전용)
 
 [담당 파일 — 이 순서대로]
 1. backend/app/services/__init__.py, backend/app/services/fx.py — FxService: TTL(4시간) 안이면 DB값, 지났으면 provider 호출, 실패 시 마지막 저장값 + fx_stale, 저장값도 없으면 503 FX_UNAVAILABLE.
@@ -58,7 +58,7 @@
 [이번 단계] Stage 2 — 사용자 기능
 [내 파트] 관심종목 조회 SQL → API(GET·POST·PATCH order·DELETE) → 테스트
 [브랜치] feat/s2-b-watchlist
-[참조 원본] ../ax_class_semiproject/backend/app/api/watchlist.py, queries/watchlist.sql, tests/test_watchlist_api.py, docs/06 3-4 (읽기 전용)
+[참조 원본] ../ax_class_stockmind/backend/app/api/watchlist.py, queries/watchlist.sql, tests/test_watchlist_api.py, docs/06 3-4 (읽기 전용)
 
 [담당 파일 — 이 순서대로]
 1. backend/app/queries/watchlist.sql — 사용자 관심종목 카드(정렬순, 최신가·등락). 매력도·메모·목표가·target_gap 컬럼 제외
@@ -96,7 +96,7 @@
 [이번 단계] Stage 2 — 사용자 기능 화면
 [내 파트] api.js 확장 → ★ 관심 토글(리스트·상세 연결) → 홈 관심종목 카드 → 포트폴리오 페이지 → 담기 모달
 [브랜치] feat/s2-a-user-screens
-[참조 원본] ../ax_class_semiproject/frontend/js/components/{watch,add-to-portfolio}.js, js/pages/portfolio.js, docs/screenshots/{05_portfolio,09_add_modal,08_mobile_portfolio}.png, docs/06 3-4·3-5 (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
+[참조 원본] ../ax_class_stockmind/frontend/js/components/{watch,add-to-portfolio}.js, js/pages/portfolio.js, docs/screenshots/{05_portfolio,09_add_modal,08_mobile_portfolio}.png, docs/06 3-4·3-5 (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S2-A] 구역: watchlist·portfolios 호출 함수
