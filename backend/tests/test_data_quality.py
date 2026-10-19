@@ -79,3 +79,23 @@ def test_days_range(client, days, status):
     assert r.status_code == status
     if status == 422:
         assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+# ------------------------------------------------------------------ 재무 기준 연도(실적 시즌 혼합)
+def test_fiscal_year_mix_counts_latest_fy_per_stock(engine):
+    from datetime import date
+
+    from app.services.data_quality import fiscal_year_mix
+    as_of = date(2026, 4, 1)
+    with engine.begin() as conn:
+        conn.execute(text("""INSERT INTO stocks (stock_id, market_id, ticker, name, coverage) VALUES
+                             (11, 1, '900011', '비교군', 'benchmark'), (12, 1, '900012', '상장', 'listed')"""))
+        fy = {1: ["2024-12-31", "2025-12-31"], 2: ["2025-12-31"], 11: ["2024-12-31"], 12: ["2025-12-31"],
+              3: ["2025-09-30"], 4: ["2026-12-31"]}                      # 4는 as_of 뒤 결산이라 세지 않음
+        conn.execute(text("""INSERT INTO financial_statements (stock_id, period_end, period_type, data_source)
+                             VALUES (:s, :p, 'FY', 'DART')"""), [{"s": s, "p": p} for s, ps in fy.items() for p in ps])
+        conn.execute(text("""INSERT INTO stock_metric_values (stock_id, as_of, metric, factor, raw_value)
+                             VALUES (:s, :d, 'roe', 'quality', 0.1)"""), [{"s": s, "d": as_of} for s in (1, 2, 11, 12, 3, 4)])
+        assert fiscal_year_mix(conn, "KR", as_of) == [{"fiscal_year": 2025, "stocks": 2}, {"fiscal_year": 2024, "stocks": 1}]
+        assert fiscal_year_mix(conn, "US", as_of) == [{"fiscal_year": 2025, "stocks": 1}]
+        assert fiscal_year_mix(conn, "KR", date(2020, 1, 1)) == []

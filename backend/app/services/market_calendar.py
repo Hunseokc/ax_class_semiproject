@@ -7,7 +7,7 @@ exchange_calendars 라이브러리에 들어 있는 거래소 달력(XKRX·XNYS)
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -55,3 +55,19 @@ def last_closed_session(country: str, now: datetime | None = None) -> date | Non
         log.warning("거래소 달력 마감 판정 실패(%s): %s", country, e)
         return None
     return close.tz_convert(TIMEZONES[country]).date()
+
+
+def sessions_between(country: str, start: date, end: date) -> int | None:
+    """start 다음 날부터 end까지(end 포함)의 거래일 수. start >= end면 0. 판정할 수 없으면 None.
+
+    시장·섹터 점수가 '시장 심리 저장값이 몇 거래일 묵었나'를 셀 때 쓴다(휴장일은 세지 않음).
+    """
+    if country not in CALENDARS:
+        return None
+    if start >= end:
+        return 0
+    try:
+        return len(_calendar(CALENDARS[country]).sessions_in_range(pd.Timestamp(start + timedelta(days=1)), pd.Timestamp(end)))
+    except Exception as e:  # noqa: BLE001 — 달력 범위 밖 등
+        log.warning("거래소 달력 거래일 수 판정 실패(%s %s~%s): %s", country, start, end, e)
+        return None

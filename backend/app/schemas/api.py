@@ -127,6 +127,21 @@ class GroupRef(Schema):
     name: str
 
 
+class MarketConditionOut(Schema):
+    score: int | None                # 0~100 정수. 시장 심리 없음·오래됨이면 null
+    label: str                       # 매우 낮음·낮음·보통·높음·매우 높음 / 데이터 부족
+    sentiment: Num | None            # 시장 심리 지수 저장값(0~100) — 오래돼도 값은 그대로
+    sector_name: str | None          # stocks.sector. 섹터 없음이면 null
+    sector_flow: Num | None          # 섹터 흐름 0~100. 섹터 미반영이면 null
+    sector_sample: int               # 섹터 수익률을 낸 표본 종목 수(섹터 없음이면 0)
+    sector_as_of: date | None        # 섹터 흐름 기준일(ref_date). 미반영이면 null
+    index_code: str                  # 비교 지수 (KOSPI · SPX)
+    stock_r5: Num | None             # 이 종목 5거래일 수익률(소수)
+    sector_r5: Num | None            # 섹터 중앙값 5거래일 수익률. 미반영이면 null
+    index_r5: Num | None             # 지수 5거래일 수익률
+    as_of: date | None               # 시장 심리 기준일(화면 '추합 기준' 날짜)
+
+
 class StockDetailOut(Schema):
     stock_id: int
     market: str
@@ -163,6 +178,7 @@ class StockDetailOut(Schema):
     is_watched: bool
     coverage: str
     detail_status: str              # ready / loading(비교군 상세 데이터 받는 중) / failed
+    market_condition: MarketConditionOut   # 시장·섹터 점수 (매력도와 별개, 투자 권유 아님)
 
 
 class Candle(Schema):

@@ -17,6 +17,7 @@ from decimal import Decimal
 from sqlalchemy import Connection, text
 
 from app.queries import sql
+from app.services.data_quality import fiscal_year_mix
 from app.services.scoring import FACTORS, METRICS, MIN_FACTORS
 
 MAD_SCALE = 1.4826
@@ -122,6 +123,7 @@ def reference_score(conn: Connection, stock_id: int, country: str, preset: dict)
         "metrics": [{"metric": k, "label": m.label, "factor": m.factor, "direction": m.direction,
                      "raw_value": raw.get(k), "z_raw": _q(z.get(k)), "z_adj": None} for k, m in METRICS.items()],
         "data_quality": dq,
+        "fin_basis": fiscal_year_mix(conn, country, as_of),
         "reference": True,
         "reference_note": (f"상장 종목 목록에서 찾은 종목이라 매력도 비교군에 들어 있지 않습니다. {as_of} 기준 같은 시장 비교군 "
                            f"{len(peers)}개의 분포에 이 종목 지표를 대입한 참고 점수이며, 경쟁 그룹이 없어 섹터 중립화는 하지 않았습니다."),

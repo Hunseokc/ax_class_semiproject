@@ -2,8 +2,8 @@
 -- 시세·밸류에이션은 LEFT JOIN — 데이터가 아직 없는 종목도 404가 아니라 null 필드로 응답한다
 -- fx_rate·close_krw는 USD 종목만 v_fx_latest(DB 최신값)로 채운다. KRW 종목은 fx_rate = NULL, close_krw = close
 -- fx_stale은 라우터가 false로 고정한다(TTL 외부 호출 서비스는 Stage 2에서 교체)
--- 업종은 이후 단계에서 컬럼을 추가한다
-SELECT s.stock_id, s.ticker, s.name, s.name_en, s.corp_code, s.cik, s.coverage, s.detail_synced_at,
+-- 업종 섹터(stocks.sector)는 시장·섹터 점수 계산용 — 응답에는 market_condition.sector_name으로 나간다
+SELECT s.stock_id, s.ticker, s.name, s.name_en, s.corp_code, s.cik, s.coverage, s.detail_synced_at, s.sector,
        m.code AS market, m.country, m.currency,
        lp.trade_date AS as_of, lp.close, lp.prev_close, lp.change, lp.change_rate, lp.volume,
        CASE WHEN m.currency = 'USD' THEN ROUND(lp.close * fx.usd_krw, 0) ELSE lp.close END AS close_krw,

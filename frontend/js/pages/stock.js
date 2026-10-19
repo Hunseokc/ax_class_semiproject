@@ -204,10 +204,10 @@ const scoreSection = h(`<section class="section card detail-section" aria-labell
     <div id="score"></div></section>`);
 $("#price-chart").closest("section").after(scoreSection);
 
-function gauge(score) {
+function gauge(score, { name = "매력도" } = {}) {
   const v = score === null ? 0 : Math.max(0, Math.min(100, score));
   const len = Math.PI * 70;   // 반원 길이 (r=70)
-  return `<svg class="gauge" viewBox="0 0 168 100" role="img" aria-label="${score === null ? "매력도 계산 불가" : `매력도 ${num(score, 1)}점`}">
+  return `<svg class="gauge" viewBox="0 0 168 100" role="img" aria-label="${score === null ? `${name} 계산 불가` : `${name} ${num(score, 1)}점`}">
       <path d="M14 90 A70 70 0 0 1 154 90" fill="none" stroke="${color("--card-active")}" stroke-width="14" stroke-linecap="round"/>
       <path d="M14 90 A70 70 0 0 1 154 90" fill="none" stroke="${color("--lavender")}" stroke-width="14" stroke-linecap="round"
         stroke-dasharray="${(len * v) / 100} ${len}"/>
@@ -302,6 +302,38 @@ function drawRadar(canvas, pos, peer) {
   });
 }
 
+// ── [S7-A] 시장·섹터 점수 (매력 점수 아래 위험 표시 — 매력도와 별개, 투자 권유 아님) ──
+const INDEX_NAME = { KOSPI: "KOSPI", SPX: "S&P 500" };
+const dotDate = (iso) => (iso ? iso.replaceAll("-", ".") : DASH);   // 2026.10.16
+const r5 = (v) => (v === null ? DASH : pct(v, { digits: 1, sign: true }));
+const round0 = (v) => (v === null ? DASH : Math.round(v));
+
+function conditionRow(mc) {
+  const band = scoreBand(mc.score);
+  const use = mc.sector_flow !== null;
+  const sector = !mc.sector_name ? "<p>섹터 분류가 없어 시장 심리만 반영했습니다</p>"
+    : `<p>현재 주식의 섹터 분류는 <strong>${esc(mc.sector_name)}</strong> 입니다</p>${
+      use ? "" : "<p>섹터 표본이 적어 시장 심리만 반영했습니다</p>"}`;
+  const sectorDate = mc.sector_as_of && mc.sector_as_of !== mc.as_of ? ` (섹터 ${mc.sector_as_of.slice(5).replace("-", ".")})` : "";
+  const tip = `<div class="senti__tip score-row__tip" role="tooltip" id="mc-tip"><strong>시장·섹터 점수 ${round0(mc.score)}</strong>
+      <span class="score-row__wide">시장 심리 ${round0(mc.sentiment)} · ${
+        use ? `섹터 흐름 ${round0(mc.sector_flow)} (${esc(mc.sector_name)} ${mc.sector_sample}종목)` : "섹터 미반영"}</span>
+      <span class="score-row__wide score-row__tip-head">5거래일 수익률</span>
+      <span>이 종목</span><span class="num">${r5(mc.stock_r5)}</span>
+      ${use ? `<span>섹터 중앙값</span><span class="num">${r5(mc.sector_r5)}</span>` : ""}
+      <span>${esc(INDEX_NAME[mc.index_code] ?? mc.index_code)}</span><span class="num">${r5(mc.index_r5)}</span>
+      <span class="score-row__wide score-row__tip-note">${use ? "시장 심리 70% + 섹터 흐름 30%" : "시장 심리 100%(섹터 미반영)"}, 투자 권유 아님</span>
+    </div>`;
+  return `<div class="score-row">
+      <div class="score-row__gauge senti__gauge" tabindex="0" aria-describedby="mc-tip">
+        <h3 class="score-row__title">시장·섹터 점수</h3>${gauge(mc.score, { name: "시장·섹터 점수" })}
+        <p class="score-band">${band ? `<i style="background:var(--gauge-${band.index})"></i>` : ""}${esc(mc.label)}</p>
+        ${tip}</div>
+      <div class="score-row__text score-row__sector">${sector}
+        <p class="score-row__date">지수 및 섹터 정보 추합 : ${dotDate(mc.as_of)} 기준${sectorDate}</p></div>
+    </div>`;
+}
+
 function renderScore(a) {
   const s = a.attractiveness;
   if (!s.as_of) {
@@ -316,11 +348,18 @@ function renderScore(a) {
   const pos = Object.fromEntries(FACTORS.map((f) => [f.key, s.factors[f.key]?.available ? toPos(s.factors[f.key].score) : null]));
   const band = scoreBand(s.score);
   const rankText = !s.rank ? "순위 없음" : `${market} 비교군 ${s.rank.total}개 중 <strong>${s.rank.position}위</strong>`;
+  const mc = stock?.market_condition;   // 시장·섹터 점수는 상세 응답에서 — 프리셋을 바꿔 다시 그려도 그대로
   const el = h(`<div class="score-panel">
-      <div class="score-panel__gauge">${gauge(s.score)}
-        ${band ? `<p class="score-band"><i style="background:var(--gauge-${band.index})"></i>${band.label}</p>` : ""}
-        <p class="score-panel__rank">${rankText}</p>
-        <p class="subtle">${esc(s.preset.name)} 성향 · ${date(s.as_of)} 기준</p></div>
+      <div class="score-panel__gauge score-panel__left">
+        <div class="score-row">
+          <div class="score-row__gauge"><h3 class="score-row__title">매력 점수</h3>${gauge(s.score)}
+            ${band ? `<p class="score-band"><i style="background:var(--gauge-${band.index})"></i>${band.label}</p>` : ""}</div>
+          <div class="score-row__text">
+            <p class="score-panel__rank">${rankText}</p>
+            <p class="subtle">${esc(s.preset.name)} 성향 · ${date(s.as_of)} 기준</p></div>
+        </div>
+        ${mc ? conditionRow(mc) : ""}
+      </div>
       <div class="score-panel__radar">
         <div class="chart-box chart-box--radar"><canvas role="img" aria-label="매력도 5요소 레이더 (같은 시장 안 위치 0~100, 50 = 시장 중앙)"></canvas></div>
         <div class="legend"><span><i style="background:${color("--lavender")}"></i>이 종목</span>
@@ -345,6 +384,7 @@ function renderScore(a) {
   const basis = h(`<details class="score-method"><summary>계산 근거 보기 <span class="subtle">팩터 기여도 · 지표 원값과 표준점수(Z)</span></summary>
       <div class="score-basis">
         <p class="subtle">데이터 충족도 ${s.factor_coverage}/${s.factor_total} 요소${s.rank ? ` · 백분위 ${num(s.rank.percentile, 0)}` : ""}</p>
+        ${s.fin_basis?.length ? `<p class="subtle">재무 기준 ${s.fin_basis.map((x) => `FY${x.fiscal_year} ${x.stocks}개`).join(" · ")}</p>` : ""}
         <div class="score-panel__factors">
           <h3>팩터 기여도 <span class="subtle">(유효 팩터 가중치 × 팩터 점수, 합 = 종합 ${zFmt(s.composite)})</span></h3>
           ${factors.map(([k, f]) => contribRow(k, f, maxAbs)).join("")}
