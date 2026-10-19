@@ -1110,8 +1110,9 @@ class FiledReport:
 
 class DartClient:
     def list_annual_reports(self, start: date, end: date, page_no: int = 1) -> tuple[list[FiledReport], int]:
-        """회사 지정 없이 사업보고서(A001) 목록 한 페이지, 최신순 100건. 정정 포함. 반환: (목록, total_page).
-        status 013(데이터 없음)이면 ([], 0). start~end는 90일 이하로 부른다(초과는 호출 측이 나눔)."""
+        """회사 지정 없이 사업보고서(A001) 목록 한 페이지(100건). 정정·첨부 공시 포함. 반환: (목록, total_page).
+        status 013(데이터 없음)이면 ([], 0). start~end는 90일 이하로 부른다(초과는 호출 측이 나눔).
+        정렬은 접수번호 순이 보장되지 않는다 — 호출 측은 기간 안 전체 페이지를 받는다."""
 ```
 
 요청: `list.json`, `bgn_de`, `end_de`(YYYYMMDD), `pblntf_ty="A"`, `pblntf_detail_ty="A001"`, `sort="date"`, `sort_mth="desc"`, `page_no`, `page_count=100`. `_get`을 거쳐 `_limiter`·`_throttle`이 그대로 걸려요.
@@ -1133,13 +1134,15 @@ def load_dart_feed(engine: Engine, providers: Providers, *, today: date | None =
     반환: {"status": "SUCCESS"|"FAILED"|"SKIPPED", "pages", "filings", "matched", "expired", "cursor"}"""
 ```
 
+**실제 API 확인 (2026-10-19)**: 회사 지정이 없으면 조회 기간이 3개월을 넘을 때 status 100("검색기간은 3개월만 가능")이고, `page_count`는 100이 상한이에요. 2026년 3월 한 달 사업보고서 목록은 3,634건(37페이지)이었고, `sort=date&sort_mth=desc`여도 **접수번호 순이 아니에요**(`[첨부추가]`·`[첨부정정]` 공시가 맨 앞에 섞여 날짜가 63번 뒤바뀜). A001 목록에 반기보고서도 섞여 나와요. 그래서 처음 정한 "기준점 이하 번호가 나오면 멈춤"을 버리고 **기간 안 전체 페이지를 받아요**(하루 구간이라 실적 시즌에도 하루 5~10페이지).
+
 동작:
 
 1. `providers.kr_feed`가 None이면 `{"status": "SKIPPED", "pages": 0, "filings": 0, "matched": 0, "expired": 0, "cursor": None}`.
 2. `today = today or 서울 날짜`. 기준점 행이 있으면 `last_no, start = last_rcept_no, last_rcept_dt − FEED_OVERLAP_DAYS`, 없으면 `"00000000000000"`, `today − FEED_FIRST_DAYS`.
 3. `job_log(engine, source="DART", job_type="DISCLOSURES", label="feed A001")` 안에서 4~8(예외는 FAILED 기록 → 반환 `"FAILED"`, 기준점 그대로).
-4. `[start, today]`를 `FEED_WINDOW_DAYS`일씩 나눠 **오래된 구간부터**. 구간마다 `page = 1`부터 `LockSession`의 `hold(DART_LOCK_KEY)` 안에서 `list_annual_reports` → `new = [x for x in items if x.rcept_no > last_no]`(`rcept_no`로 중복 제거) → `len(new) < len(items)` 또는 `page >= total_page`면 구간 끝, 아니면 `page += 1`.
-5. `"사업보고서" in report_nm`만 남겨요.
+4. `[start, today]`를 `FEED_WINDOW_DAYS`일씩 나눠 **오래된 구간부터**. 구간마다 `page = 1`부터 `page >= total_page`까지 전부: `LockSession`의 `hold(DART_LOCK_KEY)` 안에서 `list_annual_reports` → `rcept_no > last_no`인 것을 모으기(`rcept_no`로 중복 제거).
+5. `"사업보고서" in report_nm`이고 `[첨부추가]`·`[첨부정정]`으로 시작하지 않는 것만 남겨요(`FEED_SKIP_PREFIXES` — 첨부 서류만 바뀌어 재무 수치는 그대로). 기준점은 첨부 공시까지 포함한 가장 큰 접수번호로 옮겨요.
 6. `SELECT stock_id, corp_code FROM stocks WHERE corp_code = ANY(:codes) AND is_active`로 DB 종목만.
 7. 한 트랜잭션: `disclosures` upsert(`title=report_nm, report_type="정기공시", filed_at=rcept_dt 00:00 서울, url="https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}", data_source="DART"`, 충돌 키 `["rcept_no"]`) → `expired = freshness.expire_financials(conn, 종목들)` → 기준점 upsert(모은 것이 있으면 가장 큰 `rcept_no`·그 날짜, 없고 행도 없으면 `(f"{start:%Y%m%d}000000", start)`, 없고 행이 있으면 그대로).
 8. `res.rows = 고른 공시 수`, 비고 `pages=… filings=… matched=… expired=…`.
@@ -1167,7 +1170,7 @@ def load_dart_feed(engine: Engine, providers: Providers, *, today: date | None =
 계정 규칙은 DART API 적재와 같다: ACCOUNT_MAP(account_id 후보 → account_nm 후보), 연결 우선 → 별도.
 """
 ENCODING = "cp949"
-REQUIRED_COLUMNS: tuple[str, ...] = (...)   # 확인 뒤 채움(아래 '먼저 확인할 것')
+REQUIRED_COLUMNS: tuple[str, ...] = ("재무제표종류", "종목코드", "결산기준일", "보고서종류", "항목코드", "항목명", "당기")
 
 
 @dataclass(frozen=True)
@@ -1206,19 +1209,27 @@ python -m app.ingest dart-feed
 python -m app.ingest dart-bulk --as-of 2026-10-15 --years 4 FILE [FILE ...]
 ```
 
-**먼저 확인할 것 (코드 전에 — 결과를 이 절에 표로 채워요)**
+**확인 결과 (2026-10-19, 2023~2025 사업보고서 파일)**
 
-1. 파일의 실제 헤더·인코딩·종목코드 형식(`[005930]`?)·금액 형식 → `REQUIRED_COLUMNS`·`BulkRow` 매핑 표
-2. 재무제표 종류 값 → `statement`·`consolidated` 판정 규칙
-3. 삼성전자 005930, 현대차 005380, NAVER 035420의 같은 연도 값이 API 적재 값과 같은지. 다르면 항목코드 대응표를 상수로
-4. 적재 뒤 `SELECT pg_size_pretty(pg_database_size(current_database()))` — 여유가 적으면 `--years`를 줄여요
+| 항목 | 확인한 것 |
+| --- | --- |
+| 받는 곳 | 공시정보 활용마당 > 재무정보 일괄다운로드. 연도별 사업보고서(4Q) BS·PL·CF·CE zip. **스크립트로 직접 요청하면 오류 페이지**가 와서 브라우저(또는 Playwright)로 받아요. 파일 이름 예: `2025_4Q_BS_20261008030335.zip`(끝 숫자 = 생성 시각) |
+| zip 안 | cp949 탭 구분 txt 여러 개 — 일반·금융기타·보험·은행·증권 × 별도·연결. 손익은 `02_손익계산서`와 `03_포괄손익계산서`(대부분 회사가 '단일 포괄손익계산서'로 냄) 둘 다 필요해요. 그래서 BS zip과 PL zip을 함께 넘겨요 |
+| 열 | 재무제표종류 · 종목코드(`[005930]`) · 회사명 · 시장구분 · 업종 · 업종명 · 결산월 · 결산기준일 · 보고서종류 · 통화 · 항목코드 · 항목명 · 당기 · 전기 · 전전기. **손익 파일은 이름 없는 빈 열이 끼어 '당기' 위치가 달라** 헤더 이름으로 찾아요. 금액은 쉼표, 값 없음은 빈 칸이나 `-` |
+| 연결/별도 | 재무제표종류 끝이 `- 연결`/`- 별도` (파일 이름에도 `_연결`) |
+| statement | 재무제표종류가 `재무상태표`로 시작 → BS, `포괄손익계산서` 포함 → CIS, 그 밖의 `손익계산서` → IS |
+| API 대조 | 개발 DB 국내 70종목 × FY2023·2024·2025 × 6개 항목이 API 적재 값과 **전부 같아요**(`DartClient._extract`를 그대로 써서 계정 규칙이 같음) |
+| 크기 | 2025 BS 6.7MB·PL 3.8MB(zip), 2,844개 회사. 개발 DB 적재 뒤 20MB(국내 70개 회사 210행 — listed 종목이 들어오면 회사 약 2,500개 × 연도 수) |
+
+`load_bulk`는 정의서 초안의 `BatchWriter` 대신 200개 회사씩 한 트랜잭션으로 넣고 `ingestion_logs`는 요약 1행만 남겨요(회사마다 로그를 남기면 수천 행이 쌓여서).
 
 ### 6-7. 테스트
 
 | 파일 | 테스트 이름 | 확인하는 것 |
 | --- | --- | --- |
 | `test_dart_feed.py` | `test_feed_expires_only_db_stocks_and_moves_cursor` | 목록 3건(DB 종목 1·DB에 없는 회사 1·사업보고서 아닌 제목 1) → 공시 1행, 만료 1, 기준점 = 가장 큰 rcept_no |
-| | `test_feed_stops_at_cursor` | 2페이지째에 기준점 이하 번호 → 3페이지를 부르지 않음 |
+| | `test_feed_reads_every_page_even_when_order_is_mixed` | 1페이지에 기준점 이하 번호만 있어도 2페이지까지 받아 새 공시를 찾음 |
+| | `test_feed_skips_attachment_only_filings` | `[첨부추가]`는 만료 대상에서 빠지고 `[기재정정]`은 만료, 기준점은 둘 중 큰 번호 |
 | | `test_feed_failure_keeps_cursor` | 2번째 호출 실패 → `"FAILED"`, 기준점 그대로, 공시 0행 |
 | | `test_feed_splits_long_gap_into_90_day_windows` | 기준점 200일 전 → 구간 3개(오래된 순) |
 | | `test_feed_first_run_starts_7_days_back` | 기준점 없음 → `start = today − 7` |
