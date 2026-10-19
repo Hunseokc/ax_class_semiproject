@@ -1300,20 +1300,37 @@ def run_background(engine: Engine, providers: Providers, *, now: datetime | None
 
 ---
 
-## 8. 4-2 — 미국 재무 일괄 수집 (D8 결정 뒤)
+## 8. 4-2 — 미국 재무 일괄 수집 (D8 확정 2026-10-19: frames, 임시 값)
 
-지금 정하는 것은 인터페이스뿐이에요. 방식은 smoke 결과로 정하고 이 절을 채워요.
+### 8-1. smoke 결과
+
+| 후보 | 크기·호출 | 정확도(노출·비교군 76개 × 3개년, 회사별 companyfacts 대비) | 판단 |
+| --- | --- | --- | --- |
+| companyfacts.zip | **1.41GB** 한 파일(10-17 생성) | 회사별 API와 같은 원본 | Cloud Run 1~2GiB에서 받아 풀기 어려워 채택 안 함 |
+| frames API | 개념·기간당 1회 0.3~0.9MB, 0.2~0.5초. 3개년 84~92회 · 34~38초로 미국 4,400여 개 회사 | 1,368칸 중 **1,329칸(97%)** 같음 | **채택 — 임시 값으로** |
+
+frames와 회사별 값이 다른 경우: ① frames는 서식과 상관없이 최근 제출값을 골라 위임장(DEF 14A)의 반올림 값이 들어감(MVST 순이익 −106,336,000 → −106,000,000) ② 52/53주 회계연도는 한 달력연도 frame에 두 해가 겹쳐 한 해가 빠짐(LRCX FY2024) ③ 순간값 frame(`CY{y}Q{n}I`)은 달력 분기 기준이라 12월 결산이 아닌 회사는 10-Q 값이 섞임 → **결산일과 같은 날짜 값만** 써서 해결.
+
+### 8-2. 구현
 
 ```python
-# backend/app/providers/sec_bulk.py (새) — 방식과 상관없이 이 시그니처를 지킨다
-def get_annual_financials_bulk(ciks: set[str], years: int) -> dict[str, list[Financial]]:
-    """CIK → FY 재무 목록(결산일 오름차순). sec.py get_annual_financials와 같은 태그 대체 규칙·같은 Financial 모양.
-    data_source="SEC". 받지 못한 CIK는 결과에 없음."""
+# backend/app/providers/sec_bulk.py
+class SecFrames:                                    # frames 호출(초당 약 4건), calls = 호출 수
+    def frame(self, concept: str, period: str) -> list[dict]: ...
+
+def get_annual_financials_bulk(ciks: set[str], years: int, *, last_year: int | None = None,
+                               frames: SecFrames | None = None) -> dict[str, list[Financial]]:
+    """CIK → FY 재무 목록(결산일 오름차순). sec.py와 같은 태그 대체 규칙(CONCEPTS)·같은 Financial 모양.
+    기간형은 CY{last_year-years}~CY{last_year}(기본 올해까지 — 6·9월 결산 회사), 순간형은 결산일이 든 분기 frame만."""
+
+# backend/app/ingest/us_bulk.py
+PROVISIONAL_TTL = timedelta(days=7)
+def load_us_bulk(engine, *, years=3, frames=None, now=None) -> dict:
+    """재무 기록이 없는 활성 미국 listed(CIK 있음)에 넣고 freshness.mark_provisional(7일). 로그 source='SEC_BULK'."""
 ```
 
-- `jobs.merge_supplement`(yfinance 보완) 규칙은 그대로.
-- smoke 비교 기준: 받는 크기, 최대 메모리(Cloud Run 1~2GiB), 태그 대체 규칙을 옮길 수 있는지, 호출 수. 결과는 `docs/smoke_test_result.md`.
-- 적재는 `BatchWriter`(4-2절), 잠금은 `SEC_LOCK_KEY`를 파일 받는 동안 1회.
+- **임시 값**: 유효기간 7일 뒤 상세를 열면 회사별 API(정확한 10-K + yfinance 보완)로 다시 받아요. 노출 종목·비교군은 지금처럼 회사별 API만 써요. yfinance 보완(`merge_supplement`)은 회사마다 호출이라 일괄에서는 하지 않아요.
+- CLI `python -m app.ingest us-bulk [--years 3]`. 개발 DB: 대상 5,370 → 4,441개 회사 13,065행, 34초.
 
 ---
 
@@ -1346,7 +1363,7 @@ D5 수치가 나오면 `universe.yaml stocks` 확장 또는 "노출 = 시가총�
 | D11 | 미국 listed 우선순위 소스 | **확정**: 상위 1,500개 안에서 시가총액(SEC 발행주식수 × 종가) 순, 30일마다 `stocks.cap_rank`에 저장(migration 009) | 7-2 측정 — 전 종목 종가 묶음 조회 약 2분이라 매일 하지 않아요 |
 | D12 | 백그라운드 하루 예산 값 | **확정(시작값)**: DART 2,000행 · SEC 1,000행, 첫 주 `ingestion_logs`로 조정 | DART 키 1개 하루 약 2만 번 중 절반 이하(행당 2~5번) |
 | D5 | 노출 종목 수 | 4-1 뒤 측정 | — |
-| D8 | 미국 일괄 방식 | smoke 뒤 | — |
+| D8 | 미국 일괄 방식 | **확정**: SEC frames, listed 첫 적재용 임시 값(7일) | 8-1 smoke — zip 1.4GB, frames 97% 일치·38초 |
 
 ---
 
