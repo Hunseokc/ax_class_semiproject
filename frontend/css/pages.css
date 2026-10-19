@@ -322,22 +322,25 @@
    원본은 아래 중 .wl-*·.r52·.topbar·.gsearch* 가 components.css(공통, D 소유)에 있다. 공통 css는 고치지 않으므로 A 소유인 이 파일에 둔다
    (pages.css가 components.css 뒤에 로드되어 같은 결과). 필요하면 D가 components.css로 옮긴다. */
 
-/* 관심종목 카드 — 파스텔 카드 + 컴팩트 행 */
+/* 관심종목 카드 — 어두운 요약 카드 + 자세한 리스트 행 */
 
 /* 관심종목 카드 (레퍼런스의 파스텔 카드) — 항상 2줄: 2열→3열→4열→5열 */
 .wl-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-4); }
 @media (min-width: 768px)  { .wl-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (min-width: 1024px) { .wl-grid { grid-template-columns: repeat(4, 1fr); } }
 @media (min-width: 1440px) { .wl-grid { grid-template-columns: repeat(5, 1fr); } }
-/* 위에서 아래로: 게이지(가운데) → 티커 → 가격(등락률) → 종목명 */
-.wl-card { display: flex; flex-direction: column; gap: var(--sp-2); min-height: 196px; padding: var(--sp-5) var(--sp-6) var(--sp-6); border-radius: var(--r-card); }
+/* 어두운 카드, 가운데 정렬. 위에서 아래로: 게이지 → 티커 → 가격(등락률) → 종목명 */
+.wl-card {
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); min-height: 196px; padding: var(--sp-5) var(--sp-6) var(--sp-6);
+  border-radius: var(--r-card); background: var(--surface); color: var(--text); text-align: center;
+}
 .wl-card__gauge { display: flex; justify-content: center; margin-bottom: var(--sp-2); }
-.wl-card__ticker { font-size: calc(var(--fs-xs) - 1pt); font-weight: var(--fw-semibold); letter-spacing: .06em; text-transform: uppercase; color: var(--text-on-pastel-2); }
+.wl-card__ticker { font-size: calc(var(--fs-xs) - 1pt); font-weight: var(--fw-semibold); letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); }
 /* 가격·등락률은 보조 정보 — 매력도 게이지가 카드의 주인공 */
 .wl-card__price { font-size: var(--fs-lg); font-weight: var(--fw-bold); letter-spacing: .01em; }
 .wl-card__price .pwc__chg { font-size: var(--fs-xs); }
 .wl-card__name { font-weight: var(--fw-bold); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wl-card__foot { margin-top: auto; display: flex; align-items: center; min-width: 0; }
+.wl-card__foot { margin-top: auto; display: flex; align-items: center; justify-content: center; min-width: 0; max-width: 100%; }
 /* 관심종목 메모·목표가: 카드 링크 바깥 형제 버튼(링크 안 버튼 금지), 카드 위 오른쪽에 겹쳐 둔다 */
 .wl-item { position: relative; min-width: 0; }
 .wl-item > .wl-card { height: 100%; }
@@ -345,46 +348,52 @@
 .wl-card__edit {
   position: absolute; top: var(--sp-3); right: var(--sp-3); width: 32px; height: 32px;
   display: grid; place-items: center; border: 0; border-radius: 50%;
-  background: rgba(20, 20, 20, .08); color: var(--text-on-pastel);
+  background: rgba(255, 255, 255, .06); color: var(--text-2);
   transition: background .15s var(--ease);
 }
-.wl-card__edit:hover { background: rgba(20, 20, 20, .16); }
+.wl-card__edit:hover { background: var(--card-active); color: var(--text); }
 
-/* 관심종목 컴팩트 보기: 종목명 | 소형 게이지·점수·라벨 | 현재가 | 등락률 | 편집 — 열 폭을 고정해 종목명과 게이지가 벌어지지 않게 */
+/* 관심종목 리스트 보기: 종목명 | 소형 게이지·점수·라벨 | 현재가·전일 대비 | 목표가·괴리율 | 메모 | 편집 — 열 폭을 고정해 행끼리 위치가 맞게 */
 .wl-crow { display: grid; grid-template-columns: minmax(0, 1fr) 36px; align-items: center; gap: var(--sp-1); }
-.wl-compact .row { grid-template-columns: minmax(160px, 1fr) 168px 140px 96px; gap: var(--sp-3); padding-block: var(--sp-2); }   /* 전체 폭: 종목명이 남는 폭을 쓰고 숫자 열은 오른쪽에 고정 */
+.wl-compact .row { grid-template-columns: minmax(140px, 1fr) 168px 150px 130px minmax(0, 200px); gap: var(--sp-5); padding-block: var(--sp-2); }   /* 남는 폭은 종목명이 쓰고, 값 열은 모두 오른쪽에 붙인다 */
 .wl-compact .wl-card__edit { position: static; background: transparent; color: var(--text-2); }
 .wl-compact .wl-card__edit:hover { background: var(--card-active); color: var(--text); }
-/* 어두운 배경(관심종목 컴팩트·시장 심리 지수)용 밝은 구간 색 — 밝은 카드 보기는 원래 색 그대로 */
-.wl-compact__score, .senti { --gauge-1: #FF8A70; --gauge-2: #FFC35C; --gauge-3: #D3DBDD; --gauge-4: #4FD8C4; --gauge-5: #3DDC97; }
-.wl-compact__score .gauge-mini__arc path:not([opacity="1"]), .senti .gauge-mini__arc path:not([opacity="1"]) { opacity: .6; }
+/* 어두운 배경(관심종목 리스트·카드·시장 심리 지수)용 밝은 구간 색 */
+.wl-compact__score, .wl-card__gauge, .senti { --gauge-1: #FF8A70; --gauge-2: #FFC35C; --gauge-3: #D3DBDD; --gauge-4: #4FD8C4; --gauge-5: #3DDC97; }
+.wl-compact__score .gauge-mini__arc path:not([opacity="1"]), .wl-card__gauge .gauge-mini__arc path:not([opacity="1"]), .senti .gauge-mini__arc path:not([opacity="1"]) { opacity: .6; }
 .wl-compact__score .gauge-mini { width: auto; flex-direction: row; gap: var(--sp-2); }
 .wl-compact__score .gauge-mini svg { width: 48px; height: 28px; }
 .wl-compact__score .gauge-mini__value { margin-top: 0; }
-.wl-compact__score .gauge-mini__value strong { font-size: var(--fs-md); }
-.wl-compact__score .gauge-mini__band { color: var(--text-2); }
-.wl-compact__score .gauge-mini__ticks { stroke: var(--text-3); }
-.wl-compact__score .gauge-mini__needle line { stroke: var(--text); }
-.wl-compact__score .gauge-mini__needle circle { fill: var(--text); }
-.wl-compact__score .gauge-mini__ring { border-color: var(--text-3); }
-.wl-compact__price { text-align: right; font-weight: var(--fw-bold); font-size: var(--fs-sm); white-space: nowrap; }   /* 좁아져도 '원'이 다음 줄로 내려가지 않게 */
-.wl-compact__chg { text-align: right; font-size: var(--fs-sm); }
+.wl-compact__score .gauge-mini__value strong { font-size: var(--fs-md); min-width: 2ch; text-align: right; }   /* 점수 자릿수가 달라도 라벨 시작 위치가 같게 */
+.wl-compact__score .gauge-mini__band, .wl-card__gauge .gauge-mini__band { color: var(--text-2); }
+.wl-compact__score .gauge-mini__ticks, .wl-card__gauge .gauge-mini__ticks { stroke: var(--text-3); }
+.wl-compact__score .gauge-mini__needle line, .wl-card__gauge .gauge-mini__needle line { stroke: var(--text); }
+.wl-compact__score .gauge-mini__needle circle, .wl-card__gauge .gauge-mini__needle circle { fill: var(--text); }
+.wl-compact__score .gauge-mini__ring, .wl-card__gauge .gauge-mini__ring { border-color: var(--text-3); }
+/* 값 칸: 위 = 큰 값, 아래 = 보조 값 */
+.wl-compact__price, .wl-compact__target { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; white-space: nowrap; }   /* 좁아져도 '원'이 다음 줄로 내려가지 않게 */
+.wl-compact__main { font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+.wl-compact__sub { font-size: var(--fs-xs); color: var(--text-2); }
+.wl-compact__memo { min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); color: var(--text-2); }
 /* 홈 카드 보기: 4열 × 2줄(중간 폭 3열, 좁은 화면 2열) — home.js cardCols()와 맞춤 */
 .wl-grid--home { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; grid-auto-rows: 1fr; }
 .wl-grid--home .wl-card { min-height: 0; padding: var(--sp-4) var(--sp-4) var(--sp-5); }
 @media (max-width: 1023px) { .wl-grid--home { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } }
 @media (max-width: 599px) { .wl-grid--home { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+/* 중간 폭: 메모 열을 뺀다(메모는 편집 버튼·종목 상세에서) */
+@media (max-width: 1023px) {
+  .wl-compact .row { grid-template-columns: minmax(0, 1fr) 156px 140px 120px; gap: var(--sp-3); }
+  .wl-compact__memo { display: none; }
+}
 @media (max-width: 767px) {
-  /* 폰 폭: 종목명 | 게이지 | 현재가·등락률(위아래) — 게이지는 데스크톱처럼 가로 한 줄 */
-  .wl-compact .row { grid-template-columns: minmax(0, 1fr) 156px 88px; gap: 2px var(--sp-3); }   /* 게이지·현재가 열 폭 고정 — 행끼리 위치가 맞게 */
-  .wl-compact .row__main { grid-column: 1; grid-row: 1 / span 2; }
-  .wl-compact__score { grid-column: 2; grid-row: 1 / span 2; }
-  .wl-compact__price { grid-column: 3; grid-row: 1; }
-  .wl-compact__chg { grid-column: 3; grid-row: 2; }
+  /* 폰 폭: 종목명 | 게이지 | 현재가·등락률(위아래) — 목표가 열도 뺀다 */
+  .wl-compact .row { grid-template-columns: minmax(0, 1fr) 156px 150px; }   /* 게이지·현재가 열 폭 고정 — 등락률 옆 전일 대비 금액까지 한 줄에 */
+  .wl-compact__target { display: none; }
 }
 /* 아주 좁은 폭: 종목명 자리를 위해 게이지를 줄이고 구간 라벨은 숨김(점수·읽기 라벨에는 남음) */
 @media (max-width: 479px) {
-  .wl-compact .row { grid-template-columns: minmax(0, 1fr) 72px 80px; column-gap: var(--sp-2); padding-inline: var(--sp-3); }
+  .wl-compact .row { grid-template-columns: minmax(0, 1fr) 72px 96px; column-gap: var(--sp-2); padding-inline: var(--sp-3); }
+  .wl-compact__diff { display: none; }   /* 좁은 폭은 등락률만 */
   .wl-compact__score .gauge-mini { gap: var(--sp-1); }
   .wl-compact__score .gauge-mini svg { width: 40px; height: 24px; }
   .wl-compact__score .gauge-mini__band { display: none; }
@@ -451,31 +460,26 @@
 .home-widget__foot:empty { display: none; }
 @media (max-width: 1100px) { .home-split { grid-template-columns: 1fr; } }
 
-/* 내 포트폴리오 요약: 총 평가금액·손익 → 시드 사용률 바 → 원가 비중 상위 종목 */
+/* 내 포트폴리오 요약: 왼쪽 = 총 평가금액·손익 + 비중 범례(2열), 오른쪽 = 비중 도넛, 아래 = 시드 사용률. 휴대폰 폭에서만 도넛이 아래로 내려간다 */
 .home-pf__body { flex: 1; display: flex; flex-direction: column; }
 .home-pf__body > * { flex: 1; }
 .home-pf__inner { display: flex; flex-direction: column; gap: var(--sp-4); }
+.home-pf__main { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-4); align-items: center; }
+.home-pf__left { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
 .home-pf__hero { display: flex; flex-direction: column; gap: var(--sp-1); }
 .home-pf__big { font-size: var(--fs-2xl); font-weight: var(--fw-extra); letter-spacing: -0.02em; line-height: 1.15; }
 .home-pf__total-pnl { font-size: var(--fs-md); font-weight: var(--fw-bold); }
-.home-pf__usage { display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--fs-xs); }
-/* 시드 사용 막대(종목별로 쌓음): 칸 너비 = 시드 대비 금액, 칸 안 이름, 칸 아래 수익률, 끝 빈 칸 = 현금. 좁은 칸은 이름이 말줄임(전체는 툴팁) */
-.home-pf__stack {
-  --pf-seg-1: var(--ice-strong); --pf-seg-2: var(--lavender-strong); --pf-seg-3: var(--ice); --pf-seg-4: var(--lavender);
-  display: flex; gap: 2px;
-}
-.home-pf__seg { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: inherit; text-decoration: none; }
-.home-pf__seg-bar {
-  display: flex; align-items: center; height: 26px; padding: 0 6px; overflow: hidden; white-space: nowrap;
-  background: var(--seg); color: var(--text-on-pastel); font-size: 11px; font-weight: var(--fw-bold);
-}
-.home-pf__seg-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.home-pf__seg:first-child .home-pf__seg-bar { border-radius: var(--r-pill) 0 0 var(--r-pill); }
-.home-pf__seg:last-child .home-pf__seg-bar { border-radius: 0 var(--r-pill) var(--r-pill) 0; }
-.home-pf__seg:only-child .home-pf__seg-bar { border-radius: var(--r-pill); }
-.home-pf__seg--cash .home-pf__seg-bar { background: var(--card-active); }
-a.home-pf__seg:hover .home-pf__seg-bar { filter: brightness(1.08); }
-.home-pf__seg-pnl { padding-left: 4px; font-size: 11px; font-weight: var(--fw-bold); white-space: nowrap; }   /* 칸보다 길면 오른쪽으로 넘쳐 보인다(잘리지 않게) */
+.home-pf__legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-4); font-size: var(--fs-sm); }
+.home-pf__legend-row { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-2); text-decoration: none; }
+.home-pf__legend-row i { flex: none; width: 10px; height: 10px; border-radius: 3px; }
+.home-pf__legend-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: var(--fw-semibold); }
+.home-pf__legend-pct { flex: none; margin-left: auto; }
+a.home-pf__legend-row:hover .home-pf__legend-name { text-decoration: underline; text-underline-offset: 3px; }
+.home-pf__donut { position: relative; width: 180px; height: 180px; }
+@media (max-width: 479px) { .home-pf__main { grid-template-columns: 1fr; } .home-pf__donut { margin: 0 auto; } }   /* 휴대폰 폭에서만 도넛을 아래로(가로 스크롤 방지) */
+.home-pf__donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; font-size: var(--fs-xs); }
+.home-pf__donut-center strong { font-size: var(--fs-md); font-weight: var(--fw-extra); }
+.home-pf__usage { font-size: var(--fs-xs); }
 
 /* 한 줄 시장 요약 + 관심종목 연결 요약 (규칙 기반 문장) */
 .market-brief { display: flex; flex-direction: column; gap: 2px; margin: calc(-1 * var(--sp-2)) 0 var(--sp-2); }   /* 아래 카드와 간격 = 섹션 사이 간격(24px) */
