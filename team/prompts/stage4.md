@@ -15,7 +15,7 @@
 [이번 단계] Stage 4 — 분석. 이 프로젝트의 '분석 엔진'을 만든다. 수익률 예측이 아니라 같은 시장 안 상대 위치다.
 [내 파트] 설정 → 지표값 저장 → 로버스트 Z → 섹터 중립화 → 프리셋 가중 집계 → CLI → 테스트 → 정의서
 [브랜치] feat/s4-c-scoring
-[참조 원본] ../ax_class_semiproject/backend/config/scoring.yaml, app/services/scoring.py, app/queries/score_*.sql, app/ingest/explain.py, tests/test_scoring.py, docs/09_매력도_점수_정의서.md (읽기 전용)
+[참조 원본] ../ax_class_stockmind/backend/config/scoring.yaml, app/services/scoring.py, app/queries/score_*.sql, app/ingest/explain.py, tests/test_scoring.py, docs/09_매력도_점수_정의서.md (읽기 전용)
 [먼저 읽기] 코드 작성 전에 docs/09를 요약해 계획표 앞에 "모델 한 장 요약"(팩터 5개·지표·방향·가중치·Z 계산식·중립화 방식·Φ 변환)을 먼저 보여 줘. 내가 이해했다고 하면 계획표로 넘어간다.
 
 [담당 파일 — 이 순서대로]
@@ -73,7 +73,7 @@
 [이번 단계] Stage 4 — 분석. SQL 역량(CTE·윈도우 함수·집계·HAVING)이 가장 많이 드러나는 파트다.
 [내 파트] v_stock_metrics(먼저 PR) → 분석·프리셋 → 경쟁 비교·추이 → 통계 4종 → 기존 응답에 매력도 추가 → 테스트
 [브랜치] ① feat/s4-b-metrics-view  ② feat/s4-b-analysis-api
-[참조 원본] ../ax_class_semiproject/backend/db/views.sql, app/api/analysis.py, app/queries/{analysis,peers,peers_chart,stats_*}.sql, tests/test_analysis.py, docs/06 3-3·통계 (읽기 전용)
+[참조 원본] ../ax_class_stockmind/backend/db/views.sql, app/api/analysis.py, app/queries/{analysis,peers,peers_chart,stats_*}.sql, tests/test_analysis.py, docs/06 3-3·통계 (읽기 전용)
 
 [담당 파일 — 이 순서대로]
 1. backend/db/views.sql — [S4-B] v_stock_metrics: 수익률(1m·3m·1y)·변동성·MDD·120일선 괴리율·PER·PBR·ROE·성장률 등 (CTE·윈도우 함수). 배당(dps·dividend_yield) 열은 Stage 6 → 뺀다  ← 여기까지 ①번 브랜치로 먼저 PR
@@ -132,7 +132,7 @@
 [이번 단계] Stage 4 — 분석 화면. 매력도는 "투자 권유가 아님" 문구를 항상 함께 표시한다.
 [내 파트] 투자 성향 메뉴 → 상세 매력도 → 수치 분석 → 경쟁 비교 → 리스트·홈 카드 매력도
 [브랜치] feat/s4-a-analysis-screens
-[참조 원본] ../ax_class_semiproject/frontend/js/components/preset-menu.js, js/pages/stock.js(분석 부분), docs/screenshots/{01_home,02_stocks,03_stock_detail}.png, docs/06 3-3 (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
+[참조 원본] ../ax_class_stockmind/frontend/js/components/preset-menu.js, js/pages/stock.js(분석 부분), docs/screenshots/{01_home,02_stocks,03_stock_detail}.png, docs/06 3-3 (읽기 전용) 스크린샷·원본 화면은 참고용 — 배치·디자인·문구 같은 표현은 A가 정해도 된다(CLAUDE.md 1절, PR "원본과 다르게 한 것"에 기록).
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S4-A] 구역: getAnalysis·getPresets·getPeers·getPeersChart, 기존 함수에 preset 인자

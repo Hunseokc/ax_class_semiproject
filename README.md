@@ -174,7 +174,7 @@ docker compose run --rm api pytest -q
 ## 폴더 구조
 
 ```
-ax_stockmind/
+ax_class_semiproject/
 ├─ backend/
 │  ├─ app/
 │  │  ├─ api/          라우터 (market, stocks, watchlist, portfolios, health)

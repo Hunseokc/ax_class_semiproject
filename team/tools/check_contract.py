@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-ORIGINAL_CANDIDATES = ("../ax_class_semiproject", "../semi")   # CLAUDE.md 1절 경로, 없으면 ../semi
+ORIGINAL_CANDIDATES = ("../ax_class_stockmind", "../semi")   # CLAUDE.md 1절 경로, 없으면 ../semi
 SQL_FILES = ("schema.sql", "indexes.sql", "views.sql")
 
 
@@ -310,7 +310,7 @@ def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description="원본 대비 Stage 계약 검사")
     ap.add_argument("stage", type=int)
-    ap.add_argument("--original", help="원본 폴더 (기본: ../ax_class_semiproject → ../semi)")
+    ap.add_argument("--original", help="원본 폴더 (기본: ../ax_class_stockmind → ../semi)")
     ap.add_argument("--container", default="stockmind_db", help="PostgreSQL 컨테이너 이름")
     ap.add_argument("--skip-db", action="store_true", help="DB 비교 생략 (ORM·소비자만)")
     args = ap.parse_args()

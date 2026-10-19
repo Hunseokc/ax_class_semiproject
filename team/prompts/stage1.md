@@ -14,7 +14,7 @@
 [이번 단계] Stage 1 — MVP. 외부 API 없이 CSV 샘플만으로 DB를 채운다.
 [내 파트] 유니버스 설정 → 마스터 적재(오프라인) → 전처리 → 샘플 CSV 적재 CLI
 [브랜치] feat/s1-c-sample-ingest
-[참조 원본] ../ax_class_semiproject/backend/ (읽기 전용)
+[참조 원본] ../ax_class_stockmind/backend/ (읽기 전용)
 
 [담당 파일 — 이 순서대로]
 1. backend/config/universe.yaml — 원본에서 markets·indices(10개)·fx·stocks(노출 25종목)·peer_groups(테마 그룹)만. 비교군(benchmark) 후보 목록은 뺀다.
@@ -51,7 +51,7 @@
 [이번 단계] Stage 1 — MVP. DB에 저장된 값만 읽는 조회 API를 만든다.
 [내 파트] VIEW → SQL 파일 → 경로 검증 → 라우터 → 응답 스키마 → 테스트
 [브랜치] feat/s1-b-stock-api
-[참조 원본] ../ax_class_semiproject/backend/, ../ax_class_semiproject/docs/06_기능_API_정의서.md (3-1, 3-2 예시) (읽기 전용)
+[참조 원본] ../ax_class_stockmind/backend/, ../ax_class_stockmind/docs/06_기능_API_정의서.md (3-1, 3-2 예시) (읽기 전용)
 
 [담당 파일 — 이 순서대로]
 1. backend/db/views.sql — v_latest_price(종목별 최신 종가·전일 대비), v_fx_latest. v_stock_metrics는 Stage 4라 뺀다
@@ -87,7 +87,7 @@
 [이번 단계] Stage 1 — MVP. 바닐라 JS(ES Modules, 빌드 없음) + Chart.js(CDN)로 화면 3개를 만든다.
 [내 파트] 주식 리스트 → 종목 상세(기본 정보·핵심 지표·가격 차트) → 홈 지수·환율 카드
 [브랜치] feat/s1-a-screens
-[참조 원본] ../ax_class_semiproject/frontend/, ../ax_class_semiproject/docs/screenshots/{01_home,02_stocks,03_stock_detail}.png, docs/06 3-1·3-2 예시 JSON (읽기 전용)
+[참조 원본] ../ax_class_stockmind/frontend/, ../ax_class_stockmind/docs/screenshots/{01_home,02_stocks,03_stock_detail}.png, docs/06 3-1·3-2 예시 JSON (읽기 전용)
 
 [담당 파일 — 이 순서대로]
 1. frontend/js/api.js — [S1-A] 구역에 getStocks·getStock·getCandles·getPeerGroups·getIndices·getFx
