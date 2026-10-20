@@ -17,7 +17,7 @@ def test_diagnose_logs_ip_and_body_once(monkeypatch, caplog):
     monkeypatch.setattr(requests, "get", lambda url, **kw: calls.append(url) or _Resp("1.2.3.4"))
     monkeypatch.setattr(requests.Session, "get", lambda self, url, **kw: calls.append(url) or _Resp(""))
     monkeypatch.setattr(requests.Session, "post", lambda self, url, **kw: calls.append(url) or _Resp("\n\n<html>차단</html>"))
-    monkeypatch.setattr(krx, "_last_diag", 0.0)
+    monkeypatch.setattr(krx, "_last_diag", None)
     monkeypatch.setenv("KRX_PW", "secret-pw")
 
     with caplog.at_level(logging.ERROR, logger="app.providers.krx"):

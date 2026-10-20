@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 _throttle = Throttle(0.7)
 SPAC = re.compile(r"스팩")
 DIAG_INTERVAL = 600      # 로그인 실패 진단은 10분에 1회까지(재시도마다 KRX 호출이 늘지 않게)
-_last_diag = 0.0
+_last_diag: float | None = None
 # pykrx 1.2.9 website/comm/auth.py의 로그인 절차와 같은 주소 (pykrx 하위 모듈을 import하면 로그인이 한 번 더 일어나 직접 둔다)
 KRX_LOGIN_PAGE = "https://data.krx.co.kr/contents/MDC/COMS/client/MDCCOMS001.cmd"
 KRX_LOGIN_JSP = "https://data.krx.co.kr/contents/MDC/COMS/client/view/login.jsp?site=mdc"
@@ -42,7 +42,7 @@ def _stock():
 def _diagnose_login() -> None:
     """pykrx 로그인 실패 원인 기록: 나가는 IP + pykrx와 같은 로그인 절차의 실제 응답(앞부분)."""
     global _last_diag
-    if time.monotonic() - _last_diag < DIAG_INTERVAL:
+    if _last_diag is not None and time.monotonic() - _last_diag < DIAG_INTERVAL:
         return
     _last_diag = time.monotonic()
     import requests
