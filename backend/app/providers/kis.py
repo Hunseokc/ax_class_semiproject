@@ -24,7 +24,7 @@ from app.providers.convert import to_dec, to_int
 from app.providers.http import Throttle, call_with_retry
 
 log = logging.getLogger(__name__)
-_throttle = Throttle(0.35)         # 초당 약 3회 — 0.1초 간격에서 EGW00201(초당 거래건수 초과)이 났다(신규 앱키 한도)
+_throttle = Throttle(1.05)         # 모의투자 한도(초당 1건) 기준 — 앱키가 모의투자로 발급되어 가장 낮은 한도에 맞춘다
 PAGE = 100                         # 기간별 시세 1회 최대 행 수
 TOKEN_FILE = ROOT_DIR / "data" / "kis_token.json"
 # KIS 업종 코드 (universe.yaml의 pykrx 코드와 다르다)
