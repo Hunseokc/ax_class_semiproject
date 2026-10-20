@@ -27,8 +27,11 @@ log = logging.getLogger(__name__)
 _throttle = Throttle(1.05)         # 모의투자 한도(초당 1건) 기준 — 앱키가 모의투자로 발급되어 가장 낮은 한도에 맞춘다
 PAGE = 100                         # 기간별 시세 1회 최대 행 수
 TOKEN_FILE = ROOT_DIR / "data" / "kis_token.json"
-# KIS 업종 코드 (universe.yaml의 pykrx 코드와 다르다)
-INDEX_CODES = {"KOSPI": "0001", "KOSDAQ": "1001", "KOSPI200": "2001"}
+# KIS 업종 코드 (universe.yaml의 pykrx 코드와 다르다) — KIS 업종 마스터(idxcode.mst)에서 확인
+INDEX_CODES = {"KOSPI": "0001", "KOSDAQ": "1001", "KOSPI200": "2001",
+               # 대시보드 섹터 히트맵(services/sectors.py)의 코스피 200 섹터 지수: KRX 코드 → KIS 코드
+               "1150": "2039", "1151": "2009", "1152": "2010", "1153": "2011", "1154": "2012", "1155": "2013",
+               "1156": "2014", "1157": "2015", "1158": "2016", "1159": "2017", "1160": "2018"}
 EXPIRED = {"EGW00121", "EGW00123"}  # 유효하지 않은 토큰 / 만료된 토큰
 
 

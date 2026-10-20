@@ -3,7 +3,7 @@
 외부 호출은 갱신 작업(RefreshService의 SECTORS_US·SECTORS_KR — 4시간 TTL, 실패 후 30분 재시도)에서만 한다.
 홈 화면 조회(read_sectors)는 DB만 읽으므로 화면을 몇 번 열어도 외부 호출이 생기지 않는다.
 - 미국: 섹터 ETF 11개를 묶음 다운로드 1회(providers.us_batch_price — 미국 종목 일봉과 같은 경로)
-- 국내: KRX 코스피 200 섹터 지수(providers.kr_index, pykrx). 첫 섹터부터 실패하면 나머지는 시도하지 않는다
+- 국내: KRX 코스피 200 섹터 지수(providers.kr_index — pykrx, PRICE_SOURCE_KR=kis면 KIS 업종 코드로 바꿔 조회). 첫 섹터부터 실패하면 나머지는 시도하지 않는다
   (같은 원인으로 KRX에 로그인·요청을 반복하지 않도록)
 - 그 시장의 마지막 마감 거래일 값이 이미 있으면 다음 거래일까지 외부 호출 없이 끝낸다(주말·휴장 포함)
 - 장중 미확정 봉은 저장하지 않는다(마지막 마감 거래일까지만)
