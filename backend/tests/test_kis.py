@@ -80,6 +80,8 @@ def test_index_uses_kis_codes(fake_kis):
     p = kis.KisProvider()
     bars = p.get_index_prices(IndexRef(1, "KOSDAQ", "KR", "Asia/Seoul", "2001", "^KQ11"), date(2026, 1, 1), date(2026, 1, 3))
     assert fake_kis["get"][-1][2]["FID_INPUT_ISCD"] == "1001" and bars[-1].close == Decimal(3)
+    p.get_index_prices(IndexRef(0, "1155", "KR", "Asia/Seoul", "1155", None), date(2026, 1, 1), date(2026, 1, 3))
+    assert fake_kis["get"][-1][2]["FID_INPUT_ISCD"] == "2013"                 # 섹터 히트맵: KRX 1155 정보기술 → KIS 2013
     with pytest.raises(ProviderError):
         p.get_index_prices(IndexRef(2, "SPX", "US", "America/New_York", None, "^GSPC"), date(2026, 1, 1), date(2026, 1, 3))
 

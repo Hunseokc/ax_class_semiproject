@@ -55,7 +55,7 @@
 |---|---|
 | 백엔드 | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.x (동기, 원문 SQL `backend/app/queries/*.sql` + `text()`) |
 | DB | PostgreSQL 16 — 테이블 25 · VIEW 3 · 마이그레이션 001~009 |
-| 수집 | pykrx(국내 시세·지수·밸류에이션), yfinance(미국 시세·지수·밸류에이션, USD/KRW), OpenDART(국내 재무·공시), SEC EDGAR(미국 재무·공시) |
+| 수집 | pykrx(국내 시세·지수·밸류에이션, 장애 시 KIS Open API로 전환), yfinance(미국 시세·지수·밸류에이션, USD/KRW), OpenDART(국내 재무·공시), SEC EDGAR(미국 재무·공시) |
 | 갱신 | 앱 안 스케줄러(asyncio) + PostgreSQL advisory lock — 시세 4시간 TTL, 비교군 07:00, 백그라운드 재무 08:00 (KST) |
 | 프론트엔드 | 바닐라 HTML/CSS/JS (ES Modules, 빌드 없음) · Chart.js (CDN) · CSS 변수 디자인 토큰(라이트·다크) |
 | 실행·테스트 | Docker Compose · pytest |
@@ -195,7 +195,7 @@ ax_stockmind/
 │  │  ├─ api/          라우터 (market, stocks, analysis, home, watchlist, portfolios, health)
 │  │  ├─ core/         설정·DB 연결·에러·로깅
 │  │  ├─ ingest/       수집·적재 CLI (python -m app.ingest) — 일괄 파일·증분·백그라운드 적재 포함
-│  │  ├─ providers/    외부 데이터 소스 어댑터 (pykrx, yfinance, OpenDART, SEC EDGAR)
+│  │  ├─ providers/    외부 데이터 소스 어댑터 (pykrx, KIS, yfinance, OpenDART, SEC EDGAR)
 │  │  ├─ services/     환율(TTL)·갱신·스케줄러·매력도·시장 심리·섹터·포트폴리오·게스트 세션
 │  │  ├─ queries/      조회용 원문 SQL
 │  │  ├─ models/       ORM (schema.sql과 1:1)
@@ -244,6 +244,7 @@ ax_stockmind/
 ## 데이터 이용 조건
 
 - **pykrx**: KRX 정보데이터시스템 비공식 라이브러리입니다. 1.2.x는 시총·펀더멘털·지수 조회에 KRX 회원 로그인이 필요합니다.
+- **KIS Open API**(한국투자증권): `PRICE_SOURCE_KR=kis`일 때 국내 일봉·지수·밸류에이션. 시세 조회 API만 호출하고(주문·계좌 API 없음), 호출 한도는 계좌(앱키) 단위라 모의투자 기준 초당 1건으로 호출합니다([troubleshooting 2](docs/troubleshooting.md)).
 - **yfinance**: Yahoo Finance 비공식 라이브러리입니다. 개인·학습 목적으로만 쓰고 원본 데이터를 재배포하지 않습니다. 저장소에는 소량 샘플만 포함합니다.
 - **OpenDART**(금융감독원): 국내 재무(연결)·공시. 인증키가 필요하고, 분당 호출 제한을 넘지 않도록 프로세스마다 60초에 45회 이하로 호출합니다.
 - **SEC EDGAR**: 미국 재무(XBRL companyfacts·frames)·공시. API 키는 없지만 연락처(이메일)가 들어간 User-Agent가 필수입니다.
