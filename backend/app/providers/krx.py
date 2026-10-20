@@ -5,7 +5,10 @@ pykrx 1.2.x는 시총·펀더멘털·지수 조회에 KRX 로그인이 필요하
 """
 from __future__ import annotations
 
+import logging
+import os
 import re
+import time
 from datetime import date, timedelta
 
 from app.core.config import export_krx_credentials
@@ -13,14 +16,54 @@ from app.providers.base import Bar, Classification, IndexRef, Listing, StockRef,
 from app.providers.convert import positive_or_none, to_dec, to_int
 from app.providers.http import Throttle, call_with_retry
 
+log = logging.getLogger(__name__)
 _throttle = Throttle(0.7)
 SPAC = re.compile(r"스팩")
+DIAG_INTERVAL = 600      # 로그인 실패 진단은 10분에 1회까지(재시도마다 KRX 호출이 늘지 않게)
+_last_diag = 0.0
+# pykrx 1.2.9 website/comm/auth.py의 로그인 절차와 같은 주소 (pykrx 하위 모듈을 import하면 로그인이 한 번 더 일어나 직접 둔다)
+KRX_LOGIN_PAGE = "https://data.krx.co.kr/contents/MDC/COMS/client/MDCCOMS001.cmd"
+KRX_LOGIN_JSP = "https://data.krx.co.kr/contents/MDC/COMS/client/view/login.jsp?site=mdc"
+KRX_LOGIN_URL = "https://data.krx.co.kr/contents/MDC/COMS/client/MDCCOMS001D1.cmd"
+KRX_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
 
 def _stock():
     export_krx_credentials()
-    from pykrx import stock
+    try:
+        from pykrx import stock    # import 시점에 KRX 로그인 — 응답이 JSON이 아니면 여기서 예외
+    except Exception:
+        _diagnose_login()
+        raise
     return stock
+
+
+def _diagnose_login() -> None:
+    """pykrx 로그인 실패 원인 기록: 나가는 IP + pykrx와 같은 로그인 절차의 실제 응답(앞부분)."""
+    global _last_diag
+    if time.monotonic() - _last_diag < DIAG_INTERVAL:
+        return
+    _last_diag = time.monotonic()
+    import requests
+
+    try:
+        ip = requests.get("https://api.ipify.org", timeout=5).text.strip()
+    except Exception as e:  # noqa: BLE001
+        ip = f"확인 실패({type(e).__name__})"
+    try:
+        s = requests.Session()
+        s.get(KRX_LOGIN_PAGE, headers={"User-Agent": KRX_UA}, timeout=15)
+        s.get(KRX_LOGIN_JSP, headers={"User-Agent": KRX_UA, "Referer": KRX_LOGIN_PAGE}, timeout=15)
+        r = s.post(KRX_LOGIN_URL, timeout=15, headers={"User-Agent": KRX_UA, "Referer": KRX_LOGIN_PAGE},
+                   data={"mbrNm": "", "telNo": "", "di": "", "certType": "",
+                         "mbrId": os.environ.get("KRX_ID", ""), "pw": os.environ.get("KRX_PW", "")})
+        body = re.sub(r"\s+", " ", r.text)[:500]
+        log.error("KRX 로그인 진단: egress_ip=%s status=%s type=%s url=%s redirects=%s body=%r",
+                  ip, r.status_code, r.headers.get("content-type"), r.url,
+                  [h.status_code for h in r.history], body)
+    except Exception as e:  # noqa: BLE001
+        log.error("KRX 로그인 진단: egress_ip=%s 요청 실패 %s: %s", ip, type(e).__name__, e)
 
 
 def _ymd(d: date) -> str:
