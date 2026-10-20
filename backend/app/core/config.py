@@ -27,9 +27,13 @@ class Settings(BaseSettings):
     test_database_url: str = "postgresql+psycopg://stock:stock@localhost:5432/stockdb_test"
     log_level: str = "INFO"
     # ── [S1-D] 시세 수집 ──
-    price_source_kr: Literal["pykrx", "yfinance"] = "pykrx"
+    price_source_kr: Literal["pykrx", "yfinance", "kis"] = "pykrx"
     krx_id: str = ""
     krx_pw: str = ""
+    # 한국투자증권 Open API (PRICE_SOURCE_KR=kis일 때) — 실전 도메인
+    kis_api_key: str = ""
+    kis_api_secret: str = ""
+    kis_base_url: str = "https://openapi.koreainvestment.com:9443"
     # ── [S2-D] 사용자·갱신 TTL ──
     default_user_id: int = Field(default=1, ge=1)   # 인증 없는 단일 사용자(demo) 모드: get_current_user_id가 돌려주는 값
     # 게스트 세션(배포용): 켜면 브라우저마다 쿠키로 게스트 사용자를 나눈다. 쿠키가 없을 때 조회는 default_user_id를 보여 준다

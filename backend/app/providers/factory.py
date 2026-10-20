@@ -79,13 +79,18 @@ def default_providers() -> Providers:
     s = get_settings()
     yahoo, lazy = YahooProvider(), _Lazy()
     # PRICE_SOURCE_KR=yfinance면 국내도 yfinance(.KS/.KQ 심볼)로 받는다 — pykrx가 막혔을 때의 대체 경로
-    kr = KrxProvider() if s.price_source_kr == "pykrx" else yahoo
+    # PRICE_SOURCE_KR=kis면 한국투자증권 API(일봉·지수·밸류에이션). 대량 조회·상장 목록은 없어 종목별 수집으로 간다
+    if s.price_source_kr == "kis":
+        from app.providers.kis import KisProvider
+        kr = KisProvider()
+    else:
+        kr = KrxProvider() if s.price_source_kr == "pykrx" else yahoo
     dart = lazy.dart if s.dart_api_key else None
     sec = lazy.sec if "@" in s.sec_user_agent else None
     return Providers(
         kr_price=kr, us_price=yahoo, kr_index=kr, us_index=yahoo, fx=yahoo,
         # ── [S3-C] 밸류에이션·대량 조회 ──
-        kr_valuation=kr if s.price_source_kr == "pykrx" else None,
+        kr_valuation=kr if s.price_source_kr in ("pykrx", "kis") else None,
         us_valuation=yahoo,
         kr_bulk=kr if s.price_source_kr == "pykrx" else None, us_batch_price=yahoo,
         # ── [S6-B] 상장 목록 ──

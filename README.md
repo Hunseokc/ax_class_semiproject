@@ -110,7 +110,7 @@ docker compose run --rm api python -m app.ingest seed-demo
 
 ### 실제 데이터로 수집하기 (선택)
 
-샘플 대신 실제 데이터를 받으려면 `.env`에 아래 환경변수(KRX 계정·DART 키·SEC User-Agent)를 넣고 `all`을 한 번 실행합니다. pykrx가 막히면 `PRICE_SOURCE_KR=yfinance`로 바꿔 `.KS`/`.KQ` 심볼로 받습니다.
+샘플 대신 실제 데이터를 받으려면 `.env`에 아래 환경변수(KRX 계정·DART 키·SEC User-Agent)를 넣고 `all`을 한 번 실행합니다. pykrx가 막히면 `PRICE_SOURCE_KR=kis`(한국투자증권 Open API, 아래 `KIS_API_KEY`·`KIS_API_SECRET` 필요)로 바꿉니다. `yfinance`(`.KS`/`.KQ` 심볼)도 쓸 수 있지만 밸류에이션이 DART 파생값으로 대체됩니다.
 
 ```bash
 docker compose run --rm api python -m app.ingest all   # master → prices → indices → fx → financials → valuation → disclosures
@@ -133,6 +133,7 @@ docker compose run --rm api python -m app.ingest all   # master → prices → i
 | 변수 | 필수/선택 | 설명 |
 |---|---|---|
 | `KRX_ID`, `KRX_PW` | **필수**(국내 소스 pykrx 사용 시) | pykrx 1.2.x의 시총·PER/PBR·지수 조회에 필요한 KRX 정보데이터시스템 계정. 없으면 시총·펀더멘털·지수가 빈 결과([troubleshooting 1](docs/troubleshooting.md)) |
+| `KIS_API_KEY`, `KIS_API_SECRET` | 선택 (`PRICE_SOURCE_KR=kis`일 때 필수) | 한국투자증권 Open API 앱키·시크릿. 국내 일봉·지수·밸류에이션을 KIS로 받습니다(날짜별 전 종목 조회가 없어 비교군도 종목별 수집, 배당은 마지막 값 유지). 기존 DB는 `python -m app.ingest migrate 010_kis_source` 1회 |
 | `DART_API_KEY` | **필수**(국내 재무·공시) | OpenDART 인증키 |
 | `SEC_USER_AGENT` | **필수**(미국 재무·공시) | 연락처(이메일)가 들어간 User-Agent |
 | `REFRESH_TTL_HOURS` | 선택 | 같은 종류 외부 호출 최소 간격(시간, 3~4, 기본 4) |
