@@ -104,7 +104,7 @@ CREATE TABLE valuation_snapshots (
   bps                NUMERIC(18,4),
   market_cap         NUMERIC(26,0) CHECK (market_cap >= 0),      -- 종목 통화 기준
   shares_outstanding BIGINT        CHECK (shares_outstanding >= 0),
-  source             VARCHAR(20)   NOT NULL CHECK (source IN ('PYKRX','YFINANCE','DERIVED')),
+  source             VARCHAR(20)   NOT NULL CHECK (source IN ('PYKRX','YFINANCE','DERIVED','KIS')),
   dps                NUMERIC(18,4) CHECK (dps >= 0),             -- 주당배당금(연간, 종목 통화). 0 = 무배당, NULL = 미제공 (migration 005)
   PRIMARY KEY (stock_id, as_of)
 );
@@ -150,7 +150,7 @@ CREATE TABLE fx_rates (
 -- job_type은 단계마다 늘었다: SCORES(Stage 4) · BENCHMARK·HYDRATE(Stage 4-D) · SECTORS_US·SECTORS_KR(Stage 6 홈 섹터, migration 007)
 CREATE TABLE ingestion_logs (
   log_id      SERIAL PRIMARY KEY,
-  source      VARCHAR(20) NOT NULL,                              -- PYKRX / YFINANCE / DART / SEC / INTERNAL
+  source      VARCHAR(20) NOT NULL,                              -- PYKRX / KIS / YFINANCE / DART / SEC / INTERNAL
   job_type    VARCHAR(30) NOT NULL CHECK (job_type IN
                 ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','SCORES','MASTER','BENCHMARK','HYDRATE',
                  'SECTORS_US','SECTORS_KR')),

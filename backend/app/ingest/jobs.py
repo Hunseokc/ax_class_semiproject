@@ -533,6 +533,13 @@ def load_valuations(engine: Engine, providers: Providers, *, full: bool = False,
                 res.notes.append(f"DERIVED shares={shares}")
             elif vals:
                 with engine.begin() as conn:
+                    if any(v.dps is None for v in vals):      # 배당을 주지 않는 소스(KIS) → 마지막으로 알려진 값을 이어 쓴다
+                        prev_dps = conn.execute(text("""SELECT dps FROM valuation_snapshots WHERE stock_id = :id
+                                                        AND dps IS NOT NULL ORDER BY as_of DESC LIMIT 1"""),
+                                                {"id": ref.stock_id}).scalar()
+                        for v in vals:
+                            if v.dps is None:
+                                v.dps = prev_dps
                     res.rows = upsert(conn, "valuation_snapshots", [
                         {"stock_id": ref.stock_id, "as_of": v.as_of, "per": v.per, "pbr": v.pbr, "eps": v.eps,
                          "bps": v.bps, "market_cap": v.market_cap, "shares_outstanding": v.shares_outstanding,

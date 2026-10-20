@@ -389,3 +389,22 @@ def test_one_stock_failure_does_not_stop_others_in_financials(engine):
     st = jobs.load_financials(engine, pv, years=2, tickers=["AAPL"])
     assert st == {"AAPL": "FAILED"} and "미매핑" in scalar(
         engine, "SELECT error FROM ingestion_logs WHERE job_type = 'FINANCIALS' AND stock_id = 3 AND status = 'FAILED'")
+
+
+def test_kr_valuation_without_dps_keeps_last_known_dps(engine):
+    """배당을 주지 않는 소스(KIS)로 바꿔도 배당수익률이 비지 않도록 마지막으로 알려진 dps를 이어 쓴다."""
+    pv = make_providers()
+    jobs.load_valuations(engine, pv, stock_ids=[1], full=True)          # dps 1.5 저장
+    no_dps = pv.kr_valuation
+
+    class NoDps:
+        source = "YFINANCE"
+
+        def get_valuations(self, stock, start, end):
+            return [replace(v, dps=None) for v in no_dps.get_valuations(stock, start, end)]
+
+    pv.kr_valuation = NoDps()
+    jobs.load_valuations(engine, pv, stock_ids=[1], full=True)
+    with engine.connect() as conn:
+        dps = conn.execute(text("SELECT dps FROM valuation_snapshots WHERE stock_id = 1 ORDER BY as_of DESC LIMIT 1")).scalar()
+    assert dps == Decimal("1.5")
