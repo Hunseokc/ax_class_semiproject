@@ -99,3 +99,13 @@ def test_fiscal_year_mix_counts_latest_fy_per_stock(engine):
         assert fiscal_year_mix(conn, "KR", as_of) == [{"fiscal_year": 2025, "stocks": 2}, {"fiscal_year": 2024, "stocks": 1}]
         assert fiscal_year_mix(conn, "US", as_of) == [{"fiscal_year": 2025, "stocks": 1}]
         assert fiscal_year_mix(conn, "KR", date(2020, 1, 1)) == []
+
+
+def test_fast_jobs_use_fast_ttl_for_stale(engine):
+    """주가·지수·환율은 fast_ttl_hours×2(2시간), 그 밖은 ttl_hours×2(8시간)로 오래됨을 판단한다."""
+    now = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+    with engine.begin() as conn:
+        log(conn, "FX", "SUCCESS", source="REFRESH", now=now, ago=timedelta(hours=2, minutes=1))
+        log(conn, "VALUATION", "SUCCESS", source="REFRESH", now=now, ago=timedelta(hours=2, minutes=1))
+        d = data_quality(conn, days=7, ttl_hours=4, fast_ttl_hours=1, now=now)
+    assert [s["job_type"] for s in d["stale_jobs"]] == ["FX"]

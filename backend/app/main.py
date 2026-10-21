@@ -33,15 +33,15 @@ WEB_DIR = FRONTEND_DIR
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """SCHEDULER_ENABLED면 앱 안 스케줄러(4시간 갱신·비교군 1일 갱신)를 백그라운드로 돌린다."""
+    """SCHEDULER_ENABLED면 앱 안 스케줄러(주가·지수·환율 1시간·그 밖 4시간 갱신·비교군 1일 갱신)를 백그라운드로 돌린다."""
     task = None
     if get_settings().scheduler_enabled:
-        engine, ttl = get_engine(), get_settings().refresh_ttl_hours
+        engine, ttl, fast = get_engine(), get_settings().refresh_ttl_hours, get_settings().refresh_fast_ttl_hours
 
         def refresh_service():
             pv = deps.get_providers()
-            return deps.RefreshService(engine, pv, FxService(engine, pv.fx, ttl), ttl, scorer=deps.get_scorer(),
-                                       sector_loader=deps.load_sectors)
+            return deps.RefreshService(engine, pv, FxService(engine, pv.fx, fast), ttl, scorer=deps.get_scorer(),
+                                       sector_loader=deps.load_sectors, fast_ttl_hours=fast)
 
         task = asyncio.create_task(Scheduler(engine, refresh_service, deps.get_providers, deps.get_scorer()).run_forever())
     yield

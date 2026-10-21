@@ -467,7 +467,8 @@ class DataQualityOut(Schema):
                   summary="데이터 품질 현황: 작업 종류별 마지막 성공·실패(사유), 최근 N일 상태별 건수·격리 행 수, 오래된 갱신 작업(TTL×2 초과)")
 def stats_data_quality(days: int = Query(7, ge=1, le=90, description="건수를 셀 최근 일수"),
                        db: Session = Depends(get_db)):
-    return data_quality(db.connection(), days=days, ttl_hours=get_settings().refresh_ttl_hours)
+    return data_quality(db.connection(), days=days, ttl_hours=get_settings().refresh_ttl_hours,
+                        fast_ttl_hours=get_settings().refresh_fast_ttl_hours)
 
 
 @stats_router.get("/disclosure-frequency", summary="기간별 공시 빈도 (월·분기·주)")

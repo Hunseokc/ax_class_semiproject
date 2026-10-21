@@ -39,12 +39,13 @@ class Settings(BaseSettings):
     # 게스트 세션(배포용): 켜면 브라우저마다 쿠키로 게스트 사용자를 나눈다. 쿠키가 없을 때 조회는 default_user_id를 보여 준다
     guest_session_enabled: bool = False
     session_secret: str = ""                         # 세션 쿠키 서명 키. guest_session_enabled=true면 필수 (인스턴스끼리 같아야 함)
-    refresh_ttl_hours: float = Field(default=4, ge=3, le=4)   # 같은 종류 외부 호출은 이 시간에 최대 1회 (FxService TTL)
+    refresh_ttl_hours: float = Field(default=4, ge=3, le=4)   # 같은 종류 외부 호출은 이 시간에 최대 1회
+    refresh_fast_ttl_hours: float = Field(default=1, ge=1, le=4)   # 주가·지수·환율(FX·INDICES·PRICES)만 이 간격 (FxService TTL)
     # ── [S3-D] 재무·공시 소스 ── (비어 있으면 factory가 DART·SEC provider를 만들지 않는다)
     dart_api_key: str = ""
     sec_user_agent: str = ""                         # 연락처(이메일)가 들어간 User-Agent — SEC EDGAR 필수
     # ── [S3-D] 스케줄러 ──
-    scheduler_enabled: bool = True                       # 앱 안 스케줄러(4시간 갱신·비교군 1일 갱신)
+    scheduler_enabled: bool = True                       # 앱 안 스케줄러(주가·지수·환율 1시간·그 밖 4시간 갱신·비교군 1일 갱신)
     scheduler_check_minutes: int = Field(default=5, ge=1)
     # 이후 단계 설정은 해당 단계 담당자가 이 클래스에 추가한다
 
