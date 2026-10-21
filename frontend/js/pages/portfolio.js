@@ -43,6 +43,17 @@ async function loadPortfolios() {
   loadPortfolio();
 }
 
+// 쿠키 없이 연 화면은 데모 사용자의 id를 들고 있다가, 첫 쓰기에서 게스트(복사본, 새 id)로 바뀐다.
+// 그때 옛 id가 404 PORTFOLIO_NOT_FOUND가 되므로, 목록을 다시 받아 같은 이름의 포트폴리오로 갈아탄다.
+async function recoverStaleId(e) {
+  if (e?.code !== "PORTFOLIO_NOT_FOUND") return false;
+  const name = portfolios.find((p) => p.portfolio_id === currentId)?.name;
+  try { portfolios = await getPortfolios(); } catch { return false; }
+  currentId = (portfolios.find((p) => p.name === name) ?? portfolios[0])?.portfolio_id ?? null;
+  loadPortfolios();
+  return true;
+}
+
 function editPortfolio(pf) {
   const body = h(`<form class="add-form" novalidate>
       <div class="field"><label for="pf-name">이름</label><input id="pf-name" class="input" maxlength="100" required value="${esc(pf?.name || "")}"></div>
@@ -71,6 +82,7 @@ function editPortfolio(pf) {
       toast(pf ? "포트폴리오를 수정했습니다" : "포트폴리오를 만들었습니다");
       loadPortfolios();
     } catch (ex) {
+      if (await recoverStaleId(ex)) { modal.close(); toast("내 포트폴리오로 연결했습니다. 다시 한 번 저장해 주세요"); return; }
       err.hidden = false;
       err.textContent = ex.code === "SEED_BELOW_USED"
         ? `시드를 담은 원가 합계(${krw(ex.detail.used_krw)})보다 작게 줄일 수 없습니다.`
@@ -84,7 +96,10 @@ function confirmDelete(title, message, onConfirm) {
       <div class="modal__foot"><button class="btn" type="button" data-close>취소</button><button class="btn btn--danger" type="button" data-ok>삭제</button></div></div>`);
   const modal = openModal({ title, body });
   body.querySelector("[data-ok]").addEventListener("click", async () => {
-    try { await onConfirm(); modal.close(); } catch (e) { toast(e.message, "error"); }
+    try { await onConfirm(); modal.close(); } catch (e) {
+      if (await recoverStaleId(e)) { modal.close(); toast("내 포트폴리오로 연결했습니다. 다시 한 번 눌러 주세요"); return; }
+      toast(e.message, "error");
+    }
   });
 }
 
@@ -205,6 +220,7 @@ function editItem(it) {
       modal.close();
       refreshCurrent();
     } catch (ex) {
+      if (await recoverStaleId(ex)) { modal.close(); toast("내 포트폴리오로 연결했습니다. 다시 한 번 저장해 주세요"); return; }
       err.hidden = false;
       const d = ex.detail || {};
       err.textContent = ex.code === "SEED_EXCEEDED" ? `시드를 넘습니다. 이 종목은 최대 ${num(d.max_quantity)}주까지 담을 수 있습니다.`
@@ -249,6 +265,7 @@ async function openEqualWeight() {
   try {
     d = await previewEqualWeight(currentId);
   } catch (e) {
+    if (await recoverStaleId(e)) { openEqualWeight(); return; }   // 새 id로 한 번 더
     toast(e.code === "EMPTY_WATCHLIST" ? "관심종목이 없습니다. 주식 리스트에서 ★로 추가하세요." : e.message, "error");
     return;
   }
@@ -276,6 +293,7 @@ async function openEqualWeight() {
         await addPortfolioItem(currentId, { market: i.market, ticker: i.ticker, mode: "quantity", value: i.quantity });
         done += 1;
       } catch (err) {
+        if (await recoverStaleId(err)) { modal.close(); toast("내 포트폴리오로 연결했습니다. 다시 한 번 눌러 주세요"); return; }
         toast(`${i.name} 담기 실패: ${err.message} (${done}종목 담음)`, "error");
         break;
       }
