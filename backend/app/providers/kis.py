@@ -5,6 +5,7 @@ PRICE_SOURCE_KR=kis면 kr_price·kr_index·kr_valuation을 맡는다. KIS에는 
 - 접근 토큰: 24시간 유효, 발급은 1분에 1회 → 프로세스 안에서 재사용하고 /srv/data에도 남겨 재시작 때 다시 쓴다
 - 일봉: 1회 최대 100행 → 기간이 길면 끝 날짜를 앞당겨 이어 받는다
 - 밸류에이션: KIS는 현재 EPS·BPS·상장주식수만 준다 → 기간 안 각 거래일 종가로 PER·PBR·시가총액을 계산한다(배당 dps는 미제공)
+- 현재가(get_quote): 국내·미국 모두 — 관심종목·상세 화면 표시 전용(app/services/quotes.py). 해외는 kis_overseas_base_url 도메인
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from pathlib import Path
 import requests
 
 from app.core.config import ROOT_DIR, get_settings
-from app.providers.base import Bar, IndexRef, ProviderError, StockRef, Valuation
+from app.providers.base import Bar, IndexRef, ProviderError, Quote, StockRef, Valuation
 from app.providers.convert import to_dec, to_int
 from app.providers.http import Throttle, call_with_retry
 
@@ -33,6 +34,8 @@ INDEX_CODES = {"KOSPI": "0001", "KOSDAQ": "1001", "KOSPI200": "2001",
                "1150": "2039", "1151": "2009", "1152": "2010", "1153": "2011", "1154": "2012", "1155": "2013",
                "1156": "2014", "1157": "2015", "1158": "2016", "1159": "2017", "1160": "2018"}
 EXPIRED = {"EGW00121", "EGW00123"}  # 유효하지 않은 토큰 / 만료된 토큰
+# 해외 현재가 거래소 코드 — NYSE 시장에 묶인 NYSE American 종목은 NYS가 비면 AMS로 다시 묻는다
+OVERSEAS_EXCD = {"NASDAQ": ("NAS",), "NYSE": ("NYS", "AMS")}
 
 
 def _ymd(d: date) -> str:
@@ -107,12 +110,12 @@ class KisProvider:
             raise ProviderError("KIS_API_KEY·KIS_API_SECRET이 없습니다")
         self.s = s
 
-    def _get(self, path: str, tr_id: str, params: dict, what: str) -> dict:
+    def _get(self, path: str, tr_id: str, params: dict, what: str, base_url: str | None = None) -> dict:
         def call():
             h = {"authorization": f"Bearer {_token.get(self.s)}", "appkey": self.s.kis_api_key,
                  "appsecret": self.s.kis_api_secret, "tr_id": tr_id, "custtype": "P",
                  "content-type": "application/json; charset=utf-8"}
-            r = requests.get(self.s.kis_base_url + path, headers=h, params=params, timeout=15)
+            r = requests.get((base_url or self.s.kis_base_url) + path, headers=h, params=params, timeout=15)
             try:
                 d = r.json()
             except ValueError:
@@ -181,6 +184,29 @@ class KisProvider:
                 shares_outstanding=shares or None,
             ))
         return out
+
+    # ------------------------------------------------------------ 현재가 (관심종목·상세 화면)
+    def get_quote(self, stock: StockRef) -> Quote:
+        if stock.country == "KR":
+            o = self._get("/uapi/domestic-stock/v1/quotations/inquire-price", "FHKST01010100",
+                          {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": stock.ticker},
+                          f"kis quote {stock.ticker}").get("output") or {}
+            price, prev = to_dec(o.get("stck_prpr")), to_dec(o.get("stck_sdpr"))   # 기준가 = 전일 종가
+        else:
+            price = prev = None
+            for excd in OVERSEAS_EXCD.get(stock.market, ("NAS",)):
+                o = self._get("/uapi/overseas-price/v1/quotations/price", "HHDFS00000300",
+                              {"AUTH": "", "EXCD": excd, "SYMB": stock.ticker}, f"kis quote {stock.ticker}",
+                              base_url=self.s.kis_overseas_base_url).get("output") or {}
+                price, prev = to_dec(o.get("last")), to_dec(o.get("base"))
+                if price:
+                    break
+        if not price or price <= 0:
+            raise ProviderError(f"KIS 현재가 없음: {stock.market}/{stock.ticker}")
+        prev = prev if prev and prev > 0 else None
+        change = price - prev if prev else None
+        rate = (change / prev).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP) if prev else None
+        return Quote(price=price, prev_close=prev, change=change, change_rate=rate)
 
 
 def _ratio(price: Decimal, per_share: Decimal | None) -> Decimal | None:

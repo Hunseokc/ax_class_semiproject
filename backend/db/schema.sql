@@ -16,6 +16,7 @@
 --            sector_performance_daily·market_sentiment_daily (+ ingestion_logs.job_type에 SECTORS_US·SECTORS_KR) — 기존 DB는 007_home_widgets
 --   추가 기능 4-1: ingest_cursor(공시 목록 증분 기준점) — 기존 DB는 008_ingest_cursor
 --   추가 기능 4-3: stocks.cap_rank·cap_ranked_at(미국 시가총액 순위) — 기존 DB는 009_cap_rank
+--   추가 기능: price_quotes(관심종목·상세 화면 현재가, KIS) · job_type 'QUOTES' — 기존 DB는 011_price_quotes
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -153,7 +154,7 @@ CREATE TABLE ingestion_logs (
   source      VARCHAR(20) NOT NULL,                              -- PYKRX / KIS / YFINANCE / DART / SEC / INTERNAL
   job_type    VARCHAR(30) NOT NULL CHECK (job_type IN
                 ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','SCORES','MASTER','BENCHMARK','HYDRATE',
-                 'SECTORS_US','SECTORS_KR')),
+                 'SECTORS_US','SECTORS_KR','QUOTES')),
   stock_id    INT         REFERENCES stocks ON DELETE SET NULL,  -- 종목 단위 작업일 때만
   status      VARCHAR(10) NOT NULL CHECK (status IN ('SUCCESS','FAILED','SKIPPED')),
   rows_loaded INT         NOT NULL DEFAULT 0 CHECK (rows_loaded >= 0),
@@ -397,4 +398,16 @@ CREATE TABLE ingest_cursor (
   last_rcept_no CHAR(14)     NOT NULL CHECK (last_rcept_no ~ '^[0-9]{14}$'),
   last_rcept_dt DATE         NOT NULL,
   updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+-- 추가 기능 — 현재가 스냅샷 (migration 011_price_quotes)
+-- 관심종목 카드(1시간 갱신)·종목 상세 헤더(열 때 조회)에만 쓴다. 분석·점수·차트는 daily_prices(일봉) 그대로
+CREATE TABLE price_quotes (
+  stock_id    INT           PRIMARY KEY REFERENCES stocks ON DELETE CASCADE,
+  price       NUMERIC(18,4) NOT NULL CHECK (price > 0),
+  prev_close  NUMERIC(18,4) CHECK (prev_close > 0),
+  change      NUMERIC(18,4),
+  change_rate NUMERIC(10,6),
+  quoted_at   TIMESTAMPTZ   NOT NULL,
+  source      VARCHAR(20)   NOT NULL DEFAULT 'KIS'
 );

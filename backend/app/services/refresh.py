@@ -1,8 +1,9 @@
 """시장 데이터 갱신 (POST /market/refresh, python -m app.ingest refresh).
 
-작업: FX(SNAPSHOT + DAILY 증분) → INDICES → SECTORS_US·SECTORS_KR(대시보드 섹터 히트맵) → PRICES(증분) → VALUATION → SCORES
+작업: FX(SNAPSHOT + DAILY 증분) → INDICES → SECTORS_US·SECTORS_KR(대시보드 섹터 히트맵) → PRICES(증분) → QUOTES → VALUATION → SCORES
+- QUOTES: 관심종목 현재가(KIS, 화면 표시 전용 — app/services/quotes.py). 현재가 provider가 없으면 실행하지 않는다
 - 작업 단위 결과를 ingestion_logs에 source='REFRESH' 1행으로 남기고, 그 마지막 성공 시각이 TTL 이내면 외부 호출 없이 SKIPPED
-- TTL: 주가·지수·환율(FAST_JOBS)은 REFRESH_FAST_TTL_HOURS(1시간), 그 밖은 REFRESH_TTL_HOURS(4시간)
+- TTL: 주가·현재가·지수·환율(FAST_JOBS)은 REFRESH_FAST_TTL_HOURS(1시간), 그 밖은 REFRESH_TTL_HOURS(4시간)
   (종목 단위 행은 비교군 갱신·상세 수집도 남기므로 TTL 판단에 쓰지 않는다)
 - 일부 대상만 실패한 작업은 RETRY_AFTER(30분) 뒤 실패한 종목만 다시 받는다 → 성공한 종목은 TTL당 1회 유지
 - 동시에 여러 갱신 요청이 와도 advisory lock으로 직렬화 → 뒤 요청은 앞 요청 결과를 보고 SKIPPED
@@ -22,17 +23,18 @@ from app.ingest import jobs
 from app.ingest.universe import FREQUENT_SQL
 from app.providers.factory import Providers
 from app.services import sentiment
+from app.services.quotes import refresh_watchlist_quotes
 from app.services.fx import FxService, utcnow
 
 log = logging.getLogger(__name__)
 
 REFRESH_LOCK_KEY = 7_301_002
-JOB_TYPES = ("FX", "INDICES", "SECTORS_US", "SECTORS_KR", "PRICES", "VALUATION", "SCORES")
+JOB_TYPES = ("FX", "INDICES", "SECTORS_US", "SECTORS_KR", "PRICES", "QUOTES", "VALUATION", "SCORES")
 SECTOR_JOBS = {"SECTORS_US": "US", "SECTORS_KR": "KR"}   # 섹터 수집기(sector_loader)를 연결했을 때만 실행
 JOB_SOURCE = "REFRESH"                 # 작업 단위 결과 행의 source
 RETRY_AFTER = timedelta(minutes=30)    # 실패한 작업을 다시 시도하기까지 최소 간격(갱신 버튼 연타 방지)
 PER_STOCK_JOBS = ("PRICES", "VALUATION")
-FAST_JOBS = ("FX", "INDICES", "PRICES")   # fast_ttl_hours(1시간)마다 — 주가·지수·환율
+FAST_JOBS = ("FX", "INDICES", "PRICES", "QUOTES")   # fast_ttl_hours(1시간)마다 — 주가·현재가·지수·환율
 # 매시 스케줄(Cloud Scheduler 5 * * * *)이 직전 실행의 소요 시간만큼 TTL에 걸려 한 번씩 건너뛰지 않도록 둔 여유
 FAST_GRACE = timedelta(minutes=10)
 
@@ -117,9 +119,10 @@ class RefreshService:
 
     @property
     def job_types(self) -> tuple[str, ...]:
-        """실제로 실행 가능한 작업 (점수 계산기가 없으면 SCORES, 섹터 수집기가 없으면 SECTORS_* 제외)."""
+        """실제로 실행 가능한 작업 (점수 계산기가 없으면 SCORES, 섹터 수집기가 없으면 SECTORS_*, 현재가 provider가 없으면 QUOTES 제외)."""
         return tuple(j for j in JOB_TYPES if not (j == "SCORES" and self.scorer is None)
-                     and not (j in SECTOR_JOBS and self.sector_loader is None))
+                     and not (j in SECTOR_JOBS and self.sector_loader is None)
+                     and not (j == "QUOTES" and self.providers.quote is None))
 
     def next_available(self) -> datetime:
         """가장 먼저 다시 실행할 수 있는 작업의 시각."""
@@ -165,6 +168,8 @@ class RefreshService:
             return (*result, None)
         if job_type == "PRICES":
             return (*_summarize(jobs.load_prices(self.engine, self.providers, stock_ids=stock_ids)), None)
+        if job_type == "QUOTES":
+            return (*_summarize(refresh_watchlist_quotes(self.engine, self.providers.quote, self.clock())), None)
         if job_type == "VALUATION":
             return (*_summarize(jobs.load_valuations(self.engine, self.providers, stock_ids=stock_ids)), None)
         if job_type in SECTOR_JOBS:

@@ -38,6 +38,8 @@ class Providers:
     us_reference: base.ReferenceDataProvider | None = None  # 미국 발행주식수·SIC·기초값(SEC). None이면 yfinance 밸류에이션
     # 국내 사업보고서 목록(회사 지정 없이 날짜로) — 공시 증분(jobs.load_dart_feed). None이면 건너뛴다
     kr_feed: object | None = None                             # DartClient (list_annual_reports)
+    # 현재가(관심종목·상세 화면 표시 전용, 국내·미국 모두 KIS). None이면 일봉 종가만 보여 준다
+    quote: base.QuoteProvider | None = None
 
     def price(self, country: str) -> base.PriceProvider:
         return self.kr_price if country == "KR" else self.us_price
@@ -80,9 +82,10 @@ def default_providers() -> Providers:
     yahoo, lazy = YahooProvider(), _Lazy()
     # PRICE_SOURCE_KR=yfinance면 국내도 yfinance(.KS/.KQ 심볼)로 받는다 — pykrx가 막혔을 때의 대체 경로
     # PRICE_SOURCE_KR=kis면 한국투자증권 API(일봉·지수·밸류에이션). 대량 조회·상장 목록은 없어 종목별 수집으로 간다
+    from app.providers.kis import KisProvider
+    kis = KisProvider() if s.kis_api_key and s.kis_api_secret else None
     if s.price_source_kr == "kis":
-        from app.providers.kis import KisProvider
-        kr = KisProvider()
+        kr = kis or KisProvider()                     # 키가 없으면 여기서 ProviderError
     else:
         kr = KrxProvider() if s.price_source_kr == "pykrx" else yahoo
     dart = lazy.dart if s.dart_api_key else None
@@ -100,4 +103,5 @@ def default_providers() -> Providers:
         # ── [S3-B] 재무·공시 ──
         kr_financial=dart, us_financial=sec, us_financial_supplement=yahoo, kr_disclosure=dart, us_disclosure=sec,
         kr_feed=dart,                                     # 재무용과 같은 DartClient(분당 한도 공유)
+        quote=kis,
     )

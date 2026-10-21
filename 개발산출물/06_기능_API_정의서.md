@@ -37,10 +37,11 @@
 | 종목 | GET | `/peer-groups` | 경쟁 그룹 목록 (리스트 필터용) | - | 200 | 1-B |
 | 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·그룹 필터, 이름·티커 검색, 요청 사용자의 `is_watched`) | country, sort, order, group, q, limit, offset | 200 · 422 VALIDATION_ERROR, VOLUME_SORT_REQUIRES_MARKET | 1-B |
 | 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션 + `is_watched` | - | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR | 1-B |
+| 종목 | GET | `/stocks/{market}/{ticker}/quote` | 현재가(KIS, 화면 표시 전용 — 분석 값은 일봉 그대로). 같은 종목은 1분 안이면 저장값, 받기 실패 시 마지막 저장값(`stale: true`), 그것도 없으면 `price: null`(화면은 일봉 종가 유지). 국내는 KIS 실전 도메인, 미국은 `KIS_OVERSEAS_BASE_URL` | - | 200 · 404 STOCK_NOT_FOUND | 추가 |
 | 종목 | GET | `/stocks/{market}/{ticker}/candles` | 기간 일봉 — 종목의 최신 거래일 기준 | range (`1m`·`3m`·`6m`·`1y`, 기본 `3m`) | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR | 1-B |
 | 종목 | GET | `/stocks/{market}/{ticker}/financials` | FY 재무 추이 — 최근 N개 결산기를 오래된 순으로, 영업이익률·ROE는 조회 시 계산 | limit (1~10, 기본 5) | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR | 3-B |
 | 종목 | GET | `/stocks/{market}/{ticker}/disclosures` | 최근 공시 — 접수 시각 최신순 | limit (1~50, 기본 5) | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR | 3-B |
-| 관심종목 | GET | `/watchlist` | 관심종목 카드 목록 (정렬순, 현재가·등락) | - | 200 · 404 USER_NOT_FOUND | 2-B |
+| 관심종목 | GET | `/watchlist` | 관심종목 카드 목록 (정렬순, 현재가·등락). 갱신 작업 `QUOTES`(1시간)가 받은 현재가가 마지막 일봉 마감 뒤 값이면 `close`·`change`·`change_rate`·`target_gap`은 현재가 기준, `quoted_at`에 받은 시각 (아니면 일봉 종가, `quoted_at: null`) | - | 200 · 404 USER_NOT_FOUND | 2-B |
 | 관심종목 | POST | `/watchlist` | 관심종목 추가 (맨 뒤 순서) | body `{market, ticker}` | 201 · 404 USER_NOT_FOUND, STOCK_NOT_FOUND · 409 DUPLICATE_WATCHLIST · 422 VALIDATION_ERROR | 2-B |
 | 관심종목 | PATCH | `/watchlist/order` | 정렬 순서 변경 — 하나라도 목록에 없으면 전체 취소 | body `{items: [{market, ticker, sort_order}]}` (1~500개) | 200 · 404 USER_NOT_FOUND, STOCK_NOT_FOUND, WATCHLIST_ITEM_NOT_FOUND · 422 VALIDATION_ERROR | 2-B |
 | 관심종목 | DELETE | `/watchlist/{market}/{ticker}` | 관심종목 삭제 | - | 204 · 404 USER_NOT_FOUND, STOCK_NOT_FOUND, WATCHLIST_ITEM_NOT_FOUND | 2-B |

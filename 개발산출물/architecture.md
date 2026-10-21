@@ -63,7 +63,7 @@ flowchart TD
   M --> B["benchmark<br/>국가·섹터별 시총 상위 비교군(121) 선정 + 평시 데이터"]
   B --> S
   subgraph RUN["주기 실행 (앱 안 스케줄러 또는 CLI)"]
-    RF["refresh — FX·INDICES·PRICES 1시간, 그 밖 4시간 TTL<br/>FX → INDICES → SECTORS_US·SECTORS_KR → PRICES → VALUATION → SCORES<br/>부분 실패는 30분 뒤 실패 종목만 재시도"]
+    RF["refresh — FX·INDICES·PRICES·QUOTES 1시간, 그 밖 4시간 TTL<br/>FX → INDICES → SECTORS_US·SECTORS_KR → PRICES → QUOTES(관심종목 현재가, KIS) → VALUATION → SCORES<br/>부분 실패는 30분 뒤 실패 종목만 재시도"]
     BD["benchmark — 매일 07:00 KST 이후 1회"]
   end
   RF -.-> P & V & S

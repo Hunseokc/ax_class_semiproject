@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     kis_api_key: str = ""
     kis_api_secret: str = ""
     kis_base_url: str = "https://openapi.koreainvestment.com:9443"
+    # 해외 현재가만 부르는 도메인 — 모의투자 앱키는 실전 도메인 해외 시세를 거부해서(EGW02004) 모의 도메인을 쓴다. 실전 앱키면 실전 도메인으로
+    kis_overseas_base_url: str = "https://openapivts.koreainvestment.com:29443"
     # ── [S2-D] 사용자·갱신 TTL ──
     default_user_id: int = Field(default=1, ge=1)   # 인증 없는 단일 사용자(demo) 모드: get_current_user_id가 돌려주는 값
     # 게스트 세션(배포용): 켜면 브라우저마다 쿠키로 게스트 사용자를 나눈다. 쿠키가 없을 때 조회는 default_user_id를 보여 준다

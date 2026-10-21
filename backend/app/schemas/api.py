@@ -192,6 +192,20 @@ class Candle(Schema):
     volume: int
 
 
+class QuoteOut(Schema):
+    """현재가 (화면 표시 전용, KIS). price가 None이면 화면은 일봉 종가를 그대로 보여 준다."""
+    market: str
+    ticker: str
+    currency: str
+    price: Num | None
+    prev_close: Num | None
+    change: Num | None
+    change_rate: Num | None              # 비율 (0.0123 = +1.23%)
+    quoted_at: datetime | None
+    source: str | None
+    stale: bool                          # 지금 받지 못해 마지막 저장값을 보여 줄 때 True
+
+
 class CandlesOut(Schema):
     market: str
     ticker: str
@@ -230,7 +244,8 @@ class WatchlistCard(Schema):
     ticker: str
     name: str
     as_of: date | None          # 시세가 아직 없는 종목은 아래 가격 칸과 함께 None
-    close: Num | None
+    close: Num | None           # 현재가(quoted_at)가 마지막 일봉 마감 뒤에 받은 값이면 현재가, 아니면 일봉 종가
+    quoted_at: datetime | None = None        # 현재가를 받은 시각 (일봉 종가면 None)
     change: Num | None
     change_rate: Num | None
     score: Num | None

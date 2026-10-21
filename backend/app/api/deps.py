@@ -19,6 +19,7 @@ from app.services.fx import FxService
 from app.services.guest import create_guest, user_exists
 from app.services.hydration import Hydrator
 from app.services.portfolio import PortfolioService
+from app.services.quotes import QuoteService
 from app.services.refresh import RefreshService
 from app.services.sectors import load_sectors
 from app.services.scoring import default_preset
@@ -113,6 +114,11 @@ def get_refresh_service(engine: Engine = Depends(get_engine_dep), providers: Pro
     st = get_settings()
     return RefreshService(engine, providers, fx, st.refresh_ttl_hours, scorer=scorer, sector_loader=load_sectors,
                           fast_ttl_hours=st.refresh_fast_ttl_hours)
+
+
+# ── 현재가 (관심종목·상세 화면 표시 전용) ──
+def get_quote_service(engine: Engine = Depends(get_engine_dep), providers: Providers = Depends(get_providers)) -> QuoteService:
+    return QuoteService(engine, providers.quote)
 
 
 # ── [S4-D] 비교군 상세 데이터 요청 시 수집 ──

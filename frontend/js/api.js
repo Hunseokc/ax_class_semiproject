@@ -52,6 +52,8 @@ export const getStocks = ({ country, sort = "market_cap", order = "desc", group,
   getWithPreset("/stocks", { country, sort, order, group, sector, q, limit, offset, preset });
 
 export const getStock = (market, ticker) => api.get(`/stocks/${market}/${ticker}`);
+// 현재가(KIS, 화면 표시 전용) — price가 null이면 일봉 종가를 그대로 둔다
+export const getQuote = (market, ticker) => api.get(`/stocks/${market}/${ticker}/quote`);
 
 export const getCandles = (market, ticker, range = "1m") =>
   api.get(`/stocks/${market}/${ticker}/candles`, { range });

@@ -31,7 +31,7 @@ from app.main import app
 from app.services.hydration import ON_DEMAND
 from tests.fakes import FakeFx, make_providers
 
-TABLES = ["ingest_cursor", "sector_performance_daily", "market_sentiment_daily", "portfolio_items", "portfolios", "watchlist_items", "users", "ingestion_logs", "fx_rates", "index_daily_prices", "indices", "valuation_snapshots",
+TABLES = ["price_quotes", "ingest_cursor", "sector_performance_daily", "market_sentiment_daily", "portfolio_items", "portfolios", "watchlist_items", "users", "ingestion_logs", "fx_rates", "index_daily_prices", "indices", "valuation_snapshots",
           "daily_prices", "peer_group_members", "peer_groups", "stocks", "markets"]
 
 TODAY = date.today()

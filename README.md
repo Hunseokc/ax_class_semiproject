@@ -17,7 +17,7 @@
 - **상단 바**: 종목 검색(이름·영문명·티커 자동완성, `/` 단축키)과 투자 성향(위험·성장·균형·가치) 선택
 - **주요 지수·환율**: KOSPI·KOSDAQ·S&P 500·NASDAQ·Dow Jones·USD/KRW의 최신값·등락·스파크라인(1개월·3개월·1년). 장이 열리지 않은 시장은 `직전 거래일` 배지, 한 줄 시장 요약
 - **시장 심리 지수**(StockMind 간이 계산) · **섹터 히트맵**(국내·미국) · **내 포트폴리오**(총 평가금액·손익, 종목·현금 비중 도넛)
-- **내 관심종목**: 리스트(매력도 게이지·현재가·전일 대비·목표가 괴리율·메모) / 카드(요약) 보기
+- **내 관심종목**: 리스트(매력도 게이지·현재가·전일 대비·목표가 괴리율·메모) / 카드(요약) 보기 — 가격은 1시간마다 받는 장중 현재가(KIS), 종목 상세 헤더는 열 때 바로 받은 현재가. 분석·차트 값은 일봉 그대로
 - **시장 주목 종목 TOP 5**: 거래량 급증(직전 20거래일 평균 대비 배수)·매력도 순위를 국내·미국 카드 4장으로 한눈에
 
 ![대시보드 홈](개발산출물/assets/screenshots/home.png)
@@ -133,7 +133,8 @@ docker compose run --rm api python -m app.ingest all   # master → prices → i
 | 변수 | 필수/선택 | 설명 |
 |---|---|---|
 | `KRX_ID`, `KRX_PW` | **필수**(국내 소스 pykrx 사용 시) | pykrx 1.2.x의 시총·PER/PBR·지수 조회에 필요한 KRX 정보데이터시스템 계정. 없으면 시총·펀더멘털·지수가 빈 결과([troubleshooting 1](개발산출물/troubleshooting.md)) |
-| `KIS_API_KEY`, `KIS_API_SECRET` | 선택 (`PRICE_SOURCE_KR=kis`일 때 필수) | 한국투자증권 Open API 앱키·시크릿. 국내 일봉·지수·밸류에이션을 KIS로 받습니다(날짜별 전 종목 조회가 없어 비교군도 종목별 수집, 배당은 마지막 값 유지). 기존 DB는 `python -m app.ingest migrate 010_kis_source` 1회 |
+| `KIS_API_KEY`, `KIS_API_SECRET` | 선택 (`PRICE_SOURCE_KR=kis`일 때 필수) | 한국투자증권 Open API 앱키·시크릿. 국내 일봉·지수·밸류에이션을 KIS로 받습니다(날짜별 전 종목 조회가 없어 비교군도 종목별 수집, 배당은 마지막 값 유지). 기존 DB는 `python -m app.ingest migrate 010_kis_source` 1회. 키가 있으면 `PRICE_SOURCE_KR`과 관계없이 관심종목·상세 화면의 현재가(국내·미국)도 KIS로 받습니다(기존 DB는 `migrate 011_price_quotes` 1회) |
+| `KIS_OVERSEAS_BASE_URL` | 선택 | 미국 현재가를 부르는 KIS 도메인. 기본은 모의투자 도메인(모의투자 앱키는 실전 도메인 해외 시세를 거부) — 실전 앱키면 `https://openapi.koreainvestment.com:9443` |
 | `DART_API_KEY` | **필수**(국내 재무·공시) | OpenDART 인증키 |
 | `SEC_USER_AGENT` | **필수**(미국 재무·공시) | 연락처(이메일)가 들어간 User-Agent |
 | `REFRESH_TTL_HOURS` | 선택 | 같은 종류 외부 호출 최소 간격(시간, 3~4, 기본 4) |
@@ -175,6 +176,7 @@ docker compose run --rm api pytest -q
 | 종목 | GET `/stocks` | 주식 리스트 (`country`, `sort`, `order`, `group`, `sector`, `q`, `limit`, `offset`) |
 | | GET `/stocks/search` | 상단 검색 자동완성 (상장 보통주 전체) |
 | | GET `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도·시장·섹터 점수 |
+| | GET `/stocks/{market}/{ticker}/quote` | 현재가(KIS, 상세 헤더 표시 전용 — 1분 안 재사용, 실패 시 일봉 종가) |
 | | GET `/stocks/{market}/{ticker}/candles` · `/financials` · `/disclosures` | 기간 일봉 · FY 재무 추이 · 최근 공시 |
 | | GET `/stocks/{market}/{ticker}/analysis` | 투자 지표 수치 분석 |
 | | GET `/stocks/{market}/{ticker}/peers` · `/peers/chart` | 경쟁 종목 비교 표 · 비교 차트 |

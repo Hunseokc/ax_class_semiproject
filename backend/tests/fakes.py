@@ -11,8 +11,8 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from app.providers.base import (Bar, Classification, Disclosure, Financial, FxPoint, IndexRef, Listing, ProviderError, StockRef,
-                                Valuation, ValuationBase)
+from app.providers.base import (Bar, Classification, Disclosure, Financial, FxPoint, IndexRef, Listing, ProviderError, Quote,
+                                StockRef, Valuation, ValuationBase)
 from app.providers.factory import Providers
 
 SAFE_LAG = timedelta(days=2)    # 어느 시장 기준으로도 '오늘(미확정 봉)'이 되지 않도록 이틀 전까지만 돌려준다
@@ -201,6 +201,24 @@ class FakeReference(CallLog):
     def get_valuation_base(self, stock: StockRef) -> ValuationBase:
         self.record("base", stock.ticker)
         return self.bases.get(stock.ticker, ValuationBase(shares_outstanding=None, shares_as_of=None))
+
+
+class FakeQuote(CallLog):
+    """현재가(KIS 흉내). prices: ticker → 현재가, 전일 종가는 현재가의 98%. fail=True면 ProviderError."""
+    source = "KIS"
+
+    def __init__(self, prices: dict[str, str] | None = None, fail: bool = False):
+        super().__init__()
+        self.prices = {k: Decimal(v) for k, v in (prices or {"005930": "71000", "AAPL": "205.5"}).items()}
+        self.fail = fail
+
+    def get_quote(self, stock: StockRef) -> Quote:
+        self.record(stock.ticker)
+        if self.fail or stock.ticker not in self.prices:
+            raise ProviderError("가짜 현재가 실패")
+        p = self.prices[stock.ticker]
+        prev = (p * Decimal("0.98")).quantize(Decimal("0.0001"))
+        return Quote(price=p, prev_close=prev, change=p - prev, change_rate=((p - prev) / prev).quantize(Decimal("0.000001")))
 
 
 def make_providers(fx: FakeFx | None = None, *, with_fundamentals: bool = False, kr_feed=None) -> Providers:

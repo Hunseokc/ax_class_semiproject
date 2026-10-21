@@ -343,3 +343,16 @@ class IngestCursor(Base):
     last_rcept_dt: Mapped[date] = mapped_column(Date)
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
     __table_args__ = (CheckConstraint("last_rcept_no ~ '^[0-9]{14}$'"),)
+
+
+class PriceQuote(Base):
+    """현재가 스냅샷 — 관심종목·상세 화면 표시 전용(app/services/quotes.py). 분석은 daily_prices를 쓴다."""
+    __tablename__ = "price_quotes"
+    stock_id: Mapped[int] = mapped_column(ForeignKey("stocks.stock_id", ondelete="CASCADE"), primary_key=True)
+    price: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    prev_close: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    change: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    change_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    quoted_at: Mapped[datetime] = mapped_column()
+    source: Mapped[str] = mapped_column(String(20), server_default="KIS")
+    __table_args__ = (CheckConstraint("price > 0"), CheckConstraint("prev_close > 0"))

@@ -249,13 +249,16 @@ function editButton(w) {
   return b;
 }
 
+// 가격 칸 툴팁 — 현재가(1시간 갱신)면 받은 시각, 일봉 종가면 날짜
+const quoteTitle = (w) => (w.quoted_at ? ` title="현재가 · ${dateTime(w.quoted_at)} 기준"` : w.as_of ? ` title="${date(w.as_of)} 종가"` : "");
+
 // 카드 보기 = 요약: 게이지 · 티커 · 현재가·등락률 · 종목명 (목표가·메모는 리스트 보기에서)
 function watchCard(w) {
   const el = h(`<div class="wl-item"><a class="wl-card card--link"
         href="${watchHref(w)}" aria-label="${esc(watchLabel(w))}">
       <div class="wl-card__gauge">${scoreGauge(w.score)}</div>
       <div class="wl-card__ticker">${esc(w.ticker)} · ${esc(w.market)}</div>
-      <div class="wl-card__price num">${price(w.close, w.currency)}</div>
+      <div class="wl-card__price num"${quoteTitle(w)}>${price(w.close, w.currency)}</div>
       <div class="wl-card__chg num">${changeHtml(w.change_rate, w.country)}</div>
       <div class="wl-card__foot"><span class="wl-card__name">${esc(w.name)}</span></div>
     </a></div>`);
@@ -273,7 +276,7 @@ function watchRow(w) {
       <span class="row__main"><span class="row__title">${esc(w.name)}</span>
         <span class="row__sub">${esc(w.ticker)} ${marketBadge(w.market, w.country)}</span></span>
       <span class="wl-compact__score">${scoreGauge(w.score)}</span>
-      <span class="wl-compact__price num"><span class="wl-compact__main">${price(w.close, w.currency)}</span>
+      <span class="wl-compact__price num"${quoteTitle(w)}><span class="wl-compact__main">${price(w.close, w.currency)}</span>
         <span class="wl-compact__sub">${changeHtml(w.change_rate, w.country)}<span class="wl-compact__diff"> · ${diff}</span></span></span>
       <span class="wl-compact__target num">${target}</span>
       <span class="wl-compact__memo${w.memo ? "" : " subtle"}" title="${esc(w.memo || "")}">${w.memo ? esc(w.memo) : "메모 없음"}</span>

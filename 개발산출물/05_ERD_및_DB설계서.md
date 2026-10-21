@@ -179,6 +179,7 @@ erDiagram
 | 마스터 | peer_group_members | 종목↔그룹 N:M | (group_id, stock_id) |
 | 시계열 | daily_prices | 종목 일봉(수정주가) | (stock_id, trade_date) |
 | 시계열 | valuation_snapshots | PER·PBR·시총 스냅샷 | (stock_id, as_of) |
+| 시계열 | price_quotes | 현재가 스냅샷(KIS, 관심종목·상세 화면 표시 전용 — 12절) | stock_id |
 | 재무 | financial_statements | 재무제표(FY 5개년) | fin_id, UQ (stock_id, period_end, period_type) |
 | 공시 | disclosures | 공시 목록(최근 1년) | disclosure_id, UQ (rcept_no) |
 | 배경 | indices | 지수 정의 | index_id |
@@ -707,3 +708,24 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | price_position · ma_gap_score · rsi_score · vix_score | numeric(5,2) | Y |  | CHECK 0~100 | 구성요소 점수(52주 위치·이동평균 괴리·RSI·VIX — VIX는 미국만) |
 | formula_version | smallint | N |  |  | 계산식 버전 |
 | computed_at | timestamp with time zone | N | now() |  | 계산 시각 |
+
+## 12. 추가 기능 — 현재가 스냅샷 (`price_quotes`)
+
+관심종목 카드와 종목 상세 헤더의 가격만 장중 현재가로 보여 주기 위한 표다. 매력도·차트·포트폴리오 평가·거래량 급증 등 분석 값은 계속 `daily_prices`(일봉)만 쓴다 — 장중 값을 일봉 표에 섞으면 거래량·수익률 계산이 틀어진다.
+
+| 파일 | 내용 | 실행 |
+|---|---|---|
+| `backend/db/migrations/011_price_quotes.sql` | `price_quotes` 생성, `ingestion_logs.job_type`에 `QUOTES` — 멱등 | `python -m app.ingest migrate 011_price_quotes` |
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| stock_id | integer | N |  | PK, FK → stocks (CASCADE) | 종목당 1행(마지막 값으로 덮어씀) |
+| price | numeric(18,4) | N |  | CHECK > 0 | 현재가(종목 통화) |
+| prev_close | numeric(18,4) | Y |  | CHECK > 0 | 전일 종가(KIS 기준가) |
+| change | numeric(18,4) | Y |  |  | price − prev_close |
+| change_rate | numeric(10,6) | Y |  |  | 비율(0.0123 = +1.23%) |
+| quoted_at | timestamp with time zone | N |  |  | 받은 시각 |
+| source | character varying(20) | N | 'KIS' |  | 출처 |
+
+- 채우는 곳: 갱신 작업 `QUOTES`(1시간, 누군가의 관심종목에 담긴 종목) · `GET /stocks/{market}/{ticker}/quote`(상세 화면을 열 때, 같은 종목은 1분 안 재사용)
+- 관심종목 목록(`watchlist.sql`)은 `quoted_at`이 마지막 일봉의 장 마감(서울 15:30·뉴욕 16:00) 뒤일 때만 가격 칸을 현재가로 바꾼다 — 장중에 받은 값이 그날 확정 종가를 덮지 않게 한다

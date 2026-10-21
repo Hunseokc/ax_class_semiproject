@@ -1,6 +1,6 @@
 // 종목 상세: 헤더(이름·가격·등락) · 가격 차트(종가 선 + 거래량 막대) · 핵심 정보(시총·PER·PBR)
-import { PRESET_EVENT, getAnalysis, getCandles, getDisclosures, getFinancials, getMonthly, getPeers, getPeersChart, getPreset, getStock } from "../api.js";   // [S4-A] PRESET_EVENT·getAnalysis·getPreset  [S5-A] getMonthly
-import { DASH, changeHtml, date, esc, krw, num, pct, price, stockUrl, usd, volume } from "../format.js";   // [S4-A] stockUrl  [S5-A] volume
+import { PRESET_EVENT, getAnalysis, getCandles, getDisclosures, getFinancials, getMonthly, getPeers, getPeersChart, getPreset, getQuote, getStock } from "../api.js";   // [S4-A] PRESET_EVENT·getAnalysis·getPreset  [S5-A] getMonthly
+import { DASH, changeHtml, date, dateTime, esc, krw, num, pct, price, stockUrl, usd, volume } from "../format.js";   // [S4-A] stockUrl  [S5-A] volume
 import { color, dashedAxis, draw, plainAxis, scoreBand } from "../components/charts.js";   // [S4-A] scoreBand
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
 import { emptyState, errorState, h, load, marketBadge, segmented, skeleton } from "../components/ui.js";
@@ -20,6 +20,17 @@ const signColor = (v, c) => (v > 0 ? upColor(c) : v < 0 ? downColor(c) : color("
 const money = (v, cur, compact = true) => (cur === "USD" ? usd(v, { compact }) : krw(v, { compact }));
 
 // ---------------------------------------------------------------- 헤더
+// 가격 칸 — 현재가(q, KIS)를 받았으면 현재가, 아니면 일봉 종가. 분석·차트 값은 계속 일봉 기준
+function headPrice(s, q) {
+  const p = q ? q.price : s.close, chg = q ? q.change : s.change, rate = q ? q.change_rate : s.change_rate;
+  if (p === null) return '<p class="subtle">가격 정보가 없습니다</p>';
+  const inKrw = q && s.fx_rate ? p * s.fx_rate : s.close_krw;
+  return `<p class="stock-head__value num">${price(p, s.currency)}</p>
+        <p>${changeHtml(rate, s.country)} <span class="subtle">${chg !== null ? `(${chg > 0 ? "+" : ""}${s.currency === "USD" ? usd(chg) : krw(chg)})` : ""}</span></p>
+        ${s.currency === "USD" ? `<p class="subtle num">≈ ${krw(inKrw)} · 환율 ${num(s.fx_rate, 2)}${s.fx_stale ? " (지연)" : ""}</p>` : ""}
+        <p class="subtle">${q ? `현재가 · ${dateTime(q.quoted_at)} 기준${q.stale ? " (지연)" : ""}` : `일봉 기준 · ${date(s.as_of)} 종가`}</p>`;
+}
+
 function renderHeader(s) {
   document.title = `${s.name} (${s.ticker}) · StockMind`;
   const el = h(`<header class="stock-head">
@@ -28,13 +39,7 @@ function renderHeader(s) {
         <h1>${esc(s.name)}</h1>
         ${s.name_en && s.name_en !== s.name ? `<p class="subtle">${esc(s.name_en)}</p>` : ""}
       </div>
-      <div class="stock-head__price">
-        ${s.close === null ? '<p class="subtle">가격 정보가 없습니다</p>' : `
-        <p class="stock-head__value num">${price(s.close, s.currency)}</p>
-        <p>${changeHtml(s.change_rate, s.country)} <span class="subtle">${s.change !== null ? `(${s.change > 0 ? "+" : ""}${s.currency === "USD" ? usd(s.change) : krw(s.change)})` : ""}</span></p>
-        ${s.currency === "USD" ? `<p class="subtle num">≈ ${krw(s.close_krw)} · 환율 ${num(s.fx_rate, 2)}${s.fx_stale ? " (지연)" : ""}</p>` : ""}
-        <p class="subtle">일봉 기준 · ${date(s.as_of)} 종가</p>`}
-      </div>
+      <div class="stock-head__price">${headPrice(s)}</div>
       <div class="stock-head__actions"></div>
     </header>`);
   const add = h(`<button class="btn btn--accent" type="button">${icons.plus}<span>포트폴리오에 담기</span></button>`);   // [S2-A]
@@ -711,6 +716,11 @@ async function init() {
   renderKeyMetrics(stock);
   peersReq = null;   // 새로고침 뒤에는 새 값으로
   const shown = stock;
+  // 현재가는 헤더가 그려진 뒤 따로 받는다 — 실패하거나 값이 없으면 일봉 종가 그대로
+  getQuote(MARKET, TICKER).then((q) => {
+    const el = $(".stock-head__price");
+    if (stock === shown && el && q.price !== null) el.innerHTML = headPrice(stock, q);
+  }).catch(() => { /* 일봉 종가 유지 */ });
   fetchPeers().then((d) => { if (stock === shown) renderKeyMetrics(stock, d); }).catch(() => { /* 비교 없이 원래 수치만 */ });
   loadCandles();
   loadFinancials();   // [S3-A]

@@ -106,6 +106,15 @@ class Listing:
 
 
 @dataclass(frozen=True)
+class Quote:
+    """현재가 1건 (관심종목·상세 화면 표시용). change_rate는 비율(0.0123 = +1.23%)."""
+    price: Decimal
+    prev_close: Decimal | None
+    change: Decimal | None
+    change_rate: Decimal | None
+
+
+@dataclass(frozen=True)
 class StockRef:
     """수집 대상 종목 식별 정보 (universe.yaml + DB 매핑)."""
     stock_id: int
@@ -132,6 +141,11 @@ class IndexRef:
 class PriceProvider(Protocol):
     source: str
     def get_daily_prices(self, stock: StockRef, start: date, end: date) -> list[Bar]: ...
+
+
+class QuoteProvider(Protocol):
+    source: str
+    def get_quote(self, stock: StockRef) -> Quote: ...
 
 
 class IndexProvider(Protocol):

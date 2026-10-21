@@ -8,13 +8,14 @@ from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
 from app.api.deps import (MarketPath, TickerPath, get_current_user_id, get_db, get_engine_dep, get_hydrator, get_preset,
-                          resolve_stock)
+                          get_quote_service, resolve_stock)
 from app.core.errors import NotFound, Unprocessable
 from app.ingest.sectors import sectors
 from app.queries import raw, sql
-from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, SearchOut, StockDetailOut, StockListOut
+from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, QuoteOut, SearchOut, StockDetailOut, StockListOut
 from app.services.hydration import Hydrator
 from app.services.market_condition import get_condition
+from app.services.quotes import QuoteService
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -87,6 +88,17 @@ def stock_detail(market: MarketPath, ticker: TickerPath, user_id: int = Depends(
                                             sector=out.pop("sector"))
     out["fx_stale"] = False          # Stage 1은 DB 값만 읽는다. TTL 외부 호출(FxService)은 Stage 2에서 교체
     return out
+
+
+@router.get("/{market}/{ticker}/quote", response_model=QuoteOut,
+            summary="현재가 (KIS, 화면 표시 전용) — 1분 안이면 저장값, 실패하면 마지막 저장값(stale) 또는 price=None")
+def quote(market: MarketPath, ticker: TickerPath, db: Session = Depends(get_db),
+          service: QuoteService = Depends(get_quote_service)):
+    s = resolve_stock(db, market, ticker)
+    db.close()                                   # 외부 호출 동안 커넥션을 붙잡지 않는다
+    q = service.get(s["stock_id"]) or {}
+    return {"market": s["market"], "ticker": s["ticker"], "currency": s["currency"], "stale": q.get("stale", False),
+            **{k: q.get(k) for k in ("price", "prev_close", "change", "change_rate", "quoted_at", "source")}}
 
 
 @router.get("/{market}/{ticker}/candles", response_model=CandlesOut, summary="기간 일봉")
