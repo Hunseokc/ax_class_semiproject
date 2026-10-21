@@ -2,6 +2,7 @@
 
 작업: FX(SNAPSHOT + DAILY 증분) → INDICES → SECTORS_US·SECTORS_KR(대시보드 섹터 히트맵) → PRICES(증분) → VALUATION → SCORES
 - 작업 단위 결과를 ingestion_logs에 source='REFRESH' 1행으로 남기고, 그 마지막 성공 시각이 TTL 이내면 외부 호출 없이 SKIPPED
+- TTL: 주가·지수·환율(FAST_JOBS)은 REFRESH_FAST_TTL_HOURS(1시간), 그 밖은 REFRESH_TTL_HOURS(4시간)
   (종목 단위 행은 비교군 갱신·상세 수집도 남기므로 TTL 판단에 쓰지 않는다)
 - 일부 대상만 실패한 작업은 RETRY_AFTER(30분) 뒤 실패한 종목만 다시 받는다 → 성공한 종목은 TTL당 1회 유지
 - 동시에 여러 갱신 요청이 와도 advisory lock으로 직렬화 → 뒤 요청은 앞 요청 결과를 보고 SKIPPED
@@ -31,6 +32,9 @@ SECTOR_JOBS = {"SECTORS_US": "US", "SECTORS_KR": "KR"}   # 섹터 수집기(sect
 JOB_SOURCE = "REFRESH"                 # 작업 단위 결과 행의 source
 RETRY_AFTER = timedelta(minutes=30)    # 실패한 작업을 다시 시도하기까지 최소 간격(갱신 버튼 연타 방지)
 PER_STOCK_JOBS = ("PRICES", "VALUATION")
+FAST_JOBS = ("FX", "INDICES", "PRICES")   # fast_ttl_hours(1시간)마다 — 주가·지수·환율
+# 매시 스케줄(Cloud Scheduler 5 * * * *)이 직전 실행의 소요 시간만큼 TTL에 걸려 한 번씩 건너뛰지 않도록 둔 여유
+FAST_GRACE = timedelta(minutes=10)
 
 
 @dataclass
@@ -69,11 +73,13 @@ def _summarize(statuses: dict[str, str]) -> tuple[str, dict[str, int]]:
 class RefreshService:
     def __init__(self, engine: Engine, providers: Providers, fx: FxService, ttl_hours: float,
                  scorer: Callable[[Engine], int] | None = None, clock: Callable[[], datetime] = utcnow,
-                 sector_loader: Callable[..., tuple[str, dict[str, int], str | None]] | None = None):
+                 sector_loader: Callable[..., tuple[str, dict[str, int], str | None]] | None = None,
+                 fast_ttl_hours: float | None = None):
         self.engine = engine
         self.providers = providers
         self.fx = fx
         self.ttl = timedelta(hours=ttl_hours)
+        self.fast_ttl = timedelta(hours=fast_ttl_hours) - FAST_GRACE if fast_ttl_hours else self.ttl
         self.scorer = scorer
         self.clock = clock
         self.sector_loader = sector_loader
@@ -97,10 +103,14 @@ class RefreshService:
             ORDER BY f.job_type, f.finished_at DESC"""), {"src": JOB_SOURCE, "jobs": list(JOB_TYPES)}).all()
         return {r[0]: FailedRun(r[1], r[2]) for r in rows}
 
-    def _due_at(self, last: datetime | None, failed: FailedRun | None, now: datetime) -> datetime:
+    def ttl_of(self, job_type: str) -> timedelta:
+        return self.fast_ttl if job_type in FAST_JOBS else self.ttl
+
+    def _due_at(self, job_type: str, last: datetime | None, failed: FailedRun | None, now: datetime) -> datetime:
         """작업을 다시 실행할 수 있는 시각: TTL 이내면 TTL 끝, 최근 실패면 재시도 간격 끝, 아니면 지금."""
-        if last and now - last < self.ttl:
-            return last + self.ttl
+        ttl = self.ttl_of(job_type)
+        if last and now - last < ttl:
+            return last + ttl
         if failed and now - failed.finished_at < RETRY_AFTER:
             return failed.finished_at + RETRY_AFTER
         return now
@@ -116,20 +126,20 @@ class RefreshService:
         with self.engine.connect() as conn:
             last, failed = self.last_success(conn), self.last_failure(conn)
         now = self.clock()
-        return max(now, min(self._due_at(last.get(j), failed.get(j), now) for j in self.job_types))
+        return max(now, min(self._due_at(j, last.get(j), failed.get(j), now) for j in self.job_types))
 
     def status(self) -> RefreshResult:
         """외부 호출 없이 현재 갱신 상태만 반환 (사이드바 표시용)."""
         with self.engine.connect() as conn:
             last = self.last_success(conn)
-        jobs_ = [JobOutcome(j, "FRESH" if j in last and self.clock() - last[j] < self.ttl else "STALE",
+        jobs_ = [JobOutcome(j, "FRESH" if j in last and self.clock() - last[j] < self.ttl_of(j) else "STALE",
                             last_success_at=last.get(j)) for j in self.job_types]
         refreshed = max(last.values()) if last else None
         return RefreshResult(refreshed_at=refreshed, next_refresh_available_at=self.next_available(), jobs=jobs_)
 
     def _retry_targets(self, job_type: str, failed: FailedRun | None, now: datetime) -> list[int] | None:
         """TTL 안의 부분 실패 뒤 재시도면 그 실행에서 실패한 종목(갱신 대상 범위)만. 그 밖에는 None(전체)."""
-        if job_type not in PER_STOCK_JOBS or failed is None or now - failed.finished_at >= self.ttl:
+        if job_type not in PER_STOCK_JOBS or failed is None or now - failed.finished_at >= self.ttl_of(job_type):
             return None
         with self.engine.connect() as conn:
             ids = conn.execute(text(f"""
@@ -179,9 +189,9 @@ class RefreshService:
                         last = self.last_success(conn).get(job_type)
                         failed = self.last_failure(conn).get(job_type)
                     now = self.clock()
-                    due = self._due_at(last, failed, now)
+                    due = self._due_at(job_type, last, failed, now)
                     if due > now:
-                        note = (f"TTL 이내 — 마지막 성공 {last.isoformat()}" if last and now - last < self.ttl
+                        note = (f"TTL 이내 — 마지막 성공 {last.isoformat()}" if last and now - last < self.ttl_of(job_type)
                                 else f"최근 실패 — {due.isoformat()} 이후 재시도")
                         self._log_skip(job_type, note, now)
                         outcomes.append(JobOutcome(job_type, "SKIPPED", note, last))

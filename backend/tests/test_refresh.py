@@ -79,6 +79,23 @@ def test_refresh_after_ttl_calls_each_job_exactly_once_more(engine):
     assert call_counts(p) == {k: v * 2 for k, v in EXPECTED_ONE_RUN.items()}
 
 
+def test_fast_jobs_rerun_after_fast_ttl_others_stay_skipped(engine):
+    """fast_ttl_hours=1: 1시간 뒤 주가·지수·환율만 다시 받고 밸류에이션은 4시간 TTL로 SKIPPED."""
+    p = make_providers()
+    svc = RefreshService(engine, p, FxService(engine, p.fx, 1), 4, fast_ttl_hours=1)
+    svc.refresh()
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE ingestion_logs SET started_at = started_at - interval '55 minutes', "
+                          "finished_at = finished_at - interval '55 minutes'"))   # 매시 스케줄 여유(FAST_GRACE) 안
+        conn.execute(text("DELETE FROM daily_prices WHERE trade_date > :d"), {"d": D - timedelta(days=3)})
+    second = svc.refresh()
+    status = {j.job_type: j.status for j in second.jobs}
+    assert status["FX"] == status["INDICES"] == status["PRICES"] == "SUCCESS"
+    assert status["VALUATION"] == "SKIPPED"
+    counts = call_counts(p)
+    assert counts["indices"] == 2 and counts["prices"] == 8 and counts["valuation"] == EXPECTED_ONE_RUN["valuation"]
+
+
 def test_incremental_prices_start_after_last_stored_date(engine):
     p = make_providers()
     service(engine, p).refresh()

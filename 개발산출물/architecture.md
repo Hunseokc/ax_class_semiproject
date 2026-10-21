@@ -28,7 +28,7 @@ flowchart LR
     R["라우터 backend/app/api<br/>입력 검증·의존성"]
     SVC["서비스 backend/app/services<br/>환율 TTL·포트폴리오·점수·품질"]
     Q["SQL backend/app/queries/*.sql<br/>+ ORM backend/app/models"]
-    SCH["앱 안 스케줄러<br/>4시간 TTL 갱신 · 매일 07:00 비교군"]
+    SCH["앱 안 스케줄러<br/>1·4시간 TTL 갱신 · 매일 07:00 비교군"]
   end
 
   subgraph CLIENT["클라이언트"]
@@ -43,7 +43,7 @@ flowchart LR
   WEB & SW -->|"/api/v1 · /health"| R
 ```
 
-- **외부 호출은 수집 쪽에서만** 한다. 조회 API는 DB에 저장된 값을 읽고, 환율 현재값만 TTL(4시간)이 지났을 때 한 번 외부를 부른다(`개발산출물/06` 1절 "외부 소스 장애 시 동작"). 대시보드 홈의 섹터 히트맵은 갱신 작업이 받아 둔 값을, 시장 심리 지수는 저장된 지수·VIX 일봉으로 계산한 값을 읽으므로 홈을 몇 번 열어도 새 외부 호출이 없다(A-135·A-136).
+- **외부 호출은 수집 쪽에서만** 한다. 조회 API는 DB에 저장된 값을 읽고, 환율 현재값만 TTL(1시간)이 지났을 때 한 번 외부를 부른다(`개발산출물/06` 1절 "외부 소스 장애 시 동작"). 대시보드 홈의 섹터 히트맵은 갱신 작업이 받아 둔 값을, 시장 심리 지수는 저장된 지수·VIX 일봉으로 계산한 값을 읽으므로 홈을 몇 번 열어도 새 외부 호출이 없다(A-135·A-136).
 - **같은 작업이 겹치지 않게** PostgreSQL advisory lock을 쓴다: 갱신(`REFRESH_LOCK_KEY`), 환율 조회, 비교군 갱신(`BENCHMARK_LOCK_KEY`), 스케줄러.
 - **재무·공시 수집은 회사 단위·국가별 키로 잠근다**(`DART_LOCK_KEY` 국내, `SEC_LOCK_KEY` 미국). DART·SEC를 부르는 동안만 회사 1개씩 잡고 풀어서, 상세 화면 요청이 07:00 비교군 재무 묶음 전체가 아니라 처리 중인 회사 하나만 기다린다. 잠금 연결 1개를 반복문 동안 재사용하고(`LockSession`), DB 쓰기는 `ingest.flush_every`(20)개 회사마다 한 트랜잭션으로 모은다(`BatchWriter` — 행 저장과 `data_freshness`는 같은 트랜잭션, `ingestion_logs`는 별도). DART 분당 한도는 프로세스마다 45회(API 서비스 + Job 합계 90 이하).
 - **07:00 비교군 갱신은 공시 목록 증분부터** 한다(`jobs.load_dart_feed`): 회사 지정 없는 사업보고서 목록(DART list.json A001)을 기준점(`ingest_cursor`)부터 받아, 새 사업보고서·정정을 낸 DB 종목의 재무 유효기간을 끝낸다. 국내 재무 첫 적재는 OpenDART 재무정보 일괄다운로드 파일로 한 번에 넣는다(`python -m app.ingest dart-bulk`, API 호출 없음).
@@ -63,7 +63,7 @@ flowchart TD
   M --> B["benchmark<br/>국가·섹터별 시총 상위 비교군(121) 선정 + 평시 데이터"]
   B --> S
   subgraph RUN["주기 실행 (앱 안 스케줄러 또는 CLI)"]
-    RF["refresh — 4시간 TTL<br/>FX → INDICES → SECTORS_US·SECTORS_KR → PRICES → VALUATION → SCORES<br/>부분 실패는 30분 뒤 실패 종목만 재시도"]
+    RF["refresh — FX·INDICES·PRICES 1시간, 그 밖 4시간 TTL<br/>FX → INDICES → SECTORS_US·SECTORS_KR → PRICES → VALUATION → SCORES<br/>부분 실패는 30분 뒤 실패 종목만 재시도"]
     BD["benchmark — 매일 07:00 KST 이후 1회"]
   end
   RF -.-> P & V & S
@@ -107,7 +107,7 @@ sequenceDiagram
 | `markets` 분리(3NF) | 국가·통화·시간대는 종목이 아니라 시장에 종속 → `stocks.market_id`로 이행적 종속 제거 | `개발산출물/05` 4-3 |
 | 의도적 비정규화 ① | `portfolio_items.ref_price·ref_fx_rate·ref_date` — 담은 시점의 불변 사실이라 시세가 갱신돼도 원가가 바뀌지 않게 복사 저장 | `개발산출물/05` 5-1 |
 | 의도적 비정규화 ② | `stock_metric_values`·`stock_scores` — 매력도 파생 결과를 저장해 순위·설명을 매번 다시 계산하지 않음 | `개발산출물/05` 5-2 |
-| TTL 갱신 정책 | 같은 종류 외부 호출은 4시간에 1회, 작업 단위 기록으로 판단, 부분 실패는 30분 뒤 실패 종목만 재시도, 시장 현지 날짜까지만 요청 | README 갱신 정책, A-109·A-110 |
+| TTL 갱신 정책 | 같은 종류 외부 호출은 4시간(주가·지수·환율은 1시간)에 1회, 작업 단위 기록으로 판단, 부분 실패는 30분 뒤 실패 종목만 재시도, 시장 현지 날짜까지만 요청 | README 갱신 정책, A-109·A-110 |
 | 예외처리 원칙 | 응답 형식 하나(`{"error": {...}}`), 형식 오류는 DB 전에 422, 남의 리소스는 404로 숨김, 처리하지 못한 예외는 내부 정보 없이 500(요청 ID로 로그 추적), 외부 장애는 마지막 값·stale 표시 | `개발산출물/06` 1절·5절 |
 | 대시보드 지표 선정 | 국내·미국 대표 지수 + USD/KRW(미국 종목의 원화 환산·환율 효과 분리에 필요), 사용자가 지수 10개 중 고름. 홈 순위는 리스트와 겹치지 않게 거래량 급증(20거래일 평균 대비)·매력도 순위, 매력도는 같은 시장 안 상대 위치(5개 팩터). 섹터 히트맵·시장 심리 지수는 이미 받는 시세 경로와 저장된 지수 일봉으로 만든다 | A-111·A-130·A-135·A-136, `개발산출물/09` |
 | 인증 | 1차는 단일 사용자(데모) 모드, 로컬·시연 전용. 2차에서 `get_current_user_id()`만 JWT 검증으로 교체 | A-57·A-82 |

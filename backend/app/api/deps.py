@@ -93,7 +93,7 @@ def get_providers() -> Providers:
 
 # ── [S2-C] 환율·포트폴리오 서비스 ──
 def get_fx_service(engine: Engine = Depends(get_engine_dep), providers: Providers = Depends(get_providers)) -> FxService:
-    return FxService(engine, providers.fx, get_settings().refresh_ttl_hours)
+    return FxService(engine, providers.fx, get_settings().refresh_fast_ttl_hours)
 
 
 def get_portfolio_service(db: Session = Depends(get_db), fx: FxService = Depends(get_fx_service),
@@ -110,7 +110,9 @@ def get_scorer():
 
 def get_refresh_service(engine: Engine = Depends(get_engine_dep), providers: Providers = Depends(get_providers),
                         fx: FxService = Depends(get_fx_service), scorer=Depends(get_scorer)) -> RefreshService:
-    return RefreshService(engine, providers, fx, get_settings().refresh_ttl_hours, scorer=scorer, sector_loader=load_sectors)
+    st = get_settings()
+    return RefreshService(engine, providers, fx, st.refresh_ttl_hours, scorer=scorer, sector_loader=load_sectors,
+                          fast_ttl_hours=st.refresh_fast_ttl_hours)
 
 
 # ── [S4-D] 비교군 상세 데이터 요청 시 수집 ──

@@ -2,7 +2,7 @@
 
 국내(KOSPI·KOSDAQ)·미국(NASDAQ·NYSE) 주식의 시세·지수·환율·밸류에이션·재무·공시를 한 DB에 모아, 한 화면에서 같은 기준(원화 환산·일봉)으로 비교해 보는 **주식 분석 대시보드**입니다.
 
-- 흩어진 원천 데이터(pykrx·yfinance·OpenDART·SEC EDGAR)를 수집·전처리해 PostgreSQL 정규화 스키마에 적재하고, 서버가 떠 있는 동안 4시간 주기로 갱신합니다.
+- 흩어진 원천 데이터(pykrx·yfinance·OpenDART·SEC EDGAR)를 수집·전처리해 PostgreSQL 정규화 스키마에 적재하고, 서버가 떠 있는 동안 주가·지수·환율은 1시간, 그 밖은 4시간 주기로 갱신합니다.
 - 공개 재무·시세로 계산한 **투자 매력도**(투자 성향별 다중 팩터 점수)와 시장·섹터 점수, 경쟁 종목 비교, 통계를 제공합니다.
 - FastAPI 조회 API와 바닐라 HTML/CSS/JS 화면으로 보여 줍니다. 조회 API는 외부 소스를 직접 부르지 않고 DB 값만 씁니다.
 - 4인 팀(시니어 1 · 주니어 3)이 6단계(Stage 0~6)로 만들었고, 지금은 추가 기능(수집 확장·화면 개선)을 이어서 넣고 있습니다.
@@ -56,7 +56,7 @@
 | 백엔드 | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.x (동기, 원문 SQL `backend/app/queries/*.sql` + `text()`) |
 | DB | PostgreSQL 16 — 테이블 25 · VIEW 3 · 마이그레이션 001~009 |
 | 수집 | pykrx(국내 시세·지수·밸류에이션, 장애 시 KIS Open API로 전환), yfinance(미국 시세·지수·밸류에이션, USD/KRW), OpenDART(국내 재무·공시), SEC EDGAR(미국 재무·공시) |
-| 갱신 | 앱 안 스케줄러(asyncio) + PostgreSQL advisory lock — 시세 4시간 TTL, 비교군 07:00, 백그라운드 재무 08:00 (KST) |
+| 갱신 | 앱 안 스케줄러(asyncio) + PostgreSQL advisory lock — 주가·지수·환율 1시간·그 밖 4시간 TTL, 비교군 07:00, 백그라운드 재무 08:00 (KST) |
 | 프론트엔드 | 바닐라 HTML/CSS/JS (ES Modules, 빌드 없음) · Chart.js (CDN) · CSS 변수 디자인 토큰(라이트·다크) |
 | 실행·테스트 | Docker Compose · pytest |
 
@@ -66,7 +66,7 @@
 pykrx · yfinance ─┐
 OpenDART · SEC ───┴▶ providers/ ──▶ ingest/ (전처리·이상 행 격리·upsert) ──▶ PostgreSQL
                           ▲                                                  │
-   services/refresh (4시간 TTL) · benchmark (07:00) · background (08:00)    │
+   services/refresh (1·4시간 TTL) · benchmark (07:00) · background (08:00)    │
               ▲ 스케줄러 · POST /market/refresh · python -m app.ingest       │
                                                                              │
               브라우저 (frontend/) ◀── FastAPI /api/v1 (queries/*.sql) ◀──────┘
@@ -74,7 +74,7 @@ OpenDART · SEC ───┴▶ providers/ ──▶ ingest/ (전처리·이상 
 
 - **수집과 조회 분리**: 외부 호출은 수집 작업(스케줄러·`python -m app.ingest`)에서만 합니다. 화면이 부르는 API는 DB만 읽습니다.
 - **재적재 안전(멱등)**: 같은 데이터를 다시 적재해도 행 수가 늘지 않도록 upsert로 넣습니다.
-- **주기적 갱신과 호출 절약**: 환율·지수·일봉·밸류에이션은 작업별 TTL(기본 4시간) 안이면 외부를 부르지 않습니다. 일부 종목만 실패하면 30분 뒤 실패한 종목만 다시 받고, 여러 프로세스가 동시에 돌려도 DB 잠금(advisory lock)으로 한 번만 실행됩니다.
+- **주기적 갱신과 호출 절약**: 환율·지수·일봉·밸류에이션은 작업별 TTL(환율·지수·일봉 1시간, 그 밖 4시간) 안이면 외부를 부르지 않습니다. 일부 종목만 실패하면 30분 뒤 실패한 종목만 다시 받고, 여러 프로세스가 동시에 돌려도 DB 잠금(advisory lock)으로 한 번만 실행됩니다.
 - **재무 수집 부하 분산**: 재무·공시는 회사 단위로 잠그고 20개 회사씩 묶어 저장합니다. 상장 종목 전체(listed)는 첫 적재를 파일(OpenDART 일괄 다운로드)·SEC frames로 한 번에 넣고, 이후에는 새 사업보고서를 낸 회사만 다시 받거나 하루 예산(DART 2,000 · SEC 1,000행) 안에서 우선순위대로 받습니다.
 - **이상 행 격리**: 고가<저가, 음수 거래량 같은 행은 DB에 넣지 않고 `backend/data/quarantine/`에 사유와 함께 남깁니다.
 - **금액은 `Decimal`/`NUMERIC`**: 가격·비율 계산에 float을 쓰지 않습니다. 해외 종목은 원화 환산값을 함께 제공합니다.
@@ -137,6 +137,7 @@ docker compose run --rm api python -m app.ingest all   # master → prices → i
 | `DART_API_KEY` | **필수**(국내 재무·공시) | OpenDART 인증키 |
 | `SEC_USER_AGENT` | **필수**(미국 재무·공시) | 연락처(이메일)가 들어간 User-Agent |
 | `REFRESH_TTL_HOURS` | 선택 | 같은 종류 외부 호출 최소 간격(시간, 3~4, 기본 4) |
+| `REFRESH_FAST_TTL_HOURS` | 선택 | 주가·지수·환율(PRICES·INDICES·FX)만의 간격(시간, 1~4, 기본 1) |
 | `SCHEDULER_ENABLED` | 선택 | 앱 안 스케줄러 사용 여부 (기본 true) |
 | `SCHEDULER_CHECK_MINUTES` | 선택 | 스케줄러가 할 일을 확인하는 간격(분, 기본 5) |
 | `EXTRA_CA_DIR` | 선택 (compose) | 추가 CA 인증서 폴더(아래 TLS 검사 환경) |
@@ -148,7 +149,7 @@ docker compose run --rm api python -m app.ingest all   # master → prices → i
 #### 자동 갱신 (앱 안 스케줄러, 기본 켜짐)
 | 작업 | 시점 | 내용 |
 |---|---|---|
-| 시세 갱신 | 5분마다 확인, 작업별 4시간 TTL | 환율·지수·일봉·밸류에이션·섹터 등락·매력도 점수. 일부 실패 시 30분 뒤 실패 종목만 |
+| 시세 갱신 | 5분마다 확인, 주가·지수·환율 1시간·그 밖 4시간 TTL | 환율·지수·일봉·밸류에이션·섹터 등락·매력도 점수. 일부 실패 시 30분 뒤 실패 종목만 |
 | 비교군 갱신 | 매일 07:00 KST 이후 1회 | 공시 증분 → 비교군 선정(30일마다) → 평시 데이터 → 점수 |
 | 백그라운드 재무 | 매일 08:00 KST 이후 1회 | listed 종목 재무를 하루 예산 안에서 우선순위대로 |
 

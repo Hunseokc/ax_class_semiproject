@@ -42,7 +42,7 @@ DEMO_PORTFOLIOS = [
 
 def seed_demo(engine: Engine, providers: Providers) -> dict:
     out = {"watchlist": seed_demo_watchlist(engine), "portfolios": [], "items": 0, "skipped": []}
-    fx = FxService(engine, providers.fx, get_settings().refresh_ttl_hours)
+    fx = FxService(engine, providers.fx, get_settings().refresh_fast_ttl_hours)
     with session_factory(engine)() as db:
         uid = db.execute(select(User.user_id).where(User.nickname == "demo")).scalar_one()
         svc = PortfolioService(db, fx, uid)
