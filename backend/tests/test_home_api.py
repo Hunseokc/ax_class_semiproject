@@ -41,14 +41,18 @@ def test_volume_surge_excludes_short_history_and_zero_volume(client, engine):
     assert _ranking(client, "volume_surge")["items"] == []
 
 
-def test_volume_surge_targets_featured_and_watchlist_only(client, engine):
+def test_volume_surge_targets_featured_benchmark_and_watchlist(client, engine):
     with engine.begin() as conn:
         _add_history(conn, 1, 18, 1000)
         _add_history(conn, 2, 18, 1000)
+        _add_history(conn, 3, 18, 1000)
         conn.execute(text("UPDATE stocks SET coverage = 'benchmark' WHERE stock_id IN (1, 2)"))
+        conn.execute(text("UPDATE stocks SET coverage = 'listed' WHERE stock_id = 3"))
         conn.execute(text("INSERT INTO watchlist_items (user_id, stock_id, sort_order) VALUES (1, 2, 1)"))
     items = _ranking(client, "volume_surge")["items"]
-    assert [i["ticker"] for i in items] == ["000660"] and items[0]["is_watched"] is True   # 비교군은 관심종목일 때만
+    watched = {i["ticker"]: i["is_watched"] for i in items}
+    assert watched["005930"] is False and watched["000660"] is True      # 비교군도 대상, 관심 표시는 따로
+    assert all(i["stock_id"] != 3 for i in items)                        # listed는 관심종목이 아니면 제외
     assert _ranking(client, "volume_surge", "US")["items"] == []                          # 시장 필터
 
 

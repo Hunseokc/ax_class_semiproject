@@ -1,5 +1,5 @@
 -- 대시보드 '거래량 급증' TOP N: 배수 = 당일 거래량 / 직전 20거래일 평균 거래량(당일 제외)
--- 대상 = 노출 종목(주식 리스트) + 사용자의 관심종목 — 전 종목 스캔을 새로 하지 않는다
+-- 대상 = 노출 종목 + 매력도 비교군(섹터별 표본) + 사용자의 관심종목 — 전 종목 스캔을 새로 하지 않는다
 -- 직전 20거래일이 모두 있어야 계산(부족하면 제외). 당일 거래량 0, 평균 0은 제외
 -- 주의: text()는 주석 안의 콜론+이름도 바인드 파라미터로 읽으므로 주석에 쓰지 않는다
 WITH targets AS (
@@ -7,7 +7,7 @@ WITH targets AS (
     FROM stocks s
     JOIN markets m ON m.market_id = s.market_id
     WHERE s.is_active AND m.country = CAST(:country AS text)
-      AND (s.coverage = 'featured'
+      AND (s.coverage IN ('featured', 'benchmark')
            OR EXISTS (SELECT 1 FROM watchlist_items w WHERE w.stock_id = s.stock_id AND w.user_id = :user_id))
 ),
 recent AS (                           -- 종목별 최근 21거래일 (rn=1이 당일)
