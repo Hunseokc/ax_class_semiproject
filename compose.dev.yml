@@ -12,4 +12,4 @@ services:
       - ./backend/db:/srv/db
       - ./frontend:/srv/frontend
       - ./backend/tests:/srv/tests
-      - ./docs:/srv/docs                 # Stage 1 이후 python -m app.ingest 결과 기록
+      - ./개발산출물:/srv/개발산출물                 # Stage 1 이후 python -m app.ingest 결과 기록

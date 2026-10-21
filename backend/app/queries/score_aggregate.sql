@@ -3,7 +3,7 @@
 --   팩터 점수 F = 그 팩터의 유효 지표 z_adj 평균 (지표 1개 이상)
 --   종합 = Σ(w × F) / Σ w  (유효 팩터만 — 가중치 재정규화). 유효 팩터 < 3이면 NULL
 --   Final = 100 × Φ(Z_c),  Z_c = 종합을 국가·프리셋 안에서 평균·표본표준편차로 다시 표준화한 값
---   Φ(z) = 0.5 × (1 + erf(z / √2))  — PostgreSQL 16 내장 erf 사용. Min-Max는 쓰지 않는다(docs/09 5절)
+--   Φ(z) = 0.5 × (1 + erf(z / √2))  — PostgreSQL 16 내장 erf 사용. Min-Max는 쓰지 않는다(개발산출물/09 5절)
 WITH f AS (
     SELECT mv.stock_id, mv.factor, AVG(mv.z_adj) AS score
     FROM stock_metric_values mv

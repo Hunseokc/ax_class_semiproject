@@ -556,7 +556,7 @@ a.home-pf__legend-row:hover .home-pf__legend-name { text-decoration: underline; 
 .senti-skeleton { height: 170px; border-radius: var(--r-row); }
 
 
-/* ── [S7-A] 투자 매력도: 왼쪽 [매력 점수 | 순위] · [시장·섹터 점수 | 섹터 문장] 두 줄, 오른쪽 레이더 (시안 docs/assets/score_panel_sector_mockup.png) ── */
+/* ── [S7-A] 투자 매력도: 왼쪽 [매력 점수 | 순위] · [시장·섹터 점수 | 섹터 문장] 두 줄, 오른쪽 레이더 (시안 개발산출물/assets/score_panel_sector_mockup.png) ── */
 .score-panel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .score-panel__left { align-items: stretch; gap: var(--sp-5); text-align: left; }
 .score-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-6); }

@@ -1,7 +1,7 @@
 -- 매력도 1단계: 종목별 지표 원값 (기준: 종목별 최신 거래일 종가·최신 밸류에이션·최신 FY 재무)
 -- 대상: 파라미터 stock_id가 NULL이면 매력도 유니버스(활성 노출 종목 + 비교군, listed 제외)
 --       stock_id를 주면 그 종목만(상장 종목 목록의 참고 점수 계산용 — app/services/reference_score.py)
--- 지표 정의·NULL 사유는 docs/09 1절. 한 종목당 9행(값이 없으면 raw_value NULL)
+-- 지표 정의·NULL 사유는 개발산출물/09 1절. 한 종목당 9행(값이 없으면 raw_value NULL)
 -- z_fixed: 정규화 없이 Z를 고정하는 경우(지금 쓰는 지표 없음 — 규칙만 남김). note: 대체 계산·고정 사유
 WITH base AS (
     SELECT vm.stock_id, vm.close, vm.eps, vm.bps, vm.volatility_1y, vm.max_drawdown_1y, vm.market_cap, vs.shares_outstanding

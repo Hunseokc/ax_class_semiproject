@@ -1,4 +1,4 @@
-# 매력도 다중 팩터 모델 설정 → scoring_presets·scoring_weights로 적재 (docs/09)
+# 매력도 다중 팩터 모델 설정 → scoring_presets·scoring_weights로 적재 (개발산출물/09)
 # 유니버스 안에서의 상대적 위치를 나타내는 팩터 점수이며 수익률 예측·투자 권유가 아니다.
 
 # 섹터 중립화 축소 계수: z_adj = z − n/(n+k) × 주그룹 z 평균 (n = 주 그룹의 유효 표본 수)

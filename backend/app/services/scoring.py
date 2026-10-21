@@ -4,7 +4,7 @@
   1) 지표 원값 → stock_metric_values.raw_value
   2) 국가 내 로버스트 Z(z_raw) → 주 그룹 축소 추정 섹터 중립화(z_adj)   — 프리셋과 무관, as_of당 1회
   3) 프리셋별 팩터 점수·종합·100·Φ 변환 → stock_scores
-정의·근거는 docs/09_매력도_점수_정의서.md.
+정의·근거는 개발산출물/09_매력도_점수_정의서.md.
 """
 from __future__ import annotations
 

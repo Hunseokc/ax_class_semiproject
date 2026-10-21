@@ -1,4 +1,4 @@
-/* 디자인 토큰 — 다크 핀테크 (docs/assets/design_reference.png 기준), 라이트는 맨 아래 흰 바탕 + 코발트 블루
+/* 디자인 토큰 — 다크 핀테크 (개발산출물/assets/design_reference.png 기준), 라이트는 맨 아래 흰 바탕 + 코발트 블루
    면의 명도 차이로 구분하고 그림자는 쓰지 않는다. 파스텔 위 글자는 어두운 색. */
 :root {
   color-scheme: dark;

@@ -12,3 +12,6 @@ data/
 # 추가 CA 인증서(로컬 환경 전용)
 certs/*
 !certs/.gitkeep
+
+# 팀 작업 폴더(로컬 전용)
+team/

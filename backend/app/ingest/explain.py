@@ -1,4 +1,4 @@
-"""인덱스 전후 EXPLAIN (ANALYZE, BUFFERS) 비교 → docs/explain_result.md
+"""인덱스 전후 EXPLAIN (ANALYZE, BUFFERS) 비교 → 개발산출물/explain_result.md
 
 '인덱스 전'은 트랜잭션 안에서 해당 인덱스를 DROP한 뒤 측정하고 ROLLBACK한다(실제 DB는 바뀌지 않음).
 캐시 영향을 줄이려고 각 쿼리를 REPEAT회 실행하고 실행 시간 중앙값과 마지막 실행 계획을 기록한다.

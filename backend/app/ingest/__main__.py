@@ -12,7 +12,7 @@
     python -m app.ingest disclosures [--days 365] [--tickers 005930]      # 최근 공시
     python -m app.ingest all                 # master → prices → indices → fx → financials → valuation → disclosures
     python -m app.ingest scores              # 매력도 점수 재생성 (오늘 as_of, DELETE 후 INSERT)
-    python -m app.ingest explain             # 인덱스 전후 EXPLAIN 비교 → docs/explain_result.md
+    python -m app.ingest explain             # 인덱스 전후 EXPLAIN 비교 → 개발산출물/explain_result.md
     python -m app.ingest seed-demo           # demo 관심종목 8건 + 모의 포트폴리오 2개
     python -m app.ingest status              # 테이블별 행 수·기간·최근 실패
     python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용)
@@ -202,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "explain":
         from app.ingest import explain
         print(explain.run(engine))
-        print("→ docs/explain_result.md")
+        print("→ 개발산출물/explain_result.md")
     # ── [S4-D] 비교군 ──
     elif args.cmd == "benchmark":
         from app.ingest.benchmark import run_benchmark

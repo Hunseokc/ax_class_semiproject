@@ -470,7 +470,7 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 
 ## 9. Stage 4 — 매력도 (D 계약)
 
-계산 정의는 `docs/09_매력도_점수_정의서.md`(C). 새로 만드는 DB는 `schema.sql`에 반영되어 있고, 이미 적재된 DB는 마이그레이션으로 바꾼다.
+계산 정의는 `개발산출물/09_매력도_점수_정의서.md`(C). 새로 만드는 DB는 `schema.sql`에 반영되어 있고, 이미 적재된 DB는 마이그레이션으로 바꾼다.
 
 ### 9-1. 마이그레이션
 | 파일 | 내용 | 실행 |
@@ -510,7 +510,7 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 |---|---|---|---|---|---|
 | stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
 | as_of | date | N |  | PK | 기준일 |
-| metric | character varying(24) | N |  | PK | 지표 (earnings_yield, book_yield, roe … 9종, docs/09 2절) |
+| metric | character varying(24) | N |  | PK | 지표 (earnings_yield, book_yield, roe … 9종, 개발산출물/09 2절) |
 | factor | character varying(12) | N |  |  | 소속 팩터 |
 | raw_value | numeric | Y |  |  | 지표 원값, 계산 불가면 NULL |
 | z_raw | numeric(8,4) | Y |  |  | 국가 내 로버스트 Z(방향 반영, ±3 클리핑) |

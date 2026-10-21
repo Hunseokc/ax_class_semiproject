@@ -1,4 +1,4 @@
-"""매력도 비교군(benchmark) — 점수 계산 표본을 넓히기 위한 종목들. 화면 기본 목록에는 나오지 않는다(docs/09 9절).
+"""매력도 비교군(benchmark) — 점수 계산 표본을 넓히기 위한 종목들. 화면 기본 목록에는 나오지 않는다(개발산출물/09 9절).
 
 - 선정: 국가·경쟁 그룹마다 노출 종목 + 후보(config/universe.yaml benchmark_candidates) 중 시가총액 상위
   (per_sector − 노출 종목 수)개. reselect_days(30일)마다 다시 고르고, 빠진 종목은 is_active = false

@@ -4,7 +4,7 @@
 --   n = 같은 국가의 주 그룹 구성원 중 그 지표의 z가 있는 종목 수. 그룹 평균에는 자기 자신도 포함된다
 --   z는 국가 안에서 표준화한 값이라, 다른 국가 구성원의 z와 섞어 평균 내지 않는다
 --   주 그룹이 없거나 n = 1이면 z_adj = z. z_adj는 다시 자르지 않는다
---   안정성(safety) 지표는 중립화하지 않는다(z_adj = z) — 업종 특성으로 출렁이는 것도 그대로 반영 (docs/09 4절)
+--   안정성(safety) 지표는 중립화하지 않는다(z_adj = z) — 업종 특성으로 출렁이는 것도 그대로 반영 (개발산출물/09 4절)
 WITH g AS (
     SELECT mv.stock_id, mv.metric, mv.factor, mv.z_raw, gm.group_id, mk.country
     FROM stock_metric_values mv

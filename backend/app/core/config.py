@@ -17,7 +17,7 @@ def _sibling(name: str) -> Path:
 
 
 FRONTEND_DIR = _sibling("frontend")
-DOCS_DIR = _sibling("docs")
+DOCS_DIR = _sibling("개발산출물")
 
 
 class Settings(BaseSettings):
