@@ -191,6 +191,34 @@ def test_up_to_date_us_stock_is_not_requested_for_unopened_local_day(engine):
     assert scalar(engine, "SELECT error FROM ingestion_logs WHERE stock_id = 3 ORDER BY log_id DESC LIMIT 1") == "최신 상태"
 
 
+def test_session_end_stops_before_unfinished_session():
+    """장 마감 전에는 전날까지만 요청한다(당일 봉은 어차피 격리) — 마감 뒤에는 그날까지."""
+    seoul = ZoneInfo("Asia/Seoul")
+    today = datetime.now(seoul).date()
+    at = lambda h, m: datetime.combine(today, datetime.min.time().replace(hour=h, minute=m), seoul)
+    assert jobs._session_end("Asia/Seoul", today, at(10, 0)) == today - timedelta(days=1)
+    assert jobs._session_end("Asia/Seoul", today, at(15, 29)) == today - timedelta(days=1)
+    assert jobs._session_end("Asia/Seoul", today, at(15, 30)) == today
+
+
+def test_intraday_refresh_makes_no_external_call(engine):
+    """장중 1시간 갱신: 전날까지 받아 둔 종목은 외부 호출 없이 '최신 상태' (지수도 같다)."""
+    seoul = ZoneInfo("Asia/Seoul")
+    today = datetime.now(seoul).date()
+    intraday = datetime.combine(today, datetime.min.time().replace(hour=10), seoul)
+    with engine.begin() as conn:
+        conn.execute(text("""INSERT INTO daily_prices (stock_id, trade_date, open, high, low, close, volume)
+                             VALUES (1, :d, 70000, 70000, 70000, 70000, 1000) ON CONFLICT DO NOTHING"""),
+                     {"d": today - timedelta(days=1)})
+        conn.execute(text("INSERT INTO index_daily_prices (index_id, trade_date, close) VALUES (1, :d, 2600) ON CONFLICT DO NOTHING"),
+                     {"d": today - timedelta(days=1)})
+    p = make_providers()
+    assert jobs.load_prices(engine, p, tickers=["005930"], today=today, now=intraday) == {"005930": "SUCCESS"}
+    assert jobs.load_indices(engine, p, today=today, now=intraday) == {"KOSPI": "SUCCESS"}
+    assert p.kr_price.calls == [] and p.kr_index.count == 0
+    assert scalar(engine, "SELECT error FROM ingestion_logs WHERE stock_id = 1 ORDER BY log_id DESC LIMIT 1") == "최신 상태"
+
+
 def test_stock_refs_use_universe_yf_symbol(engine):
     """yfinance 대체 경로(PRICE_SOURCE_KR=yfinance)는 universe.yaml의 yf_symbol(.KS/.KQ)로 국내 종목을 받는다."""
     with engine.connect() as conn:

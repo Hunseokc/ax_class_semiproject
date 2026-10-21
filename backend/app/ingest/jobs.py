@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Connection, Engine, text
 
 from app.core.config import ROOT_DIR
-from app.ingest.preprocess import Quarantined, clean_bars, clean_fx
+from app.ingest.preprocess import Quarantined, clean_bars, clean_fx, unfinished_session_date
 from app.ingest.store import (DART_LOCK_KEY, LOCK_WAIT_NOTE_SECONDS, BatchWriter, LockSession, Unit, default_flush_every,
                               error_text, job_log, provider_lock_key, upsert)
 from app.ingest.universe import index_refs, load_universe, stock_refs
@@ -153,6 +153,13 @@ def _market_today(tz: str, today: date) -> date:
     return min(today, datetime.now(ZoneInfo(tz)).date())
 
 
+def _session_end(tz: str, today: date, now: datetime | None = None) -> date:
+    """요청 끝 날짜: 시장 현지 날짜, 단 장 마감 전이면 전날까지. 당일 미확정 봉은 어차피 격리되므로(A-07)
+    장중 1시간 갱신은 외부 호출 없이 '최신 상태'로 넘어가고, 마감 뒤 첫 갱신이 그날 종가를 받는다."""
+    end = _market_today(tz, today)
+    return end - timedelta(days=1) if end == unfinished_session_date(tz, now) else end
+
+
 def _no_session(start: date, end: date) -> str | None:
     """요청할 거래일이 없으면 사유. 주말뿐인 구간은 외부 호출 없이 '최신 상태'로 둔다."""
     if start > end:
@@ -164,8 +171,9 @@ def _no_session(start: date, end: date) -> str | None:
 
 def load_prices(engine: Engine, providers: Providers, *, full: bool = False,
                 tickers: list[str] | None = None, today: date | None = None,
-                stock_ids: list[int] | None = None, history_days: int = PRICE_HISTORY_DAYS) -> dict[str, str]:
-    """종목 일봉. 기본은 증분(저장된 마지막 날짜 다음 날부터), --full이면 history_days(기본 2년) 전체 재수집."""
+                stock_ids: list[int] | None = None, history_days: int = PRICE_HISTORY_DAYS,
+                now: datetime | None = None) -> dict[str, str]:
+    """종목 일봉. 기본은 증분(저장된 마지막 날짜 다음 날부터 장 마감된 날까지), --full이면 history_days(기본 2년) 전체 재수집."""
     today = today or date.today()
     statuses = {}
     with engine.connect() as conn:
@@ -174,7 +182,7 @@ def load_prices(engine: Engine, providers: Providers, *, full: bool = False,
     for ref in refs:
         p = providers.price(ref.country)
         with job_log(engine, source=p.source, job_type="PRICES", stock_id=ref.stock_id, label=ref.ticker) as res:
-            end = _market_today(ref.timezone, today)
+            end = _session_end(ref.timezone, today, now)
             start = _start_date(last.get(ref.stock_id), full, history_days, today)
             if skip := _no_session(start, end):
                 res.notes.append(skip)
@@ -193,7 +201,8 @@ def load_prices(engine: Engine, providers: Providers, *, full: bool = False,
     return statuses
 
 
-def load_indices(engine: Engine, providers: Providers, *, full: bool = False, today: date | None = None) -> dict[str, str]:
+def load_indices(engine: Engine, providers: Providers, *, full: bool = False, today: date | None = None,
+                 now: datetime | None = None) -> dict[str, str]:
     today = today or date.today()
     statuses = {}
     with engine.connect() as conn:
@@ -202,7 +211,7 @@ def load_indices(engine: Engine, providers: Providers, *, full: bool = False, to
     for ref in refs:
         p = providers.index(ref.country)
         with job_log(engine, source=p.source, job_type="INDICES", label=ref.code) as res:
-            end = _market_today(ref.timezone, today)
+            end = _session_end(ref.timezone, today, now)
             start = _start_date(last.get(ref.index_id), full, PRICE_HISTORY_DAYS, today)
             if skip := _no_session(start, end):
                 res.notes.append(skip)
