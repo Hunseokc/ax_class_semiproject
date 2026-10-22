@@ -5,7 +5,7 @@
 | # | 문제 | 08 14절 | 분류 |
 |---|---|---|---|
 | 1 | pykrx가 시총·펀더멘털·지수를 빈 결과로 돌려줌 | 1번 | 외부 데이터 소스 |
-| 2 | Cloud Run 인스턴스 교체 후 KRX 로그인 실패 → 국내 데이터 적재 중단 | — (배포 후) | 외부 데이터 소스·운영 |
+| 2 | Cloud Run 인스턴스 교체 후 KRX 로그인 실패 → 국내 데이터 적재 중단 | 23번 | 외부 데이터 소스·운영 |
 
 ---
 
@@ -24,7 +24,7 @@
 ### 원인 분석
 - **직접 원인**: pykrx 1.2.x는 KRX 정보데이터시스템의 시총·펀더멘털·지수 화면에 **회원 로그인**이 필요하다. 로그인하지 않으면 해당 엔드포인트가 빈 응답을 준다.
 - **근본 원인**: pykrx는 **import 시점**에 `os.environ`의 `KRX_ID`/`KRX_PW`를 읽는다. `.env`에 값을 넣어도 pydantic-settings가 읽을 뿐 환경변수로 내보내지 않으면 pykrx는 로그인하지 못한다(A-04). 또한 비공식 라이브러리라 사이트 정책 변화가 그대로 영향을 준다.
-- **확인 방법**: `python -m app.ingest.smoke`로 로그인 없음/있음 두 경우의 실제 응답을 비교(`개발산출물/smoke_test_result.md`), pykrx 소스 `website/comm/auth.py`에서 환경변수 읽는 시점 확인
+- **확인 방법**: `python -m app.ingest.smoke`(원본 완성본의 스크립트)로 로그인 없음/있음 두 경우의 실제 응답을 비교(`개발산출물/smoke_test_result.md`), pykrx 소스 `website/comm/auth.py`에서 환경변수 읽는 시점 확인
 
 ### 해결 과정
 1. smoke test로 로그인 여부에 따른 응답 차이를 실측해 원인을 로그인으로 좁힘
@@ -34,7 +34,7 @@
 
 ### 해결 결과
 - **정상화**: 로그인 후 일봉·시총·펀더멘털·지수가 모두 동작(2026-10-08 깨끗한 DB 재현에서 적재 실패 0건)
-- **재발 확인 방법**: `python -m app.ingest.smoke` 재실행, `GET /api/v1/statistics/data-quality`에서 VALUATION·INDICES의 `last_failure_reason`, `python -m app.ingest status`의 최근 실패
+- **재발 확인 방법**: `python -m app.ingest valuation --tickers 005930`·`indices`로 실제 적재해 보기(smoke 스크립트는 원본 완성본에만 있음), `GET /api/v1/statistics/data-quality`에서 VALUATION·INDICES의 `last_failure_reason`, `python -m app.ingest status`의 최근 실패
 
 ### 재발 방지
 - **코드**: `export_krx_credentials()` 호출을 pykrx import 경로 앞에 고정, 소스 전환(`PRICE_SOURCE_KR`)·DERIVED 폴백 유지

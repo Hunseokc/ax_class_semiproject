@@ -1,6 +1,15 @@
 # 아키텍처
 
-StockMind의 구성 요소, 데이터 적재 흐름, 요청 하나가 처리되는 순서, 주요 설계 결정을 한 장에 모은 문서다. 상세는 각 절에 링크한 문서를 따른다.
+StockMind의 구성 요소, 데이터 적재 흐름, 요청 하나가 처리되는 순서, 주요 설계 결정을 한 장에 모은 문서다. 상세는 각 절에 링크한 문서를 따른다. 실행·점검 방법은 `operations_guide.md`.
+
+## 0. 프로젝트 개요
+| 항목 | 내용 |
+|---|---|
+| 프로젝트 주제 | 국내·미국 주식 데이터 백엔드와 분석 대시보드 (서비스: https://stockmind-538269380647.asia-northeast3.run.app) |
+| 해결하려는 문제 | 시세·지수·환율·재무·공시가 사이트·통화·회계기준마다 흩어져 있어, 국내·미국 종목을 같은 기준으로 비교하고 시드 배분을 계산하기 어렵다(`01` 3절) |
+| 대상 도메인·데이터 | 금융(주식) — pykrx·KIS·yfinance(시세·지수·환율), OpenDART·SEC EDGAR(재무·공시). 노출 25종목 + 매력도 비교군 121종목 + 검색용 상장 목록 8,155개(`03`) |
+| 사용한 LLM API·모델 | **사용하지 않는다.** 1차 세미프로젝트 규격에서 LLM·RAG는 범위 밖이라, '인사이트'는 SQL 분석(VIEW·윈도우 함수)과 규칙 기반 점수(매력도·시장 심리)로 만든다. 3차에서 분석 JSON을 LLM 입력으로 쓸 수 있게 구조를 맞춰 두었다(4절 끝) |
+| 주요 사용자·시나리오 | 국내·미국 주식을 함께 보는 입문 투자자 — 홈에서 시장 흐름 확인 → 리스트에서 종목 고르기 → 상세에서 매력도·경쟁 비교 → 관심종목 ★ → 모의 포트폴리오에 담아 시드 배분 확인 |
 
 ## 1. 전체 구성도
 
@@ -8,6 +17,7 @@ StockMind의 구성 요소, 데이터 적재 흐름, 요청 하나가 처리되�
 flowchart LR
   subgraph EXT["외부 데이터 소스"]
     KRX["pykrx<br/>(KRX 정보데이터시스템)"]
+    KIS["KIS Open API<br/>(국내 대체 소스)"]
     YF["yfinance<br/>(Yahoo Finance)"]
     DART["OpenDART"]
     SEC["SEC EDGAR"]
@@ -20,7 +30,7 @@ flowchart LR
   end
 
   subgraph DB["PostgreSQL 16"]
-    TBL["테이블 20<br/>시장·종목·시세·재무·공시·사용자"]
+    TBL["테이블 25<br/>시장·종목·시세·재무·공시·사용자·매력도·운영"]
     VIEW["VIEW 3<br/>v_latest_price · v_fx_latest · v_stock_metrics"]
   end
 
@@ -28,7 +38,7 @@ flowchart LR
     R["라우터 backend/app/api<br/>입력 검증·의존성"]
     SVC["서비스 backend/app/services<br/>환율 TTL·포트폴리오·점수·품질"]
     Q["SQL backend/app/queries/*.sql<br/>+ ORM backend/app/models"]
-    SCH["앱 안 스케줄러<br/>1·4시간 TTL 갱신 · 매일 07:00 비교군"]
+    SCH["앱 안 스케줄러(로컬)<br/>배포는 Cloud Run Jobs<br/>1·4시간 TTL 갱신 · 07:00 비교군 · 08:00 재무"]
   end
 
   subgraph CLIENT["클라이언트"]
@@ -36,7 +46,7 @@ flowchart LR
     SW["Swagger /docs"]
   end
 
-  KRX & YF & DART & SEC --> PROV --> PRE --> STORE --> TBL
+  KRX & KIS & YF & DART & SEC --> PROV --> PRE --> STORE --> TBL
   TBL --> VIEW
   R --> SVC --> Q --> TBL & VIEW
   SCH -->|"TTL 지난 작업만<br/>advisory lock으로 1회"| PROV
@@ -47,9 +57,25 @@ flowchart LR
 - **같은 작업이 겹치지 않게** PostgreSQL advisory lock을 쓴다: 갱신(`REFRESH_LOCK_KEY`), 환율 조회, 비교군 갱신(`BENCHMARK_LOCK_KEY`), 스케줄러.
 - **재무·공시 수집은 회사 단위·국가별 키로 잠근다**(`DART_LOCK_KEY` 국내, `SEC_LOCK_KEY` 미국). DART·SEC를 부르는 동안만 회사 1개씩 잡고 풀어서, 상세 화면 요청이 07:00 비교군 재무 묶음 전체가 아니라 처리 중인 회사 하나만 기다린다. 잠금 연결 1개를 반복문 동안 재사용하고(`LockSession`), DB 쓰기는 `ingest.flush_every`(20)개 회사마다 한 트랜잭션으로 모은다(`BatchWriter` — 행 저장과 `data_freshness`는 같은 트랜잭션, `ingestion_logs`는 별도). DART 분당 한도는 프로세스마다 45회(API 서비스 + Job 합계 90 이하).
 - **07:00 비교군 갱신은 공시 목록 증분부터** 한다(`jobs.load_dart_feed`): 회사 지정 없는 사업보고서 목록(DART list.json A001)을 기준점(`ingest_cursor`)부터 받아, 새 사업보고서·정정을 낸 DB 종목의 재무 유효기간을 끝낸다. 국내 재무 첫 적재는 OpenDART 재무정보 일괄다운로드 파일로 한 번에 넣는다(`python -m app.ingest dart-bulk`, API 호출 없음).
-- **08:00 백그라운드 재무 적재**(`app/ingest/background.py`): 재무 기록이 없는 국내 listed 종목을 거래대금 → 시가총액 순으로, 오늘 남긴 DART 재무·공시 로그 행이 `background.dart_calls_per_day`(2,000)에 닿을 때까지 받는다. 미국은 순위 소스(D11)를 정한 뒤.
+- **08:00 백그라운드 재무 적재**(`app/ingest/background.py`): 재무 기록이 없는 국내 listed 종목을 거래대금 → 시가총액 순으로, 오늘 남긴 DART 재무·공시 로그 행이 `background.dart_calls_per_day`(2,000)에 닿을 때까지 받는다. 미국은 SEC 발행주식수 × 종가로 매긴 시가총액 순위(`stocks.cap_rank`, 상위 1,500개, 30일마다) 순으로 받는다.
 - **07:00 비교군 재무는 하루 예산**(`benchmark.fin_daily_budget`, 100종목)까지만 유효기간이 가장 오래 지난 순으로 받는다. 노출·관심·포트폴리오 종목은 예산과 무관하다.
-- 컨테이너는 `db`(PostgreSQL)와 `api`(uvicorn + 스케줄러) 두 개다(`compose.yml`). `api`의 HEALTHCHECK는 `/health/db`.
+- 로컬 컨테이너는 `db`(PostgreSQL)와 `api`(uvicorn + 스케줄러) 두 개다(`compose.yml`). `api`의 HEALTHCHECK는 `/health/db`.
+
+### 1-1. 배포 구성 (Google Cloud, 2026-10-22 `gcloud run services describe` 등으로 확인)
+
+```mermaid
+flowchart LR
+  USER["브라우저<br/>(게스트 세션 쿠키)"] -->|HTTPS| RUN["Cloud Run 서비스 stockmind<br/>FastAPI + 화면 · 최대 인스턴스 1<br/>SCHEDULER_ENABLED=false"]
+  SCHED["Cloud Scheduler<br/>refresh 매시 5분 · benchmark 07:00 · background 08:00 (KST)"] --> JOBS["Cloud Run Jobs<br/>stockmind-refresh · -benchmark · -background<br/>python -m app.ingest …"]
+  RUN & JOBS --> SUPA["Supabase PostgreSQL<br/>(세션 풀러, 풀 5+3 / Job 2+1)"]
+  JOBS --> EXT["외부 소스<br/>pykrx·KIS·yfinance·DART·SEC"]
+  SM["Secret Manager<br/>DATABASE_URL·SESSION_SECRET·DART·KRX·KIS 키"] -.-> RUN & JOBS
+  AR["Artifact Registry<br/>stockmind/api:&lt;커밋&gt;-&lt;날짜시각&gt;"] -.->|같은 이미지| RUN & JOBS
+```
+
+- 서비스와 Jobs는 **같은 컨테이너 이미지**를 쓴다. 서비스는 화면·API만 맡고(앱 안 스케줄러 끔), 외부 수집은 Cloud Scheduler가 시간마다 실행하는 Job이 맡는다. 그래서 요청이 없어 인스턴스가 쉬어도 갱신이 멈추지 않는다.
+- 비밀 값은 이미지·저장소에 넣지 않고 Secret Manager에서 환경변수로 주입한다. 방문자는 브라우저별 게스트(`GUEST_SESSION_ENABLED=true`)로 나뉜다.
+- 재배포·장애 점검 절차는 `operations_guide.md` 7·8절.
 
 ## 2. 데이터 적재 흐름
 
@@ -107,9 +133,11 @@ sequenceDiagram
 | `markets` 분리(3NF) | 국가·통화·시간대는 종목이 아니라 시장에 종속 → `stocks.market_id`로 이행적 종속 제거 | `개발산출물/05` 4-3 |
 | 의도적 비정규화 ① | `portfolio_items.ref_price·ref_fx_rate·ref_date` — 담은 시점의 불변 사실이라 시세가 갱신돼도 원가가 바뀌지 않게 복사 저장 | `개발산출물/05` 5-1 |
 | 의도적 비정규화 ② | `stock_metric_values`·`stock_scores` — 매력도 파생 결과를 저장해 순위·설명을 매번 다시 계산하지 않음 | `개발산출물/05` 5-2 |
+| 의도적 비정규화 ③ | `market_sentiment_daily` — 지수 일봉으로 계산한 심리 지수를 거래일별로 저장, 계산식 버전이 바뀌면 다시 계산 | `개발산출물/05` 5-3 |
+| 배포 분리 | 화면·API(Cloud Run 서비스)와 수집(Cloud Run Jobs + Scheduler)을 나눠, 외부 장애·긴 적재가 화면 응답을 막지 않게 함. 비용 때문에 고정 IP(Cloud NAT)는 두지 않고 KRX 차단 시 KIS로 전환 | 1-1절, troubleshooting 2 |
 | TTL 갱신 정책 | 같은 종류 외부 호출은 4시간(주가·지수·환율은 1시간)에 1회, 일봉·지수는 장 마감된 날까지만 요청(장중 호출 0), 작업 단위 기록으로 판단, 부분 실패는 30분 뒤 실패 종목만 재시도, 시장 현지 날짜까지만 요청 | README 갱신 정책, A-109·A-110 |
 | 예외처리 원칙 | 응답 형식 하나(`{"error": {...}}`), 형식 오류는 DB 전에 422, 남의 리소스는 404로 숨김, 처리하지 못한 예외는 내부 정보 없이 500(요청 ID로 로그 추적), 외부 장애는 마지막 값·stale 표시 | `개발산출물/06` 1절·5절 |
 | 대시보드 지표 선정 | 국내·미국 대표 지수 + USD/KRW(미국 종목의 원화 환산·환율 효과 분리에 필요), 사용자가 지수 10개 중 고름. 홈 순위는 리스트와 겹치지 않게 거래량 급증(20거래일 평균 대비)·매력도 순위, 매력도는 같은 시장 안 상대 위치(5개 팩터). 섹터 히트맵·시장 심리 지수는 이미 받는 시세 경로와 저장된 지수 일봉으로 만든다 | A-111·A-130·A-135·A-136, `개발산출물/09` |
-| 인증 | 1차는 단일 사용자(데모) 모드, 로컬·시연 전용. 2차에서 `get_current_user_id()`만 JWT 검증으로 교체 | A-57·A-82 |
+| 인증 | 로그인 없음. 로컬은 단일 사용자(demo), 배포는 서명된 쿠키로 브라우저별 게스트(첫 쓰기 때 demo 데이터 복사). 2차에서 `get_current_user_id()`만 JWT 검증으로 교체 | A-57·A-82, `02` USR-04 |
 
-- **LLM 연동**: 1차 범위 제외(세미프로젝트 규격). 3차 예정 — `GET /api/v1/statistics/data-quality`와 `stock_scores.data_quality`의 JSON 구조가 입력으로 쓰일 예정이다.
+- **LLM 연동**: 사용하지 않는다. 1차 세미프로젝트 규격에서 LLM은 범위 밖이다. 3차 예정 — `GET /api/v1/statistics/data-quality`와 `stock_scores.data_quality`의 JSON 구조가 입력으로 쓰일 예정이다.
