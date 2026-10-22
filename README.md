@@ -1,5 +1,9 @@
 # StockMind
 
+**🔗 서비스 바로가기: https://stockmind-538269380647.asia-northeast3.run.app**
+
+<img src="개발산출물/assets/service_qr.jpg" alt="StockMind 서비스 QR 코드" width="160">
+
 국내(KOSPI·KOSDAQ)·미국(NASDAQ·NYSE) 주식의 시세·지수·환율·밸류에이션·재무·공시를 한 DB에 모아, 한 화면에서 같은 기준(원화 환산·일봉)으로 비교해 보는 **주식 분석 대시보드**입니다.
 
 - 흩어진 원천 데이터(pykrx·yfinance·OpenDART·SEC EDGAR)를 수집·전처리해 PostgreSQL 정규화 스키마에 적재하고, 서버가 떠 있는 동안 주가·지수·환율은 1시간, 그 밖은 4시간 주기로 갱신합니다.
