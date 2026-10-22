@@ -38,20 +38,39 @@ async function loadPortfolios() {
     return;
   }
   if (!portfolios.some((p) => p.portfolio_id === currentId)) currentId = portfolios[0].portfolio_id;
-  $("#picker").replaceChildren(segmented(portfolios.map((p) => ({ value: p.portfolio_id, label: p.name })), currentId,
-    (v) => { currentId = v; loadPortfolio(); }, { label: "포트폴리오 선택" }));
+  renderPicker();
   loadPortfolio();
 }
 
+function renderPicker() {
+  $("#picker").replaceChildren(segmented(portfolios.map((p) => ({ value: p.portfolio_id, label: p.name })), currentId,
+    (v) => { currentId = v; loadPortfolio(); }, { label: "포트폴리오 선택" }));
+}
+
 // 쿠키 없이 연 화면은 데모 사용자의 id를 들고 있다가, 첫 쓰기에서 게스트(복사본, 새 id)로 바뀐다.
-// 그때 옛 id가 404 PORTFOLIO_NOT_FOUND가 되므로, 목록을 다시 받아 같은 이름의 포트폴리오로 갈아탄다.
-async function recoverStaleId(e) {
-  if (e?.code !== "PORTFOLIO_NOT_FOUND") return false;
-  const name = portfolios.find((p) => p.portfolio_id === currentId)?.name;
-  try { portfolios = await getPortfolios(); } catch { return false; }
-  currentId = (portfolios.find((p) => p.name === name) ?? portfolios[0])?.portfolio_id ?? null;
-  loadPortfolios();
-  return true;
+// 그때 옛 id가 404 PORTFOLIO_NOT_FOUND가 되므로, 목록을 다시 받아 같은 이름의 포트폴리오로 갈아타고 같은 요청을 한 번 다시 보낸다.
+async function withFreshId(run) {
+  try {
+    return await run(currentId);
+  } catch (e) {
+    if (e?.code !== "PORTFOLIO_NOT_FOUND") throw e;
+    const name = portfolios.find((p) => p.portfolio_id === currentId)?.name;
+    let fresh;
+    try { fresh = await getPortfolios(); } catch { throw e; }
+    const match = fresh.find((p) => p.name === name);
+    if (!match || match.portfolio_id === currentId) throw e;   // 정말 지워진 포트폴리오면 원래 오류를 보여 준다
+    portfolios = fresh;
+    currentId = match.portfolio_id;
+    renderPicker();
+    return run(currentId);
+  }
+}
+
+// 게스트 복사본은 항목 id도 새로 받는다 → 다른 포트폴리오로 갈아탔으면 같은 종목의 항목 id를 찾는다
+async function itemIdIn(pid, from, it) {
+  if (pid === from) return it.item_id;
+  const s = await getPortfolioSummary(pid);
+  return s.items.find((x) => x.market === it.market && x.ticker === it.ticker)?.item_id ?? it.item_id;
 }
 
 function editPortfolio(pf) {
@@ -75,14 +94,13 @@ function editPortfolio(pf) {
     const seed = Number(seedInput.value.replace(/[,\s]/g, ""));
     if (!name || !(seed > 0) || !Number.isInteger(seed)) { err.hidden = false; err.textContent = "이름과 0보다 큰 정수 시드(원)를 입력해 주세요."; return; }
     try {
-      const saved = pf ? await updatePortfolio(pf.portfolio_id, name, seed) : await createPortfolio(name, seed);
+      const saved = pf ? await withFreshId((pid) => updatePortfolio(pid, name, seed)) : await createPortfolio(name, seed);
       currentId = saved.portfolio_id;
       history.replaceState(null, "", `/portfolio?id=${currentId}`);
       modal.close();
       toast(pf ? "포트폴리오를 수정했습니다" : "포트폴리오를 만들었습니다");
       loadPortfolios();
     } catch (ex) {
-      if (await recoverStaleId(ex)) { modal.close(); toast("내 포트폴리오로 연결했습니다. 다시 한 번 저장해 주세요"); return; }
       err.hidden = false;
       err.textContent = ex.code === "SEED_BELOW_USED"
         ? `시드를 담은 원가 합계(${krw(ex.detail.used_krw)})보다 작게 줄일 수 없습니다.`
@@ -96,10 +114,7 @@ function confirmDelete(title, message, onConfirm) {
       <div class="modal__foot"><button class="btn" type="button" data-close>취소</button><button class="btn btn--danger" type="button" data-ok>삭제</button></div></div>`);
   const modal = openModal({ title, body });
   body.querySelector("[data-ok]").addEventListener("click", async () => {
-    try { await onConfirm(); modal.close(); } catch (e) {
-      if (await recoverStaleId(e)) { modal.close(); toast("내 포트폴리오로 연결했습니다. 다시 한 번 눌러 주세요"); return; }
-      toast(e.message, "error");
-    }
+    try { await onConfirm(); modal.close(); } catch (e) { toast(e.message, "error"); }
   });
 }
 
@@ -132,7 +147,7 @@ function renderToolbar(pf, s) {
   el.querySelector("[data-edit]").addEventListener("click", () => editPortfolio({ ...pf, used_krw: s.used_krw }));
   el.querySelector("[data-del]").addEventListener("click", () => confirmDelete("포트폴리오 삭제",
     `<strong>${esc(s.name)}</strong>과(와) 담은 종목 ${s.items.length}개를 모두 삭제합니다.`, async () => {
-      await deletePortfolio(currentId);
+      await withFreshId(deletePortfolio);
       toast("포트폴리오를 삭제했습니다");
       currentId = null;
       loadPortfolios();
@@ -168,6 +183,7 @@ function renderItems(s) {
     return sec;
   }
   const ul = h('<ul class="list card card--flush" aria-label="담은 종목"></ul>');
+  const from = s.portfolio_id;
   for (const it of s.items) {
     const li = h(`<li class="pf-item">
         <a class="pf-item__name" href="${stockUrl(it.market, it.ticker)}"><span class="avatar" aria-hidden="true">${esc(initials(it.name))}</span>
@@ -180,9 +196,9 @@ function renderItems(s) {
         <span class="pf-item__actions"></span></li>`);
     const edit = h(`<button class="btn btn--sm" type="button" aria-label="${esc(it.name)} 수정">수정</button>`);
     const del = h(`<button class="btn btn--sm btn--danger" type="button" aria-label="${esc(it.name)} 삭제">삭제</button>`);
-    edit.addEventListener("click", () => editItem(it));
+    edit.addEventListener("click", () => editItem(it, from));
     del.addEventListener("click", () => confirmDelete("담은 종목 삭제", `<strong>${esc(it.name)}</strong> ${num(it.quantity)}주를 포트폴리오에서 뺍니다.`, async () => {
-      await deletePortfolioItem(currentId, it.item_id);
+      await withFreshId(async (pid) => deletePortfolioItem(pid, await itemIdIn(pid, from, it)));
       toast(`${it.name}을(를) 뺐습니다`);
       refreshCurrent();
     }));
@@ -193,7 +209,7 @@ function renderItems(s) {
   return sec;
 }
 
-function editItem(it) {
+function editItem(it, from) {
   let mode = "quantity";
   const body = h(`<form class="add-form" novalidate>
       <p class="subtle">수정하면 기준가·환율이 현재값으로 다시 저장됩니다. 현재 ${num(it.quantity)}주 · 원가 ${krw(it.cost_krw)}</p>
@@ -215,12 +231,12 @@ function editItem(it) {
     const value = Number(body.querySelector("#it-value").value.replace(/[,\s]/g, ""));
     if (!(value > 0)) { err.hidden = false; err.textContent = "0보다 큰 값을 입력해 주세요."; return; }
     try {
-      const r = await updatePortfolioItem(currentId, it.item_id, { mode, value, memo: body.querySelector("#it-memo").value });
+      const memo = body.querySelector("#it-memo").value;
+      const r = await withFreshId(async (pid) => updatePortfolioItem(pid, await itemIdIn(pid, from, it), { mode, value, memo }));
       toast(`${it.name} ${num(r.quantity)}주로 수정했습니다`);
       modal.close();
       refreshCurrent();
     } catch (ex) {
-      if (await recoverStaleId(ex)) { modal.close(); toast("내 포트폴리오로 연결했습니다. 다시 한 번 저장해 주세요"); return; }
       err.hidden = false;
       const d = ex.detail || {};
       err.textContent = ex.code === "SEED_EXCEEDED" ? `시드를 넘습니다. 이 종목은 최대 ${num(d.max_quantity)}주까지 담을 수 있습니다.`
@@ -263,9 +279,8 @@ function renderWeights(s) {
 async function openEqualWeight() {
   let d;
   try {
-    d = await previewEqualWeight(currentId);
+    d = await withFreshId(previewEqualWeight);
   } catch (e) {
-    if (await recoverStaleId(e)) { openEqualWeight(); return; }   // 새 id로 한 번 더
     toast(e.code === "EMPTY_WATCHLIST" ? "관심종목이 없습니다. 주식 리스트에서 ★로 추가하세요." : e.message, "error");
     return;
   }
@@ -290,10 +305,9 @@ async function openEqualWeight() {
     let done = 0;
     for (const i of d.items) {
       try {
-        await addPortfolioItem(currentId, { market: i.market, ticker: i.ticker, mode: "quantity", value: i.quantity });
+        await withFreshId((pid) => addPortfolioItem(pid, { market: i.market, ticker: i.ticker, mode: "quantity", value: i.quantity }));
         done += 1;
       } catch (err) {
-        if (await recoverStaleId(err)) { modal.close(); toast("내 포트폴리오로 연결했습니다. 다시 한 번 눌러 주세요"); return; }
         toast(`${i.name} 담기 실패: ${err.message} (${done}종목 담음)`, "error");
         break;
       }

@@ -130,8 +130,8 @@ textarea.input { font: inherit; resize: vertical; }
 
 /* ---------------------------------------------------------------- 토스트 */
 .toast-wrap { position: fixed; right: var(--sp-6); bottom: var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-2); z-index: 60; }
-.toast { background: var(--text); color: var(--text-on-pastel); padding: var(--sp-3) var(--sp-5); border-radius: var(--r-row); font-weight: var(--fw-semibold); font-size: var(--fs-sm); max-width: 360px; animation: pop .2s var(--ease); }
-.toast--error { background: #ffd6d6; }
+.toast { background: var(--text); color: var(--bg); padding: var(--sp-3) var(--sp-5); border-radius: var(--r-row); font-weight: var(--fw-semibold); font-size: var(--fs-sm); max-width: 360px; animation: pop .2s var(--ease); }   /* 글자는 페이지 바탕색 — 라이트에서 --text-on-pastel이 --text와 같은 남색이라 글자가 묻혔다 */
+.toast--error { background: #ffd6d6; color: var(--text-on-pastel); }
 @keyframes pop { from { transform: translateY(8px); opacity: 0; } }
 @media (max-width: 767px) { .toast-wrap { left: var(--sp-4); right: var(--sp-4); bottom: calc(var(--tabbar-h) + var(--sp-3)); } }
 

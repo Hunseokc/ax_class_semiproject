@@ -26,7 +26,7 @@ export function renderAddForm(container, stock, { portfolios, fx, portfolioId, o
       <p class="subtle">기준가 ${price(stock.close, stock.currency)}${stock.currency === "USD" ? ` × 환율 ${num(rate, 2)}${fx.fx_stale ? " (지연된 환율)" : ""}` : ""}
         = 1주 ${krw(unit)}</p>
       <div class="field" ${fixed ? "hidden" : ""}><label for="pf-select">포트폴리오</label>
-        <select id="pf-select" class="select">${portfolios.map((p) => `<option value="${p.portfolio_id}">${esc(p.name)} · 잔여 ${krw(p.remaining_krw, { compact: true })}</option>`).join("")}</select></div>
+        <select id="pf-select" class="select"></select></div>
       <div class="field"><span class="field__label" id="mode-label">입력 방식</span><div data-mode></div></div>
       <div class="field"><label for="pf-value" data-value-label>금액 (원)</label>
         <input id="pf-value" class="input num" inputmode="decimal" autocomplete="off" required></div>
@@ -37,13 +37,32 @@ export function renderAddForm(container, stock, { portfolios, fx, portfolioId, o
     </form>`);
   container.replaceChildren(form);
   const select = form.querySelector("#pf-select");
-  if (fixed) select.value = String(portfolioId);
   const input = form.querySelector("#pf-value");
   const preview = form.querySelector("[data-preview]");
   const errorBox = form.querySelector("[data-error]");
   const current = () => portfolios.find((p) => p.portfolio_id === Number(select.value));
   const value = () => Number(input.value.replace(/[,\s]/g, ""));
   const showError = (msg, html = false) => { errorBox.hidden = false; errorBox[html ? "innerHTML" : "textContent"] = msg; };
+  const renderOptions = () => {
+    select.innerHTML = portfolios.map((p) => `<option value="${p.portfolio_id}">${esc(p.name)} · 잔여 ${krw(p.remaining_krw, { compact: true })}</option>`).join("");
+  };
+  renderOptions();
+  if (fixed) select.value = String(portfolioId);
+
+  // 쿠키 없이 연 화면은 데모 사용자의 id를 들고 있다가, 첫 쓰기에서 게스트(복사본, 새 id)로 바뀐다.
+  // 그때 옛 id가 404 PORTFOLIO_NOT_FOUND가 되므로, 목록을 다시 받아 같은 이름의 포트폴리오를 고른다(다시 담기는 호출한 쪽).
+  const refreshStaleIds = async (err) => {
+    if (err?.code !== "PORTFOLIO_NOT_FOUND") return false;
+    const name = current()?.name;
+    let fresh;
+    try { fresh = await getPortfolios(); } catch { return false; }
+    const match = fresh.find((p) => p.name === name);
+    if (!match || match.portfolio_id === Number(select.value)) return false;   // 정말 지워진 포트폴리오면 원래 오류를 보여 준다
+    portfolios.splice(0, portfolios.length, ...fresh);
+    renderOptions();
+    select.value = String(match.portfolio_id);
+    return true;
+  };
 
   const update = () => {
     const m = MODES.find((x) => x.value === mode);
@@ -80,8 +99,15 @@ export function renderAddForm(container, stock, { portfolios, fx, portfolioId, o
     if (!(value() > 0)) { showError("0보다 큰 값을 입력해 주세요."); input.focus(); return; }
     const submit = form.querySelector('[type="submit"]');
     submit.disabled = true;
+    const add = () => addPortfolioItem(Number(select.value), { market: stock.market, ticker: stock.ticker, mode, value: value() });
     try {
-      const item = await addPortfolioItem(Number(select.value), { market: stock.market, ticker: stock.ticker, mode, value: value() });
+      let item;
+      try {
+        item = await add();
+      } catch (err) {
+        if (!(await refreshStaleIds(err))) throw err;
+        item = await add();
+      }
       toast(`${current().name}에 ${stock.name} ${num(item.quantity)}주를 담았습니다 (${krw(item.cost_krw)})`);
       onDone?.(item);
     } catch (err) {
