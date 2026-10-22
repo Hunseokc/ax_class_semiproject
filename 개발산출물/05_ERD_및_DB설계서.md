@@ -1,13 +1,11 @@
-# 05. ERD 및 DB 설계서 (Stage 3 범위)
+# 05. ERD 및 DB 설계서
 
-> **상태: Stage 3 확정 (v3.0).** Stage 1 테이블 10개 + Stage 2 사용자 테이블 4개 + Stage 3 재무·공시 테이블 2개, VIEW 2개, 보조 인덱스 10개, 트리거 2개를 실제 DDL 기준으로 담았다. 이후 단계에서 D가 테이블을 추가할 때 이 문서의 해당 절을 함께 확장한다.
-> (Stage 4+: 매력도·비교군·섹터 — 의도적 비정규화 5-2, `v_stock_metrics`, EXPLAIN 비교도 그때 채운다. `watchlist_items`의 메모·목표가·`updated_at`은 Stage 5 — 기존 DB는 migration 004.)
-> **Stage 4 계약**(매력도 테이블 4개, `peer_group_members.is_primary`, `v_stock_metrics` 컬럼, 마이그레이션 001·002)은 9절, Stage 5-D(006)는 10절, Stage 6(005·007)은 11절에 모았다. 1~8절의 Stage 4·5 반영은 Stage 6 최종 문서에서 한다.
-
-- DDL 원문: `backend/db/schema.sql` → `backend/db/indexes.sql` → `backend/db/views.sql` 순서로 실행 (`python -m app.ingest init-db`가 같은 순서로 적용)
-- DBMS: PostgreSQL 16 / 테이블 16개, VIEW 2개, 보조 인덱스 10개, 트리거 2개(updated_at 자동 갱신 — portfolios·portfolio_items)
-- 금액·가격은 모두 `NUMERIC` (float 사용 안 함), 시각은 모두 `TIMESTAMPTZ`
-- ORM(`backend/app/models/__init__.py`)은 `schema.sql`과 1:1이며 `tests/test_schema.py`가 일치를 검증한다.
+- DDL 원문: `backend/db/schema.sql` → `backend/db/indexes.sql` → `backend/db/views.sql` 순서로 실행 (`python -m app.ingest init-db`가 같은 순서로 적용). 이미 적재된 DB는 `backend/db/migrations/001~010`으로 바꾼다(8절).
+- DBMS: PostgreSQL 16 / **테이블 25개, VIEW 3개, 보조 인덱스 10개, 부분 UNIQUE 인덱스 1개(주 그룹 제약), 트리거 3개**(updated_at 자동 갱신 — portfolios·portfolio_items·watchlist_items), 생성 컬럼 1개(`portfolio_items.cost_krw`)
+- 금액·가격은 모두 `NUMERIC`(float 사용 안 함), 시각은 모두 `TIMESTAMPTZ`
+- ORM(`backend/app/models/__init__.py`)은 `schema.sql`과 1:1이며 `tests/test_schema.py::test_orm_matches_schema`가 일치를 검증한다.
+- 3절 테이블 정의와 2절 행 수는 2026-10-22 개발 DB에 DDL을 적용한 상태에서 시스템 카탈로그(`pg_attribute`, `pg_constraint`)와 `count(*)`로 뽑았다.
+- 매력도 계산 정의는 `09_매력도_점수_정의서.md`, 데이터 출처는 `03_데이터_조사_정의서.md`를 따른다.
 
 ## 1. ERD
 
@@ -21,13 +19,19 @@ erDiagram
     stocks ||--o{ valuation_snapshots : "밸류에이션"
     stocks ||--o{ financial_statements : "재무"
     stocks ||--o{ disclosures : "공시"
+    stocks ||--o{ stock_metric_values : "지표 원값·Z"
+    stocks ||--o{ stock_scores : "매력도"
+    stocks ||--o{ data_freshness : "유효기간"
+    stocks ||--o| fundamental_bases : "미국 기초값"
+    scoring_presets ||--o{ scoring_weights : "가중치"
+    scoring_presets ||--o{ stock_scores : "프리셋"
     indices ||--o{ index_daily_prices : "지수 일봉"
-    stocks |o--o{ ingestion_logs : "SET NULL"
     users ||--o{ watchlist_items : ""
     stocks ||--o{ watchlist_items : ""
     users ||--o{ portfolios : "소유"
     portfolios ||--o{ portfolio_items : "담기"
     stocks ||--o{ portfolio_items : "RESTRICT"
+    stocks |o--o{ ingestion_logs : "SET NULL"
 
     markets {
         smallint market_id PK
@@ -45,15 +49,25 @@ erDiagram
         varchar corp_code
         varchar cik
         boolean is_active
+        varchar coverage
+        timestamptz detail_synced_at
+        varchar industry
+        smallint sic
+        varchar sector
+        timestamptz industry_checked_at
+        int cap_rank
+        timestamptz cap_ranked_at
     }
     peer_groups {
         int group_id PK
         varchar name UK
         text description
+        varchar kind
     }
     peer_group_members {
         int group_id PK,FK
         int stock_id PK,FK
+        boolean is_primary
     }
     daily_prices {
         int stock_id PK,FK
@@ -74,6 +88,7 @@ erDiagram
         numeric market_cap
         bigint shares_outstanding
         varchar source
+        numeric dps
     }
     financial_statements {
         int fin_id PK
@@ -122,16 +137,27 @@ erDiagram
         varchar granularity
         varchar source
     }
-    ingestion_logs {
-        int log_id PK
-        varchar source
-        varchar job_type
-        int stock_id FK
-        varchar status
-        int rows_loaded
-        text error
-        timestamptz started_at
-        timestamptz finished_at
+    sector_performance_daily {
+        bigint id PK
+        char market UK
+        varchar sector_code UK
+        varchar sector_name
+        date trade_date UK
+        numeric change_pct
+        timestamptz fetched_at
+    }
+    market_sentiment_daily {
+        bigint id PK
+        char market UK
+        date trade_date UK
+        numeric score
+        varchar label
+        numeric price_position
+        numeric ma_gap_score
+        numeric rsi_score
+        numeric vix_score
+        smallint formula_version
+        timestamptz computed_at
     }
     users {
         int user_id PK
@@ -143,6 +169,9 @@ erDiagram
         int stock_id PK,FK
         int sort_order
         timestamptz added_at
+        varchar memo
+        numeric target_price
+        timestamptz updated_at
     }
     portfolios {
         int portfolio_id PK
@@ -165,192 +194,313 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at
     }
+    scoring_presets {
+        smallint preset_id PK
+        varchar code UK
+        varchar name
+        text description
+        smallint sort_order
+    }
+    scoring_weights {
+        smallint preset_id PK,FK
+        varchar factor PK
+        numeric weight
+    }
+    stock_metric_values {
+        int stock_id PK,FK
+        date as_of PK
+        varchar metric PK
+        varchar factor
+        numeric raw_value
+        numeric z_raw
+        numeric z_adj
+    }
+    stock_scores {
+        int stock_id PK,FK
+        date as_of PK
+        smallint preset_id PK,FK
+        numeric value_score
+        numeric quality_score
+        numeric growth_score
+        numeric safety_score
+        numeric momentum_score
+        numeric composite
+        numeric score
+        smallint factor_coverage
+        jsonb data_quality
+    }
+    data_freshness {
+        int stock_id PK,FK
+        varchar kind PK
+        timestamptz fetched_at
+        timestamptz valid_until
+        varchar status
+        text error
+    }
+    fundamental_bases {
+        int stock_id PK,FK
+        bigint shares_outstanding
+        date shares_as_of
+        numeric dps
+        date dps_period_end
+        varchar source
+        timestamptz updated_at
+    }
+    ingest_cursor {
+        varchar source PK
+        char last_rcept_no
+        date last_rcept_dt
+        timestamptz updated_at
+    }
+    ingestion_logs {
+        int log_id PK
+        varchar source
+        varchar job_type
+        int stock_id FK
+        varchar status
+        int rows_loaded
+        text error
+        timestamptz started_at
+        timestamptz finished_at
+    }
 ```
 
-`fx_rates`는 FK 관계가 없는 독립 테이블이다(조회 시점에 참조하며, 담은 시점 환율은 `portfolio_items`에 복사 — 5절).
+FK가 없는 독립 테이블은 4개다.
+- `fx_rates`: 조회 시점에 참조한다. 담은 시점 환율은 `portfolio_items`에 복사한다(5-1).
+- `sector_performance_daily`(섹터 히트맵)·`market_sentiment_daily`(시장 심리 지수): 대시보드 홈 위젯용이다(migration 007).
+- `ingest_cursor`: 소스 단위 수집 기준점이다(migration 008).
 
 ## 2. 테이블 목록
+행 수는 2026-10-22 개발 DB에서 `count(*)`로 셌다. 운영(Cloud Run) DB는 `python -m app.ingest status`로 확인한다.
 
-| 영역 | 테이블 | 설명 | PK |
-|---|---|---|---|
-| 마스터 | markets | 시장(통화·국가·시간대) | market_id |
-| 마스터 | stocks | 종목 | stock_id, UQ (market_id, ticker) |
-| 마스터 | peer_groups | 경쟁 그룹 | group_id |
-| 마스터 | peer_group_members | 종목↔그룹 N:M | (group_id, stock_id) |
-| 시계열 | daily_prices | 종목 일봉(수정주가) | (stock_id, trade_date) |
-| 시계열 | valuation_snapshots | PER·PBR·시총 스냅샷 | (stock_id, as_of) |
-| 재무 | financial_statements | 재무제표(FY 5개년) | fin_id, UQ (stock_id, period_end, period_type) |
-| 공시 | disclosures | 공시 목록(최근 1년) | disclosure_id, UQ (rcept_no) |
-| 배경 | indices | 지수 정의 | index_id |
-| 배경 | index_daily_prices | 지수 일봉 | (index_id, trade_date) |
-| 배경 | fx_rates | USD/KRW | fx_id, UQ (granularity, rate_at) |
-| 사용자 | users | 사용자(인증 없음, 기본 사용자 demo는 `master`가 시드, 배포의 게스트는 `guest-…`) | user_id |
-| 사용자 | watchlist_items | 관심종목 N:M + 정렬 순서 | (user_id, stock_id) |
-| 사용자 | portfolios | 모의 포트폴리오 | portfolio_id, UQ (user_id, name) |
-| 사용자 | portfolio_items | 담은 종목 (담은 시점 가격·환율 복사) | item_id, UQ (portfolio_id, stock_id) |
-| 운영 | ingestion_logs | 적재·갱신 로그 | log_id |
+| 영역 | 테이블 | 설명 | PK | 행 수 |
+|---|---|---|---|---|
+| 마스터 | markets | 시장(통화·국가·시간대) | market_id | 4 |
+| 마스터 | stocks | 종목 — 노출(featured)·매력도 비교군(benchmark)·상장 목록(listed) | stock_id, UQ (market_id, ticker) | 8,301 (노출 25 · 비교군 121 · 상장 목록 8,155) |
+| 마스터 | peer_groups | 경쟁 그룹(theme) / 업종 섹터 그룹(sector) | group_id | 8 |
+| 마스터 | peer_group_members | 종목↔그룹 N:M, 주 그룹 표시 | (group_id, stock_id) | 146 |
+| 시계열 | daily_prices | 종목 일봉(수정주가) | (stock_id, trade_date) | 45,126 (노출 25종목 2년 12,432 · 비교군 121종목 32,694) |
+| 시계열 | valuation_snapshots | PER·PBR·시총·주당배당 | (stock_id, as_of) | 4,580 (PYKRX 4,200 · DERIVED 292 · YFINANCE 88) |
+| 재무 | financial_statements | 재무제표(FY) | fin_id, UQ (stock_id, period_end, period_type) | 20,896 (DART 7,396 · SEC 13,500) |
+| 공시 | disclosures | 공시 목록(최근 1년) | disclosure_id, UQ (rcept_no) | 1,361 (DART 1,183 · SEC 178) |
+| 배경 | indices | 지수 정의 | index_id | 10 |
+| 배경 | index_daily_prices | 지수 일봉 | (index_id, trade_date) | 4,538 (2024-10-14 ~ 2026-10-22) |
+| 배경 | fx_rates | USD/KRW | fx_id, UQ (granularity, rate_at) | 533 (DAILY 523 · SNAPSHOT 10) |
+| 홈 위젯 | sector_performance_daily | 섹터 전일 대비 등락률(캐시, 30일 보관) | id, UQ (market, sector_code, trade_date) | 176 |
+| 홈 위젯 | market_sentiment_daily | 시장 심리 지수(StockMind 간이 계산) | id, UQ (market, trade_date) | 14 |
+| 사용자 | users | 사용자(인증 없음 — demo, 배포의 게스트 `guest-…`) | user_id, UQ (nickname) | demo 1 (+ 게스트는 방문 브라우저마다 생김) |
+| 사용자 | watchlist_items | 관심종목 N:M + 정렬·메모·목표가 | (user_id, stock_id) | demo 8 (`seed-demo`) |
+| 사용자 | portfolios | 모의 포트폴리오 | portfolio_id, UQ (user_id, name) | demo 2 |
+| 사용자 | portfolio_items | 담은 종목(담은 시점 가격·환율 복사) | item_id, UQ (portfolio_id, stock_id) | demo 10 (KRW·USD 혼합) |
+| 설정 | scoring_presets | 투자 성향 프리셋 | preset_id, UQ (code) | 4 |
+| 설정 | scoring_weights | 프리셋별 팩터 가중치 | (preset_id, factor) | 20 (4 × 5) |
+| 파생 | stock_metric_values | 매력도 지표 원값·Z | (stock_id, as_of, metric) | 5,256 |
+| 파생 | stock_scores | 프리셋별 매력도 점수 | (stock_id, as_of, preset_id) | 2,336 |
+| 운영 | data_freshness | 종목·데이터 종류별 유효기간 | (stock_id, kind) | 7,203 |
+| 운영 | fundamental_bases | 미국 PER·PBR 계산용 기초값(발행주식수·주당배당) | stock_id | 137 |
+| 운영 | ingest_cursor | 공시 목록 증분 수집 기준점 | source | 1 |
+| 운영 | ingestion_logs | 적재·갱신 로그 | log_id | 1,909 (적재·갱신마다 증가) |
 
 ## 3. 테이블 정의서
 
 #### `markets`
 
-| 컬럼 | 타입 | NULL | 기본값 | 키 | 설명 |
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | market_id | smallint | N | 자동 증가 | PK | 시장 ID |
-| code | varchar(10) | N |  | UQ | KOSPI / KOSDAQ / NASDAQ / NYSE |
-| country | char(2) | N |  |  | 국가 (KR/US) |
-| currency | char(3) | N |  |  | 통화 (KRW/USD) |
-| timezone | varchar(40) | N |  |  | Asia/Seoul / America/New_York |
+| code | character varying(10) | N |  | UQ | KOSPI / KOSDAQ / NASDAQ / NYSE |
+| country | character(2) | N |  |  | 국가 (KR/US) |
+| currency | character(3) | N |  |  | 통화 (KRW/USD) |
+| timezone | character varying(40) | N |  |  | Asia/Seoul / America/New_York |
 
-제약: `CHECK (country IN ('KR','US'))` / `CHECK (currency IN ('KRW','USD'))`
+제약: `CHECK ((country = ANY (ARRAY['KR'::bpchar, 'US'::bpchar])))` / `CHECK ((currency = ANY (ARRAY['KRW'::bpchar, 'USD'::bpchar])))`
 
 #### `stocks`
 
-| 컬럼 | 타입 | NULL | 기본값 | 키 | 설명 |
+`coverage`·`detail_synced_at`은 migration 003, 업종 4칸은 006, `listed` 허용은 005, `cap_rank`·`cap_ranked_at`은 009에서 추가했다.
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | stock_id | integer | N | 자동 증가 | PK | 종목 ID |
 | market_id | smallint | N |  | UQ(복합), FK→markets | 시장 ID |
-| ticker | varchar(16) | N |  | UQ(복합) | 거래소 종목 코드 |
-| name | varchar(128) | N |  |  | 이름 |
-| name_en | varchar(128) | Y |  |  | 영문 이름 |
-| corp_code | varchar(16) | Y |  |  | OpenDART 고유번호 (KR, `master`가 DART 매핑으로 채움 — `--offline`이면 NULL) |
-| cik | varchar(10) | Y |  |  | SEC CIK 10자리 (US, `master`가 SEC 매핑으로 채움 — `--offline`이면 NULL) |
+| ticker | character varying(16) | N |  | UQ(복합) | 거래소 종목 코드 |
+| name | character varying(128) | N |  |  | 이름 |
+| name_en | character varying(128) | Y |  |  | 영문 이름 |
+| corp_code | character varying(16) | Y |  |  | OpenDART 고유번호 (KR, `master`가 DART 매핑으로 채움 — `--offline`이면 NULL) |
+| cik | character varying(10) | Y |  |  | SEC CIK 10자리 (US, `master`가 SEC 매핑으로 채움 — `--offline`이면 NULL) |
 | is_active | boolean | N | true |  | 수집·점수 계산 대상 여부 (false면 데이터만 보존) |
+| coverage | character varying(10) | N | 'featured' |  | featured(화면 노출 — 주가 1시간·그 밖 4시간 갱신) / benchmark(매력도 비교군, 1일 갱신) / listed(상장 보통주 목록 — 이름·티커만, 상세를 열 때 수집, 점수 유니버스 제외) |
+| detail_synced_at | timestamp with time zone | Y |  |  | 비교군 종목 상세(공시·2년 일봉·5개년 재무)를 마지막으로 받은 시각 |
+| industry | character varying(64) | Y |  |  | 국내 KRX 업종명 / 미국 SEC SIC 설명 |
+| sic | smallint | Y |  |  | 미국 SEC SIC 코드 |
+| sector | character varying(32) | Y |  |  | `config/universe.yaml` sectors 매핑 결과. NULL = 매핑 없음·금융 등 제외 업종 |
+| industry_checked_at | timestamp with time zone | Y |  |  | 업종을 마지막으로 확인한 시각(미국 SIC는 1년마다 다시 확인) |
+| cap_rank | integer | Y |  |  | 국가 안 시가총액 순위(1 = 가장 큼). 미국 상위 1,500개만 값이 있다 — 백그라운드 재무 적재 우선순위용, 화면에는 쓰지 않음 (migration 009) |
+| cap_ranked_at | timestamp with time zone | Y |  |  | 순위를 매긴 시각(30일마다 다시 매김) |
 
-제약: `UNIQUE (market_id, ticker)` — 같은 티커라도 시장이 다르면 다른 종목
+제약: `CHECK ((cap_rank > 0))` / `CHECK (((coverage)::text = ANY ((ARRAY['featured'::character varying, 'benchmark'::character varying, 'listed'::character varying])::text[])))` / `UNIQUE (market_id, ticker)`
 
 #### `peer_groups`
 
-| 컬럼 | 타입 | NULL | 기본값 | 키 | 설명 |
+기존 경쟁 그룹은 `kind = 'theme'`(화면 경쟁 비교용)이다. 업종 섹터 그룹(`kind = 'sector'`)은 비교군 선정 때 만들어지고, 그 `is_primary` 구성원이 매력도 섹터 중립화 표본이다(09 9절). 화면 경쟁 비교·그룹 통계(`peers.sql`·`stock_groups.sql`·`stats_overview.sql`·`stats_peer_group_valuation.sql`)는 테마 그룹만 쓴다.
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | group_id | integer | N | 자동 증가 | PK | 경쟁 그룹 ID |
-| name | varchar(64) | N |  | UQ | 이름 |
+| name | character varying(64) | N |  | UQ | 이름 |
 | description | text | Y |  |  | 설명 |
+| kind | character varying(10) | N | 'theme' |  | theme = 화면 경쟁 비교 / sector = 매력도 섹터 중립화 |
+
+제약: `CHECK (((kind)::text = ANY ((ARRAY['theme'::character varying, 'sector'::character varying])::text[])))`
 
 #### `peer_group_members`
 
-| 컬럼 | 타입 | NULL | 기본값 | 키 | 설명 |
+부분 UNIQUE 인덱스 `CREATE UNIQUE INDEX ux_pgm_primary ON peer_group_members (stock_id) WHERE is_primary` — 종목당 주 그룹 최대 1개.
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | group_id | integer | N |  | PK, FK→peer_groups (CASCADE) | 경쟁 그룹 ID |
 | stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
-| is_primary | boolean | N | false |  | 매력도 섹터 중립화의 주 그룹 여부 (Stage 4) |
-
-제약(Stage 4): 부분 UNIQUE 인덱스 `CREATE UNIQUE INDEX ux_pgm_primary ON peer_group_members (stock_id) WHERE is_primary` — 종목당 주 그룹 최대 1개
+| is_primary | boolean | N | false |  | 매력도 섹터 중립화의 주 그룹 여부 |
 
 #### `daily_prices`
 
-| 컬럼 | 타입 | NULL | 기본값 | 키 | 설명 |
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
 | trade_date | date | N |  | PK | 시장 현지 날짜 |
-| open / high / low | numeric(18,4) | N |  |  | 시가 / 고가 / 저가 |
+| open | numeric(18,4) | N |  |  | 시가 |
+| high | numeric(18,4) | N |  |  | 고가 |
+| low | numeric(18,4) | N |  |  | 저가 |
 | close | numeric(18,4) | N |  |  | 수정주가 |
 | volume | bigint | N |  |  | 거래량(주) |
 
-제약: `CHECK (volume >= 0)` / `CHECK (high >= low)` / `CHECK (low > 0)` — 0·음수 가격은 이상 행으로 격리
+제약: `CHECK ((high >= low))` / `CHECK ((low > (0)::numeric))` / `CHECK ((volume >= 0))`
 
 #### `valuation_snapshots`
 
-| 컬럼 | 타입 | NULL | 기본값 | 키 | 설명 |
+`v_stock_metrics`는 `dps`와 `dividend_yield`(= dps ÷ 최신 종가)를 끝 열로 붙였다(`CREATE OR REPLACE VIEW`는 끝에 붙인 열만 허용). `KIS`는 migration 010에서 허용했다.
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
 | as_of | date | N |  | PK | 기준일 |
-| per / pbr | numeric(18,4) | Y |  |  | 적자·미제공은 NULL |
-| eps / bps | numeric(18,4) | Y |  |  | 주당순이익 / 주당순자산 |
+| per | numeric(18,4) | Y |  |  | 적자·미제공은 NULL |
+| pbr | numeric(18,4) | Y |  |  | 주가순자산비율 |
+| eps | numeric(18,4) | Y |  |  | 주당순이익 |
+| bps | numeric(18,4) | Y |  |  | 주당순자산 |
 | market_cap | numeric(26,0) | Y |  |  | 종목 통화 기준 |
 | shares_outstanding | bigint | Y |  |  | 발행(상장)주식수 |
-| source | varchar(20) | N |  |  | PYKRX / YFINANCE / DERIVED |
+| source | character varying(20) | N |  |  | 데이터 출처 — PYKRX / KIS / YFINANCE / DERIVED |
+| dps | numeric(18,4) | Y |  |  | 연간 주당배당금(종목 통화). 0 = 무배당, NULL = 미제공 (migration 005) |
 
-제약: `CHECK (market_cap >= 0)` / `CHECK (shares_outstanding >= 0)` / `CHECK (source IN ('PYKRX','YFINANCE','DERIVED'))`
+제약: `CHECK ((dps >= (0)::numeric))` / `CHECK ((market_cap >= (0)::numeric))` / `CHECK ((shares_outstanding >= 0))` / `CHECK (((source)::text = ANY ((ARRAY['PYKRX'::character varying, 'YFINANCE'::character varying, 'DERIVED'::character varying])::text[])))`
 
 #### `financial_statements`
 
-| 컬럼 | 타입 | NULL | 기본값 | 키 | 설명 |
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | fin_id | integer | N | 자동 증가 | PK | 재무 행 ID |
 | stock_id | integer | N |  | UQ(복합), FK→stocks (CASCADE) | 종목 ID |
 | period_end | date | N |  | UQ(복합) | 결산일 |
-| period_type | varchar(4) | N |  | UQ(복합) | FY / Q1~Q4 (현재 FY만 적재) |
+| period_type | character varying(4) | N |  | UQ(복합) | FY / Q1~Q4 |
 | revenue | numeric(24,2) | Y |  |  | 매출액 |
 | operating_income | numeric(24,2) | Y |  |  | 영업이익 |
-| net_income | numeric(24,2) | Y |  |  | 순이익 (지배기업 소유주 귀속 우선) |
+| net_income | numeric(24,2) | Y |  |  | 지배기업 소유주 귀속 우선 |
 | total_assets | numeric(24,2) | Y |  |  | 자산총계 |
-| total_equity | numeric(24,2) | Y |  |  | 자본총계 (지배기업 소유주 귀속 우선) |
+| total_equity | numeric(24,2) | Y |  |  | 지배기업 소유주 귀속 우선 |
 | total_debt | numeric(24,2) | Y |  |  | 부채총계 (KR Liabilities / US Liabilities) |
-| data_source | varchar(20) | N |  |  | DART / SEC / YFINANCE |
-| accounting_std | varchar(20) | Y |  |  | K-IFRS / US-GAAP |
+| data_source | character varying(20) | N |  |  | 데이터 출처 |
+| accounting_std | character varying(20) | Y |  |  | K-IFRS / US-GAAP |
 
-금액은 종목 통화 기준. 계정을 못 찾은 항목은 NULL로 두고, 대체 계정명을 쓴 경우 `ingestion_logs`에 남긴다.
-
-제약: `CHECK (period_type IN ('FY','Q1','Q2','Q3','Q4'))` / `CHECK (data_source IN ('DART','SEC','YFINANCE'))` / `UNIQUE (stock_id, period_end, period_type)`
+제약: `CHECK (((data_source)::text = ANY ((ARRAY['DART'::character varying, 'SEC'::character varying, 'YFINANCE'::character varying])::text[])))` / `CHECK (((period_type)::text = ANY ((ARRAY['FY'::character varying, 'Q1'::character varying, 'Q2'::character varying, 'Q3'::character varying, 'Q4'::character varying])::text[])))` / `UNIQUE (stock_id, period_end, period_type)`
 
 #### `disclosures`
 
-| 컬럼 | 타입 | NULL | 기본값 | 키 | 설명 |
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | disclosure_id | integer | N | 자동 증가 | PK | 공시 ID |
 | stock_id | integer | N |  | FK→stocks (CASCADE) | 종목 ID |
-| rcept_no | varchar(64) | N |  | UQ | DART 접수번호 / SEC accession number |
+| rcept_no | character varying(64) | N |  | UQ | DART 접수번호 / SEC accession number |
 | title | text | N |  |  | 공시 제목 |
-| report_type | varchar(100) | Y |  |  | 공시유형명(DART) / 서식(SEC: 10-K·10-Q·8-K …) |
-| filed_at | timestamptz | N |  |  | 접수(제출) 시각 |
+| report_type | character varying(100) | Y |  |  | 보고서 유형/서식 |
+| filed_at | timestamp with time zone | N |  |  | 접수(제출) 시각 |
 | url | text | Y |  |  | 원문 링크 |
-| data_source | varchar(20) | N |  |  | DART / SEC |
+| data_source | character varying(20) | N |  |  | 데이터 출처 |
 
-제약: `CHECK (data_source IN ('DART','SEC'))` / `UNIQUE (rcept_no)` — 재적재 시 접수번호로 upsert
+제약: `CHECK (((data_source)::text = ANY ((ARRAY['DART'::character varying, 'SEC'::character varying])::text[])))`
 
 #### `indices`
 
-| 컬럼 | 타입 | NULL | 기본값 | 키 | 설명 |
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | index_id | smallint | N | 자동 증가 | PK | 지수 ID |
-| code | varchar(16) | N |  | UQ | KOSPI / KOSDAQ / SPX / IXIC / DJI |
-| name | varchar(64) | N |  |  | 이름 |
+| code | character varying(16) | N |  | UQ | KOSPI / KOSDAQ / SPX / IXIC / DJI |
+| name | character varying(64) | N |  |  | 이름 |
 | market_id | smallint | Y |  | FK→markets | 시장 ID |
-| source_symbol | varchar(32) | N |  |  | 라이브러리 조회용 심볼 (1001, ^GSPC …) |
+| source_symbol | character varying(32) | N |  |  | 라이브러리 조회용 심볼 (1001, ^GSPC …) |
 | display_order | smallint | N | 0 |  | 화면 표시 순서 |
 
 #### `index_daily_prices`
 
-| 컬럼 | 타입 | NULL | 기본값 | 키 | 설명 |
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | index_id | smallint | N |  | PK, FK→indices (CASCADE) | 지수 ID |
 | trade_date | date | N |  | PK | 거래일(현지) |
-| open / high / low | numeric(18,4) | Y |  |  | 시가 / 고가 / 저가 |
+| open | numeric(18,4) | Y |  |  | 시가 |
+| high | numeric(18,4) | Y |  |  | 고가 |
+| low | numeric(18,4) | Y |  |  | 저가 |
 | close | numeric(18,4) | N |  |  | 종가 |
 
-제약: `CHECK (close > 0)`
+제약: `CHECK ((close > (0)::numeric))`
 
 #### `fx_rates`
 
-| 컬럼 | 타입 | NULL | 기본값 | 키 | 설명 |
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | fx_id | integer | N | 자동 증가 | PK | 환율 행 ID |
-| rate_at | timestamptz | N |  | UQ(복합) | 환율 기준 시각 |
+| rate_at | timestamp with time zone | N |  | UQ(복합) | 환율 기준 시각 |
 | usd_krw | numeric(12,4) | N |  |  | 1달러당 원 |
-| granularity | varchar(8) | N |  | UQ(복합) | SNAPSHOT(조회 시각) / DAILY(해당 일자 00:00 Asia/Seoul) |
-| source | varchar(20) | N | 'YFINANCE' |  | 데이터 출처 |
+| granularity | character varying(8) | N |  | UQ(복합) | SNAPSHOT / DAILY |
+| source | character varying(20) | N | 'YFINANCE' |  | 데이터 출처 |
 
-제약: `CHECK (usd_krw > 0)` / `CHECK (granularity IN ('SNAPSHOT','DAILY'))` / `UNIQUE (granularity, rate_at)`
+제약: `CHECK (((granularity)::text = ANY ((ARRAY['SNAPSHOT'::character varying, 'DAILY'::character varying])::text[])))` / `CHECK ((usd_krw > (0)::numeric))` / `UNIQUE (granularity, rate_at)`
 
-#### `ingestion_logs`
+#### `sector_performance_daily`
 
-| 컬럼 | 타입 | NULL | 기본값 | 키 | 설명 |
+대시보드 섹터 히트맵. 갱신 작업 `SECTORS_US`(섹터 ETF 11개 묶음 다운로드)·`SECTORS_KR`(KRX 코스피 200 섹터 지수)만 쓰고 홈 화면은 읽기만 한다. 섹터 가중치(타일 크기)는 저장하지 않고 `app/services/sectors.py` 상수로 둔다. 캐시 성격이라 30일 지난 행은 갱신 작업이 지운다.
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
-| log_id | integer | N | 자동 증가 | PK | 로그 ID |
-| source | varchar(20) | N |  |  | PYKRX / YFINANCE / DART / SEC / INTERNAL / REFRESH(갱신 서비스의 작업 단위 행) |
-| job_type | varchar(30) | N |  |  | PRICES / INDICES / FX / VALUATION / FINANCIALS / DISCLOSURES / MASTER (이후 단계에서 확장) |
-| stock_id | integer | Y |  | FK→stocks (SET NULL) | 종목 단위 작업일 때만 |
-| status | varchar(10) | N |  |  | SUCCESS / FAILED / SKIPPED |
-| rows_loaded | integer | N | 0 |  | 적재 행 수 |
-| error | text | Y |  |  | 실패 사유 / 격리 행 사유 |
-| started_at | timestamptz | N |  |  | 시작 시각 |
-| finished_at | timestamptz | Y |  |  | 종료 시각 (`>= started_at`) |
+| id | bigint | N | 자동 증가 | PK | 행 ID |
+| market | character(2) | N |  | UQ(복합) | KR / US |
+| sector_code | character varying(16) | N |  | UQ(복합) | 미국 섹터 ETF 티커(XLK…) / KRX 섹터 지수 코드 |
+| sector_name | character varying(40) | N |  |  | 화면 표시용 한글명 |
+| trade_date | date | N |  | UQ(복합) | 거래일(현지) |
+| change_pct | numeric(8,4) | Y |  |  | 전일 대비 %(1.23 = 1.23%) |
+| fetched_at | timestamp with time zone | N | now() |  | 받은 시각 |
 
-쓰는 값: `MASTER`(INTERNAL `universe` + DART `corp_code`·SEC `cik` 매핑), `PRICES`(PYKRX·YFINANCE, 종목 1건당 1행 또는 국내 대량·미국 묶음 1행), `INDICES`(지수 1건당 1행), `FX`(YFINANCE), `VALUATION`(종목 1건당 1행), `FINANCIALS`·`DISCLOSURES`(DART·SEC, 종목 1건당 1행).
-갱신 서비스(`services/refresh.py`)는 작업마다 `source='REFRESH'`·`stock_id` NULL인 작업 단위 행을 따로 남기고, **이 행의 마지막 성공 시각으로만 TTL을 판단**한다(CLI가 남긴 종목 단위 행으로 TTL을 채우지 않음). 일부 종목만 실패한 작업은 FAILED로 남겨 TTL을 시작하지 않는다.
+제약: `CHECK ((market = ANY (ARRAY['KR'::bpchar, 'US'::bpchar])))` / `UNIQUE (market, sector_code, trade_date)`
 
-제약: `CHECK (job_type IN ('PRICES','INDICES','FX','VALUATION','FINANCIALS','DISCLOSURES','MASTER'))` / `CHECK (status IN ('SUCCESS','FAILED','SKIPPED'))` / `CHECK (rows_loaded >= 0)` / `CHECK (finished_at IS NULL OR finished_at >= started_at)`
+#### `market_sentiment_daily`
+
+시장 심리 지수(0~100, 높을수록 탐욕). 기준 지수(국내 KOSPI, 미국 S&P 500)와 VIX 일봉(`index_daily_prices`)으로 계산해 저장한다 — 새 외부 호출 없음. CNN Fear & Greed 지수가 아니다. 계산식은 `app/services/sentiment.py`, 저장된 행의 `formula_version`이 현재 상수와 다르면 다시 계산해 덮어쓴다. 구성요소가 2개 미만('데이터 부족')인 날은 저장하지 않는다.
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| id | bigint | N | 자동 증가 | PK | 행 ID |
+| market | character(2) | N |  | UQ(복합) | KR / US |
+| trade_date | date | N |  | UQ(복합) | 기준 지수 거래일 |
+| score | numeric(5,2) | N |  |  | 구성요소 점수 단순 평균(0~100) |
+| label | character varying(10) | N |  |  | 극단적 공포·공포·중립·탐욕·극단적 탐욕 |
+| price_position | numeric(5,2) | Y |  |  | 52주(252거래일) 범위 안 위치 × 100 |
+| ma_gap_score | numeric(5,2) | Y |  |  | clamp(50 + 125일 이동평균 괴리율(%) × 5) |
+| rsi_score | numeric(5,2) | Y |  |  | RSI(14, Wilder) |
+| vix_score | numeric(5,2) | Y |  |  | clamp((35 − VIX) / 23 × 100), 미국만 |
+| formula_version | smallint | N |  |  | 계산식 버전 |
+| computed_at | timestamp with time zone | N | now() |  | 계산 시각 |
+
+제약: `CHECK (((ma_gap_score >= (0)::numeric) AND (ma_gap_score <= (100)::numeric)))` / `CHECK ((market = ANY (ARRAY['KR'::bpchar, 'US'::bpchar])))` / `CHECK (((price_position >= (0)::numeric) AND (price_position <= (100)::numeric)))` / `CHECK (((rsi_score >= (0)::numeric) AND (rsi_score <= (100)::numeric)))` / `CHECK (((score >= (0)::numeric) AND (score <= (100)::numeric)))` / `CHECK (((vix_score >= (0)::numeric) AND (vix_score <= (100)::numeric)))` / `UNIQUE (market, trade_date)`
 
 #### `users`
 
@@ -360,9 +510,9 @@ erDiagram
 | nickname | character varying(50) | N |  | UQ | 닉네임 |
 | created_at | timestamp with time zone | N | now() |  | 생성 시각 |
 
-요청 사용자는 `get_current_user_id`(설정 `DEFAULT_USER_ID`, 기본 1 = demo)가 정한다. 배포(`GUEST_SESSION_ENABLED=true`)에서는 첫 쓰기 요청 때 게스트 행(`nickname = 'guest-' + 16자리 16진수`)을 만들고 demo의 `watchlist_items`·`portfolios`·`portfolio_items`를 복사한다(`app/services/guest.py` — 포트폴리오는 사용자 안에서 이름이 유일하므로 이름으로 원본과 짝지어 항목을 옮긴다). 2차에서 로그인으로 대체한다.
-
 #### `watchlist_items`
+
+`memo`·`target_price`·`updated_at`은 migration 004(멱등, 컬럼 추가만 — 기존 행 값 유지).
 
 | 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
@@ -370,11 +520,11 @@ erDiagram
 | stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
 | sort_order | integer | N | 0 |  | 표시 순서 |
 | added_at | timestamp with time zone | N | now() |  | 추가 시각 |
-| memo | character varying(200) | Y |  |  | 사용자 메모 (Stage 5) |
-| target_price | numeric(20,4) | Y |  | CHECK > 0 | 목표가(종목 통화) (Stage 5) |
-| updated_at | timestamp with time zone | N | now() |  | 수정 시각 — 트리거 `trg_watchlist_items_updated_at`가 갱신 (Stage 5) |
+| memo | character varying(200) | Y |  |  | 사용자 메모 (migration 004) |
+| target_price | numeric(20,4) | Y |  |  | 목표가(종목 통화 — KRW 종목은 원, USD 종목은 달러) |
+| updated_at | timestamp with time zone | N | now() |  | 수정 시각(트리거 `trg_watchlist_items_updated_at` 갱신) |
 
-메모·목표가·`updated_at`은 Stage 5에서 추가했다. 기존 DB는 `python -m app.ingest migrate 004_watchlist_memo`(멱등, 기존 행 값은 그대로).
+제약: `CHECK ((target_price > (0)::numeric))`
 
 #### `portfolios`
 
@@ -391,6 +541,8 @@ erDiagram
 
 #### `portfolio_items`
 
+"원가 합계 ≤ 시드"는 행 간 제약이라 CHECK로 걸 수 없어 서비스가 트랜잭션 + 포트폴리오 행 잠금(`SELECT … FOR UPDATE`)으로 보장한다.
+
 | 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | item_id | integer | N | 자동 증가 | PK | 담은 항목 ID |
@@ -405,84 +557,11 @@ erDiagram
 | updated_at | timestamp with time zone | N | now() |  | 수정 시각(트리거 갱신) |
 | cost_krw | numeric(24,2) | Y | GENERATED: (((quantity)::numeric * ref_price) * ref_fx_rate) |  | 원가(원) |
 
-제약: `CHECK ((quantity > 0))` / `CHECK ((ref_price > (0)::numeric))` / `CHECK ((ref_fx_rate > (0)::numeric))` / `UNIQUE (portfolio_id, stock_id)`. "원가 합계 ≤ 시드"는 행 간 제약이라 CHECK로 걸 수 없어 서비스가 트랜잭션 + 포트폴리오 행 잠금(`SELECT … FOR UPDATE`)으로 보장한다.
-
-## 4. 정규화 (Stage 3 범위)
-
-- **1NF**: 모든 컬럼이 원자값. 배열·쉼표 구분 값 없음.
-- **2NF**: 복합 PK 테이블(`daily_prices`, `valuation_snapshots`, `index_daily_prices`, `peer_group_members`, `watchlist_items`)의 비키 컬럼은 PK 전체에 종속. `financial_statements`는 대리키 `fin_id`를 두되 자연키 `(stock_id, period_end, period_type)`를 UNIQUE로 걸어 재무 값이 결산기 전체에 종속되게 한다.
-- **3NF — `markets` 분리**: 통화·국가·시간대는 시장 단위 속성이므로 `stocks`에 반복하지 않는다(종목 → 시장 → 통화 이행적 종속 제거).
-- **N:M 교차 테이블**: `peer_group_members` (국내·해외 종목 혼합 가능), `watchlist_items` (사용자 ↔ 종목, 속성 `sort_order`·`added_at`).
-- **파생값은 저장하지 않음**: 같은 행 값만으로 계산되는 `portfolio_items.cost_krw`는 저장형 생성 컬럼(`GENERATED ALWAYS … STORED`)으로 두어 직접 쓰기를 막는다. 영업이익률·ROE도 저장하지 않고 `financials.sql`이 조회할 때 계산한다.
-
-## 4-1. 의도적 비정규화 — `portfolio_items.ref_price`·`ref_fx_rate`·`ref_date`
-- 형태: `daily_prices.close`와 `fx_rates.usd_krw`에서 가져올 수 있는 값을 항목 행에 복사해 둔다.
-- 사유: "담은 시점의 가격과 환율"은 **그 시점에 확정된 변하지 않는 사실**이다. 시세 테이블은 수정주가 재계산(배당·분할)으로 과거 종가가 바뀌고, 환율도 SNAPSHOT이 새로 쌓이며 재적재·보정될 수 있다. 참조로만 연결하면 이런 갱신이 일어날 때 이미 담은 원가와 평가손익이 소급해서 바뀐다.
-- 정합성: 항목 수정(PUT) 시 기준가·환율을 현재값으로 다시 저장하는 것만 허용한다(명세). `ref_date`로 어느 거래일 종가인지 추적할 수 있다.
-- (원본 5-2 매력도 파생 테이블은 Stage 4에서 추가)
-
-## 5. 인덱스 (Stage 3)
-
-| 인덱스 | 대상 | 받치는 조회 | 비고 |
-|---|---|---|---|
-| (PK) | daily_prices (stock_id, trade_date) | 종목별 기간 일봉, 최신 2행 | 자동 |
-| ix_stocks_name | stocks (name) | 이름 정렬·접두 검색 | 부분 일치는 순차 스캔 허용 |
-| ix_daily_prices_trade_date | daily_prices (trade_date) | 특정 날짜 전 종목 | PK 선두가 stock_id라 별도 필요 |
-| ix_index_prices_trade_date | index_daily_prices (trade_date) | 날짜 기준 전 지수 | |
-| ix_fx_granularity_rate_at | fx_rates (granularity, rate_at DESC) | 최신 SNAPSHOT(TTL 판단) | |
-| ix_ingestion_logs_job_finished | ingestion_logs (job_type, finished_at DESC) | 작업별 마지막 성공 시각 | |
-| ix_peer_members_stock | peer_group_members (stock_id) | 종목 → 소속 그룹 | PK가 group_id 선두라 필요 |
-| ix_watchlist_stock | watchlist_items (stock_id) | FK 역방향(CASCADE) | PK가 user_id 선두라 필요 |
-| ix_portfolio_items_stock | portfolio_items (stock_id) | FK 역방향(RESTRICT 검사) | UQ가 portfolio_id 선두라 필요 |
-| ix_fin_stock_type_end | financial_statements (stock_id, period_type, period_end DESC) | 종목별 최신 FY N건 (`financials.sql`) | UQ는 period_end가 period_type보다 앞이라 필터 후 정렬에 불리 |
-| ix_disclosures_stock_filed | disclosures (stock_id, filed_at DESC) | 종목별 최근 공시 N건 (`disclosures.sql`) | |
-
-(`valuation_snapshots (stock_id, as_of DESC)`는 PK 역방향 스캔과 중복이라 만들지 않는다.)
-
-FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으로 이미 인덱싱된다: `stocks.market_id`(UNIQUE 선두), `portfolios.user_id`(UNIQUE 선두), `portfolio_items.portfolio_id`(UNIQUE 선두), `financial_statements.stock_id`(UNIQUE 선두), `disclosures.stock_id`(`ix_disclosures_stock_filed` 선두), 복합 PK의 선두 컬럼들. `indices.market_id`(10행), `ingestion_logs.stock_id`는 행 수가 적어 생략했다.
-
-## 6. VIEW (Stage 1~3)
-| VIEW | 내용 | 주요 SQL 요소 | 사용처 |
-|---|---|---|---|
-| v_latest_price | 종목별 최신 종가·전일 종가·등락·등락률·거래량 | LATERAL, 서브쿼리 LIMIT 2, LAG, NULLIF | `stock_list.sql`, `stock_detail.sql` |
-| v_fx_latest | 최신 USD/KRW 1행 (최신 rate_at, 동시각이면 SNAPSHOT 우선) | ORDER BY, LIMIT | `/stocks`의 `fx_rate_at`, 상세의 USD 원화 환산 |
-
-환율 서비스(FxService)와 4시간 갱신이 넣은 SNAPSHOT이 있으면 그 행이, 없으면 `fx` 수집이 넣은 최신 DAILY 행이 나온다.
-
-## 7. 검증 결과 (Stage 1~3)
-| 검증 | 결과 |
-|---|---|
-| DDL 적용 (schema → indexes → views, 테스트 DB 카탈로그 조회) | 테이블 16, VIEW 2, 보조 인덱스 10, 트리거 2 |
-| ORM ↔ DDL 컬럼 일치, Stage 1~3 외 테이블 없음 | `test_orm_matches_schema`, `test_tables_are_stage1_to_3_only` 통과 |
-| 제약 위반 18건(고가<저가, 음수 거래량, 가격 0, PK·UNIQUE 중복, 없는 FK, 잘못된 국가·통화·granularity·job_type, 환율 0, 종료<시작 등) 거부, 종목 삭제 시 CASCADE | `test_constraints_reject_bad_rows`, `test_delete_cascades` 통과 |
-| Stage 2 제약 위반 8건(관심종목 중복, 없는 사용자 FK, 시드 0, 포트폴리오 이름 중복, 수량 0, 담은 가격 0, 항목 종목 중복, 담긴 종목 삭제 RESTRICT) 거부, 사용자 삭제 시 CASCADE·`updated_at` 트리거 | `test_constraints_reject_bad_rows`(26건), `test_user_delete_cascades_and_updated_at_trigger` 통과 |
-| Stage 3 제약 위반 5건(잘못된 결산 구분, 잘못된 재무 source, 재무 결산기 중복, 공시 접수번호 중복, 잘못된 공시 source) 거부 | `test_constraints_reject_bad_rows`(31건) 통과 |
-| 같은 데이터 재적재 시 행 수 불변(upsert) | `test_ingest.py`의 샘플·전체 재적재, `test_load_financials_and_disclosures_upsert_and_are_idempotent` 통과 |
-| 갱신 TTL·잠금·부분 실패 재시도 | `test_refresh.py` 9건 통과 (TTL 이내 외부 호출 0, 동시 요청 직렬화, 실패 종목만 30분 뒤 재시도) |
-| 전체 테스트 (2026-10-15, v3.0) | `pytest -q` 194 passed |
-| 실제 수집 적재 (2026-10-13, 개발 DB) | 25종목 `daily_prices` 12,276행, 지수 10개 4,960행, USD/KRW DAILY 516행, `ingestion_logs` 성공 41 / 실패 0 |
-| 실제 수집 적재 (2026-10-15, 개발 DB — 4시간 자동 갱신 운영 후) | `valuation_snapshots` 25종목 3,913행(2025-10-15~2026-10-14), `financial_statements` 125행(25종목 × FY 5개년, DART 80 · SEC 45), `disclosures` 1,361행(DART 1,183 · SEC 178), USD/KRW DAILY 518 · SNAPSHOT 2 |
-
-## 8. 이후 단계에서 채울 절
-
-- 매력도 테이블·`v_stock_metrics`·마이그레이션 001·002 — Stage 4 (계약은 9절) / 비교군(`stocks.coverage`·`detail_synced_at`, 003) — Stage 4-D / 업종 섹터·데이터 유효기간(006) — Stage 5-D (10절)
-- 인덱스 전후 `EXPLAIN (ANALYZE)` 비교, 분석 쿼리와 SQL 요소 정리 — Stage 5
-
-## 9. Stage 4 — 매력도 (D 계약)
-
-계산 정의는 `개발산출물/09_매력도_점수_정의서.md`(C). 새로 만드는 DB는 `schema.sql`에 반영되어 있고, 이미 적재된 DB는 마이그레이션으로 바꾼다.
-
-### 9-1. 마이그레이션
-| 파일 | 내용 | 실행 |
-|---|---|---|
-| `backend/db/migrations/001_scoring_v2.sql` | `peer_group_members.is_primary` + `ux_pgm_primary`, `scoring_presets`·`scoring_weights`·`stock_metric_values`·`stock_scores` 생성 | `python -m app.ingest migrate 001_scoring_v2` |
-| `backend/db/migrations/002_presets.sql` | 프리셋 4종(aggressive·growth·balanced·value)과 가중치 20행 — 멱등 | `python -m app.ingest migrate 002_presets` |
-
-둘 다 적용한 뒤 `python -m app.ingest scores`로 점수를 다시 만든다. `ingestion_logs.job_type` CHECK에는 `SCORES`가 추가된다(`schema.sql`). 마이그레이션 파일은 원본 그대로라 이 CHECK는 바꾸지 않으므로, 기존 DB는 `init-db --reset` → `master --offline` → `import-sample` → `seed-demo`로 다시 만든다(CLAUDE.md 10절).
-
-### 9-2. 테이블 정의서
+제약: `CHECK ((quantity > 0))` / `CHECK ((ref_fx_rate > (0)::numeric))` / `CHECK ((ref_price > (0)::numeric))` / `UNIQUE (portfolio_id, stock_id)`
 
 #### `scoring_presets`
+
+`backend/config/scoring.yaml`에서 적재(init-db·migrate·scores 실행 시). 프리셋별 가중치 합 = 1은 행 간 제약이라 적재 시 검증한다(`validate_presets`).
 
 | 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
@@ -491,8 +570,6 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | name | character varying(50) | N |  |  | 화면 이름 (위험·성장·균형·가치) |
 | description | text | Y |  |  | 설명 |
 | sort_order | smallint | N | 0 |  | 화면 표시 순서 (위험 1 → 가치 4) |
-
-`backend/config/scoring.yaml`에서 적재(init-db·migrate·scores 실행 시). 프리셋별 가중치 합 = 1은 행 간 제약이라 적재 시 검증한다.
 
 #### `scoring_weights`
 
@@ -510,7 +587,7 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 |---|---|---|---|---|---|
 | stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
 | as_of | date | N |  | PK | 기준일 |
-| metric | character varying(24) | N |  | PK | 지표 (earnings_yield, book_yield, roe … 9종, 개발산출물/09 2절) |
+| metric | character varying(24) | N |  | PK | 지표 (earnings_yield, book_yield, roe … 9종, 09 2절) |
 | factor | character varying(12) | N |  |  | 소속 팩터 |
 | raw_value | numeric | Y |  |  | 지표 원값, 계산 불가면 NULL |
 | z_raw | numeric(8,4) | Y |  |  | 국가 내 로버스트 Z(방향 반영, ±3 클리핑) |
@@ -537,47 +614,195 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 
 제약: `CHECK (((factor_coverage >= 0) AND (factor_coverage <= 5)))` / `CHECK (((score >= (0)::numeric) AND (score <= (100)::numeric)))`
 
-### 9-3. 의도적 비정규화 — `stock_metric_values`·`stock_scores` (매력도 파생 테이블)
-- 형태: `v_stock_metrics`·`valuation_snapshots`·`financial_statements`·`daily_prices`에서 계산할 수 있는 지표 원값·Z(`stock_metric_values`)와 프리셋별 점수(`stock_scores`)를 as_of별로 저장한다.
-- 사유: 매력도는 같은 시장 전체의 중앙값·MAD, 주 그룹 평균, 국가 내 재표준화를 거치는 상대 점수라서 종목 1개를 보여 줘도 유니버스 전체를 계산해야 한다. 리스트·관심종목·포트폴리오 요약에서 반복 조회되고, 상세 화면은 점수의 근거(지표 원값·z_raw·z_adj)를 설명해야 하므로 결과를 저장한다. 지표 Z는 프리셋과 무관해 한 번만 저장하고, 프리셋별로는 가중합·변환 결과만 저장한다.
-- 정합성: **재생성 가능한 파생 테이블**이다. `python -m app.ingest scores`·`POST /market/refresh`가 해당 `as_of`의 두 테이블을 한 트랜잭션에서 DELETE 후 INSERT로 다시 만든다. 가중치는 `scoring_weights`에서 읽으므로 점수 행이 어떤 프리셋으로 계산됐는지 `preset_id`로 추적된다.
+#### `data_freshness`
 
-### 9-4. `v_stock_metrics` 컬럼 계약 (B가 `views.sql`에 작성, C가 입력으로 씀 — 이름·순서 변경 금지)
-종목별 최신 지표 1행. 비율은 소수(0.05 = 5%), 데이터가 부족하면 NULL. 원본의 끝 열 `dps`·`dividend_yield`(배당, migration 005)는 Stage 5+에서 붙인다(`CREATE OR REPLACE VIEW`는 끝에 붙인 열만 허용).
+종목·데이터 종류별 유효기간(migration 006). 일봉은 이 표와 관계없이 항상 빠진 날짜만 증분으로 받는다(`price_history`는 2년 백필 여부만 정한다).
 
-| # | 컬럼 | 타입 | 내용 |
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
+| kind | character varying(16) | N |  | PK | 데이터 종류 |
+| fetched_at | timestamp with time zone | N |  |  | 마지막 시도 시각 |
+| valid_until | timestamp with time zone | N |  |  | 이 시각 전에는 다시 받지 않는다 |
+| status | character varying(10) | N |  |  | 마지막 시도 결과 |
+| error | text | Y |  |  | 실패 사유 |
+
+제약: `CHECK (((kind)::text = ANY ((ARRAY['financials'::character varying, 'disclosures'::character varying, 'price_history'::character varying])::text[])))` / `CHECK (((status)::text = ANY ((ARRAY['SUCCESS'::character varying, 'FAILED'::character varying])::text[])))` / `CHECK ((valid_until >= fetched_at))`
+
+#### `fundamental_bases`
+
+미국 종목 PER·PBR·시가총액을 '기초값 × 종가'로 계산할 때 쓴다(migration 006). SEC companyfacts에서 재무와 같은 호출로 받고, 유효기간은 `data_freshness.financials`를 따른다.
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
+| shares_outstanding | bigint | Y |  |  | 발행주식수 |
+| shares_as_of | date | Y |  |  | 발행주식수 기준일 |
+| dps | numeric(18,4) | Y |  |  | 최근 FY 주당 배당(선언 기준), NULL = 공시값 없음 |
+| dps_period_end | date | Y |  |  | 배당 기준 결산일 |
+| source | character varying(20) | N |  |  | 데이터 출처 |
+| updated_at | timestamp with time zone | N | now() |  | 수정 시각 |
+
+제약: `CHECK ((dps >= (0)::numeric))` / `CHECK ((shares_outstanding > 0))`
+
+#### `ingest_cursor`
+
+공시 목록 증분 수집 기준점(migration 008). 모두 성공한 뒤에만 기준점을 옮긴다 — 중간에 실패하면 다음 실행이 같은 지점부터 다시 읽는다.
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| source | character varying(20) | N |  | PK | 소스 이름 — 'DART_A001'(DART 사업보고서 목록) |
+| last_rcept_no | character(14) | N |  |  | 마지막으로 처리한 접수번호(14자리 숫자) |
+| last_rcept_dt | date | N |  |  | 그 접수번호의 접수일 |
+| updated_at | timestamp with time zone | N | now() |  | 기준점을 옮긴 시각 |
+
+제약: `CHECK ((last_rcept_no ~ '^[0-9]{14}$'::text))`
+
+#### `ingestion_logs`
+
+갱신 TTL 판단(작업별 마지막 성공 시각)에도 쓴다. `job_type`은 단계마다 늘었다: SCORES(001) · BENCHMARK·HYDRATE(003) · SECTORS_US·SECTORS_KR(007).
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| log_id | integer | N | 자동 증가 | PK | 로그 ID |
+| source | character varying(20) | N |  |  | PYKRX / KIS / YFINANCE / DART / SEC / INTERNAL |
+| job_type | character varying(30) | N |  |  | 작업 종류 |
+| stock_id | integer | Y |  | FK→stocks (SET NULL) | 종목 단위 작업일 때만 |
+| status | character varying(10) | N |  |  | SUCCESS / FAILED / SKIPPED |
+| rows_loaded | integer | N | 0 |  | 적재 행 수 |
+| error | text | Y |  |  | 실패 사유 / 격리 행 사유 |
+| started_at | timestamp with time zone | N |  |  | 시작 시각 |
+| finished_at | timestamp with time zone | Y |  |  | 종료 시각 |
+
+제약: `CHECK (((finished_at IS NULL) OR (finished_at >= started_at)))` / `CHECK (((job_type)::text = ANY ((ARRAY['PRICES'::character varying, 'INDICES'::character varying, 'FX'::character varying, 'VALUATION'::character varying, 'FINANCIALS'::character varying, 'DISCLOSURES'::character varying, 'SCORES'::character varying, 'MASTER'::character varying, 'BENCHMARK'::character varying, 'HYDRATE'::character varying, 'SECTORS_US'::character varying, 'SECTORS_KR'::character varying])::text[])))` / `CHECK ((rows_loaded >= 0))` / `CHECK (((status)::text = ANY ((ARRAY['SUCCESS'::character varying, 'FAILED'::character varying, 'SKIPPED'::character varying])::text[])))`
+## 4. 정규화
+
+### 4-1. 1NF
+모든 컬럼에는 값이 하나씩만 들어간다. 반복되는 값은 컬럼 목록(`group1, group2…`)이나 배열로 두지 않고 교차 테이블의 행으로 나눴다. 종목 하나가 여러 그룹에 속하는 경쟁 그룹 소속과 관심종목이 그 예다.
+
+JSONB 컬럼은 `stock_scores.data_quality` 하나뿐이다. 조회·조인에 쓰지 않는 진단 정보(계산하지 못한 팩터와 그 사유)라서 문서 하나로 저장한다.
+
+### 4-2. 2NF
+복합 PK를 가진 테이블의 일반 속성은 PK 전체에 종속된다. 해당 테이블: `daily_prices`, `valuation_snapshots`, `index_daily_prices`, `stock_metric_values`, `stock_scores`, `scoring_weights`, `peer_group_members`, `watchlist_items`, `data_freshness`.
+- 예: `daily_prices.close`는 (종목, 날짜) 조합에 종속된다. 종목 이름처럼 `stock_id`에만 종속되는 속성은 이 테이블에 두지 않는다.
+- 대리키 테이블은 자연키를 UNIQUE로 건다. 예: `financial_statements`는 `fin_id` + UNIQUE `(stock_id, period_end, period_type)`. 그래서 재무 값은 결산기 전체에 종속된다.
+- 예외: `stock_metric_values.factor`는 `metric`만으로 정해지는 값이다. 파생 테이블(5-2)에서 팩터별 집계를 JOIN 없이 하려고 함께 저장했다.
+
+### 4-3. 3NF — `markets` 분리 (이행적 종속 제거)
+`stocks`에 통화·국가·시간대를 두면 `stock_id → market → currency/country/timezone`이라는 이행적 종속이 생긴다. 그러면 같은 시장 종목 수만큼 같은 값이 반복된다(지금은 8,301행).
+
+그래서 시장 단위 속성을 `markets`(4행)로 분리했고, `stocks`는 `market_id`만 참조한다. 시장의 시간대를 바꿔도 한 행만 고치면 된다.
+
+### 4-4. 왜 이렇게 나눴나 — 테이블 분리 근거
+| 질문 | 답 |
+|---|---|
+| 일봉을 `stocks`에 넣지 않은 이유 | 종목 1 : 일봉 N(종목당 약 500행). 같은 행에 두면 종목 속성이 날짜마다 반복된다 |
+| `valuation_snapshots`와 `financial_statements`를 나눈 이유 | 밸류에이션은 **거래일**마다, 재무는 **결산기**마다 생긴다. 키가 다르므로 다른 테이블이다 |
+| `indices`와 `stocks`를 합치지 않은 이유 | 지수는 거래량·재무·공시가 없고, 관심종목·포트폴리오에 담을 수 없다. 합치면 NULL 컬럼과 예외 규칙이 늘어난다 |
+| `data_freshness`를 `stocks` 컬럼으로 두지 않은 이유 | 유효기간은 종목 × 데이터 종류(financials·disclosures·price_history)마다 따로 있다. 컬럼으로 두면 종류가 늘 때마다 테이블을 바꿔야 한다 |
+| `fundamental_bases`를 분리한 이유 | 미국 종목에만 있는 1:1 속성(발행주식수·FY 주당 배당)이다. 국내 8천여 행에 NULL 컬럼을 두지 않으려고 나눴다 |
+| `ingest_cursor`를 `ingestion_logs`와 나눈 이유 | 로그는 계속 쌓이는 이력이다. 기준점은 소스당 1행을 덮어쓰는 현재 상태다 |
+
+### 4-5. N:M 교차 테이블
+| 관계 | 교차 테이블 | 속성 |
+|---|---|---|
+| 종목 ↔ 경쟁 그룹 | `peer_group_members` | `is_primary`(매력도 섹터 중립화의 주 그룹, 종목당 최대 1개) |
+| 사용자 ↔ 종목(관심종목) | `watchlist_items` | `sort_order`, `added_at`, `memo`, `target_price`, `updated_at` |
+
+### 4-6. 파생값은 저장하지 않음 (VIEW)
+아래 값은 원천 데이터에서 언제든 계산할 수 있어서 테이블에 저장하지 않는다. `v_stock_metrics` VIEW로 계산한다.
+- 수익률·변동성·MDD·이동평균·52주 위치·거래량 비율
+- 영업이익률·ROE·YoY·시총 원화 환산·배당수익률
+
+원천이 갱신·보정되면 지표도 자동으로 따라 바뀐다.
+
+`portfolio_items.cost_krw`는 같은 행 값만으로 계산된다. 그래서 저장형 생성 컬럼(`GENERATED ALWAYS … STORED`)으로 두어 직접 쓰지 못하게 막았다.
+
+## 5. 의도적 비정규화 3건
+
+### 5-1. `portfolio_items.ref_price`·`ref_fx_rate`·`ref_date`
+- 형태: `daily_prices.close`와 `fx_rates.usd_krw`에서 가져올 수 있는 값을 항목 행에 복사해 둔다.
+- 사유: "담은 시점의 가격과 환율"은 **그 시점에 확정된, 변하지 않는 사실**이다.
+  - 시세 테이블은 수정주가 재계산(배당·분할) 때문에 과거 종가가 바뀐다.
+  - 환율도 SNAPSHOT이 새로 쌓이고 재적재·보정될 수 있다.
+  - 참조로만 연결하면 이런 갱신이 일어날 때 이미 담은 원가와 평가손익이 거슬러 올라가 바뀐다.
+- 정합성: 항목을 수정(PUT)할 때만 기준가·환율을 현재값으로 다시 저장한다. `ref_date`로 어느 거래일 종가인지 추적할 수 있다.
+
+### 5-2. `stock_metric_values`·`stock_scores` (매력도 파생 테이블)
+- 형태: `v_stock_metrics`·`valuation_snapshots`·`financial_statements`·`daily_prices`에서 계산할 수 있는 값을 기준일(`as_of`)별로 저장한다.
+  - `stock_metric_values`: 지표 원값과 Z
+  - `stock_scores`: 프리셋별 점수
+- 사유:
+  - 매력도는 같은 시장 전체의 중앙값·MAD, 주 그룹 평균, 국가 내 재표준화를 거치는 상대 점수다. 종목 하나만 보여 줘도 비교 표본 전체(146종목)를 계산해야 한다.
+  - 리스트·관심종목·포트폴리오 요약·홈 순위에서 반복해서 조회한다.
+  - 상세 화면은 점수의 근거(지표 원값·z_raw·z_adj)를 보여 줘야 한다.
+  - 지표 Z는 프리셋과 무관해서 한 번만 저장한다. 프리셋별로는 가중합·변환 결과만 저장한다.
+- 정합성: **다시 만들 수 있는 파생 테이블**이다.
+  - `python -m app.ingest scores`와 `POST /market/refresh`가 해당 `as_of`의 두 테이블을 한 트랜잭션에서 DELETE한 뒤 INSERT로 다시 만든다.
+  - 점수가 어느 프리셋으로 계산됐는지는 `preset_id`로 추적한다.
+
+### 5-3. `market_sentiment_daily` (시장 심리 지수)
+- 형태: `index_daily_prices`(KOSPI·S&P 500·VIX)로 계산할 수 있는 값을 거래일별로 저장한다. 구성요소 점수 4개와 종합 점수다.
+- 사유:
+  - 52주(252거래일) 위치, 125일 이동평균, RSI(14)를 매번 계산하면 홈 화면을 열 때마다 지수 2년치를 훑어야 한다.
+  - 직전 거래일·5거래일 전 값과 비교해 보여 주므로 과거 값도 필요하다.
+- 정합성: `formula_version`이 현재 계산식 상수와 다르면 다시 계산해 덮어쓴다. 빠진 날은 그 시점까지 자른 시계열로 계산해 채운다.
+- 참고: `sector_performance_daily`는 DB 안 다른 테이블로 계산할 수 없는 외부 원천(섹터 ETF·KRX 섹터 지수)의 캐시라서 비정규화가 아니다.
+
+## 6. 인덱스
+| 인덱스 | 대상 | 받치는 조회 | 비고 |
 |---|---|---|---|
-| 1 | stock_id | integer | 종목 ID |
-| 2 | market | varchar | 시장 코드 |
-| 3 | country | char(2) | KR / US |
-| 4 | currency | char(3) | KRW / USD |
-| 5 | as_of | date | 기준일(종목별 최신 거래일) |
-| 6 | close | numeric | 최신 종가 |
-| 7 | change_rate | numeric | 전일 대비 등락률 |
-| 8~12 | return_1w, return_1m, return_3m, return_6m, return_1y | numeric | 기간 수익률 |
-| 13 | volatility_1y | numeric | 연환산 변동성 |
-| 14 | max_drawdown_1y | numeric | 1년 최대 낙폭 |
-| 15~17 | ma20, ma60, ma120 | numeric | 이동평균 |
-| 18 | ma120_gap | numeric | 120일선 괴리율 |
-| 19~21 | high_52w, low_52w, position_52w | numeric | 52주 고가·저가·위치 |
-| 22 | volume | bigint | 최신 거래량 |
-| 23 | avg_volume_20d | numeric | 직전 20거래일 평균 거래량 |
-| 24 | volume_ratio_20d | numeric | 거래량 비율 |
-| 25 | valuation_as_of | date | 최신 밸류에이션 기준일 |
-| 26~29 | per, pbr, eps, bps | numeric | 최신 밸류에이션 |
-| 30 | market_cap | numeric | 시가총액(종목 통화) |
-| 31 | market_cap_krw | numeric | 시가총액 원화 환산 |
-| 32 | fx_usd_krw | numeric | 환산에 쓴 USD/KRW |
-| 33 | fx_rate_at | timestamptz | 환율 시각 |
-| 34 | fin_period_end | date | 최신 FY 결산일 |
-| 35 | accounting_std | varchar | 회계 기준 |
-| 36 | operating_margin | numeric | 영업이익률 |
-| 37 | roe | numeric | ROE |
-| 38 | debt_ratio | numeric | 부채비율 |
-| 39 | revenue_yoy | numeric | 매출 YoY |
-| 40 | operating_income_yoy | numeric | 영업이익 YoY |
+| (PK) | daily_prices (stock_id, trade_date) | 종목별 기간 일봉, 최신 2행(LAG) | 자동 |
+| ix_stocks_name | stocks (name) | 이름 정렬·접두 검색 | 부분 일치 검색(`stock_search.sql`)은 8천여 행 순차 스캔(수 ms). pg_trgm은 확장 설치가 필요해 두지 않음 |
+| ix_daily_prices_trade_date | daily_prices (trade_date) | 특정 날짜의 전 종목 | PK 선두가 stock_id라 따로 필요 |
+| ~~ix_valuation_stock_asof~~ | valuation_snapshots (stock_id, as_of DESC) | 종목별 최신 1행 | **만들지 않음** — PK 역방향 스캔과 중복(6-1) |
+| ix_fin_stock_type_end | financial_statements (stock_id, period_type, period_end DESC) | 종목별 최신 FY N건 | 6-1 해석 참고 |
+| ix_disclosures_stock_filed | disclosures (stock_id, filed_at DESC) | 종목별 최근 공시 N건 | |
+| ix_index_prices_trade_date | index_daily_prices (trade_date) | 날짜 기준 전 지수 | |
+| ix_fx_granularity_rate_at | fx_rates (granularity, rate_at DESC) | 최신 SNAPSHOT(TTL 판단) | |
+| ix_watchlist_stock | watchlist_items (stock_id) | FK 역방향(CASCADE) | PK가 user_id 선두라 필요 |
+| ix_portfolio_items_stock | portfolio_items (stock_id) | FK 역방향(RESTRICT 검사) | UQ가 portfolio_id 선두라 필요 |
+| ix_ingestion_logs_job_finished | ingestion_logs (job_type, finished_at DESC) | 작업별 마지막 성공 시각(갱신 TTL) | |
+| ix_peer_members_stock | peer_group_members (stock_id) | 종목 → 소속 그룹 | PK가 group_id 선두라 필요 |
+| ux_pgm_primary (부분 UNIQUE) | peer_group_members (stock_id) WHERE is_primary | 종목당 주 그룹 1개 제약 | 제약용 |
 
-계산 규칙 (데이터 부족 시 NULL):
+FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으로 이미 인덱싱돼 있다.
+- `stocks.market_id`(UNIQUE 선두), `portfolios.user_id`(UNIQUE 선두), `portfolio_items.portfolio_id`(UNIQUE 선두)
+- `financial_statements.stock_id`(UNIQUE 선두), `disclosures.stock_id`(`ix_disclosures_stock_filed` 선두)
+- `data_freshness`·`fundamental_bases`·`stock_metric_values`·`stock_scores`의 `stock_id`(PK 선두)
+
+`indices.market_id`(10행)와 `ingestion_logs.stock_id`는 행 수가 적거나 그 방향으로 조회하지 않아서 생략했다.
+
+### 6-1. 인덱스 전후 EXPLAIN (ANALYZE) 비교
+`python -m app.ingest explain`으로 2026-10-22 개발 DB에서 실행했다.
+- '인덱스 전'은 트랜잭션 안에서 해당 인덱스를 DROP한 뒤 측정하고 ROLLBACK했다. 실제 DB는 바뀌지 않는다.
+- 각 쿼리를 7번 실행한 중앙값이다.
+- 실행 계획 원문은 `explain_result.md`에 있다.
+
+| 쿼리 | 인덱스 | 행 수 | 인덱스 전 계획 | 전(ms) | 인덱스 후 계획 | 후(ms) |
+|---|---|---|---|---|---|---|
+| 종목별 최근 공시 5건 (종목 상세 '최근 공시') | `ix_disclosures_stock_filed` | 1,361 | Seq Scan | 0.082 | Index Scan (ix_disclosures_stock_filed) | 0.013 |
+| 특정 거래일의 전 종목 시세 (거래량 순위·날짜 단위 조회) | `ix_daily_prices_trade_date` | 45,126 | Seq Scan | 1.332 | Bitmap Heap Scan, Bitmap Index Scan | 0.032 |
+| 종목별 최신 FY 재무 5건 (재무 추이) | `ix_fin_stock_type_end` | 20,896 | Index Scan Backward (UNIQUE 인덱스) | 0.012 | Index Scan (ix_fin_stock_type_end) | 0.013 |
+| 종목별 최신 밸류에이션 1행 — PK와 기능이 겹치는지 확인 | `ix_valuation_stock_asof` | 4,580 | Index Scan Backward (valuation_snapshots_pkey) | 0.006 | Index Scan (ix_valuation_stock_asof) | 0.014 |
+
+해석:
+- **`ix_daily_prices_trade_date`**: 45,126행 순차 스캔에서 비트맵 인덱스 스캔으로 바뀌어 해당 날짜 행만 읽는다. 약 **42배** 빨라졌다. 2026-10-15 측정(10,849행, 약 15배)보다 데이터가 늘수록 효과가 커진다.
+- **`ix_disclosures_stock_filed`**: 순차 스캔 + 정렬에서 인덱스 스캔으로 바뀌어, 정렬 없이 앞 5건만 읽는다. 약 6배 빨라졌다.
+- **`ix_fin_stock_type_end`**: 재무가 125행일 때는 플래너가 순차 스캔을 골랐다. 비교군 재무가 쌓여 20,896행이 된 지금은 순차 스캔 대신 **UNIQUE `(stock_id, period_end, period_type)` 역방향 스캔**을 쓴다. 그래서 이 인덱스와 차이가 거의 없다. 지금은 FY만 적재해서 `period_type` 조건이 거르는 행이 없기 때문이다. 분기 재무(REQ-DATA-12)를 적재하면 `period_type`을 선두 다음에 둔 이 인덱스가 정렬 없이 FY만 읽게 해 준다. 그래서 인덱스를 유지한다.
+- **`ix_valuation_stock_asof`(만들지 않음)**: 인덱스가 없으면 PK `(stock_id, as_of)`의 역방향 스캔으로 같은 쿼리를 처리한다. 인덱스를 만들면 오히려 0.006ms에서 0.014ms로 느려졌다. B-tree는 양방향으로 스캔할 수 있어서, `ORDER BY as_of DESC LIMIT 1`을 PK가 그대로 받친다. **기능이 겹치는 인덱스**라 크기와 쓰기 비용만 늘어서 만들지 않는다. 측정은 이 인덱스를 트랜잭션 안에서 임시로 만들어 비교한다.
+- 데이터 규모가 작아 절대 시간은 ms 미만이다. 핵심은 실행 계획이 '전체 읽기'에서 '필요한 행만 읽기'로 바뀌는 것이다.
+
+## 7. VIEW
+| VIEW | 내용 | 주요 SQL 요소 | 사용처 |
+|---|---|---|---|
+| v_latest_price | 종목별 최신 종가·전일 종가·등락·등락률·거래량 | LATERAL, 서브쿼리 LIMIT 2, LAG, NULLIF | `stock_list.sql`, `stock_detail.sql`, `watchlist.sql` |
+| v_fx_latest | 최신 USD/KRW 1행(최신 rate_at, 같은 시각이면 SNAPSHOT 우선) | ORDER BY, LIMIT | 리스트 `fx_rate_at`, 상세·포트폴리오 원화 환산 |
+| v_stock_metrics | 수익률 5종, 연환산 변동성, MDD, 이동평균 3종, 120일선 괴리율, 52주 고저·위치, 거래량 비율, 최신 밸류에이션, 시총 원화 환산, 영업이익률, ROE, 부채비율, 매출·영업이익 YoY, 주당배당·배당수익률 (42열) | CTE, ROW_NUMBER, LAG, MAX OVER(누적), STDDEV_SAMP, AVG FILTER, LATERAL, GROUP BY, NULLIF | 상세 분석, 매력도 지표, 랭킹·통계 |
+
+`v_stock_metrics` 컬럼 순서(다른 SQL이 이름으로 읽음, `CREATE OR REPLACE VIEW`라 끝에만 붙일 수 있음): `stock_id, market, country, currency, as_of, close, change_rate, return_1w, return_1m, return_3m, return_6m, return_1y, volatility_1y, max_drawdown_1y, ma20, ma60, ma120, ma120_gap, high_52w, low_52w, position_52w, volume, avg_volume_20d, volume_ratio_20d, valuation_as_of, per, pbr, eps, bps, market_cap, market_cap_krw, fx_usd_krw, fx_rate_at, fin_period_end, accounting_std, operating_margin, roe, debt_ratio, revenue_yoy, operating_income_yoy, dps, dividend_yield`
+
+계산 규칙(데이터가 부족하면 NULL):
 | 지표 | 정의 | NULL 조건 |
 |---|---|---|
 | return_1w~1y | 최신 종가 / (기준일 − 기간 이전 가장 가까운 거래일 종가) − 1 | 해당 날짜 이전 데이터 없음 |
@@ -592,118 +817,93 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | roe | 순이익 / 자본 | 자본 ≤ 0·NULL |
 | debt_ratio | 부채총계 / 자본 | 자본 0·NULL |
 | revenue_yoy, operating_income_yoy | (당기 − 전기) / \|전기\| | 전기 0·NULL, 직전 FY 결산일이 330~400일 전이 아님 |
+| dividend_yield | dps / 최신 종가 | dps NULL(미제공). 무배당은 0 |
 
-### 9-5. 검증
-| 검증 | 결과 |
-|---|---|
-| 원본 대비 schema·ORM·import 계약 | `python team/tools/check_contract.py 4` 통과 (차이는 `team/contracts/stage4.toml`에 적힌 것만) |
-| ORM ↔ DDL 일치, Stage 1~4 외 테이블 없음 | `test_orm_matches_schema`, `test_tables_are_stage1_to_4_only` 통과 (Stage 5부터 `test_tables_are_stage1_to_5_only`) |
-| Stage 4 제약 위반 6건(점수 101, 유효 팩터 6개, 가중치 1 초과, 없는 팩터, 프리셋 code 중복, 종목당 주 그룹 2개) 거부, 종목 삭제 시 지표값·점수 CASCADE, 프리셋 삭제 시 가중치 CASCADE | `test_constraints_reject_bad_rows`, `test_delete_cascades` 통과 |
+## 8. 마이그레이션
+새로 만드는 DB는 `schema.sql`에 모두 반영돼 있다. 이미 적재된 DB만 아래 파일로 바꾼다. 모두 멱등이어서 여러 번 실행해도 결과가 같다. 실행은 `python -m app.ingest migrate <이름>`이다.
 
-
-## 10. Stage 5-D — 업종 섹터·데이터 유효기간 (D 계약)
-
-새로 만드는 DB는 `schema.sql`에 반영되어 있고, 이미 적재된 DB는 마이그레이션으로 바꾼다.
-
-### 10-1. 마이그레이션
-| 파일 | 내용 | 실행 |
+| 파일 | 내용 | 뒤에 할 일 |
 |---|---|---|
-| `backend/db/migrations/006_sector_freshness.sql` | `stocks.industry·sic·sector·industry_checked_at`, `peer_groups.kind`(theme/sector), `data_freshness`, `fundamental_bases` 생성, 값이 모두 빈 국내 밸류에이션 행 정리 — 멱등 | `python -m app.ingest migrate 006_sector_freshness` → `python -m app.ingest benchmark --reselect` |
+| `001_scoring_v2.sql` | `peer_group_members.is_primary` + `ux_pgm_primary`, 매력도 테이블 4개 생성 | `002` 후 `scores` |
+| `002_presets.sql` | 프리셋 4종(aggressive·growth·balanced·value)과 가중치 20행 | `scores` |
+| `003_benchmark.sql` | `stocks.coverage`·`detail_synced_at`, `job_type`에 BENCHMARK·HYDRATE | `benchmark` |
+| `004_watchlist_memo.sql` | `watchlist_items.memo`·`target_price`·`updated_at` + 트리거 | — |
+| `005_listed_dividend.sql` | `coverage`에 `listed` 허용, `valuation_snapshots.dps`, `v_stock_metrics` 끝 열 `dps`·`dividend_yield` | `listing` |
+| `006_sector_freshness.sql` | `stocks` 업종 4칸, `peer_groups.kind`, `data_freshness`, `fundamental_bases` | `benchmark --reselect` |
+| `007_home_widgets.sql` | `sector_performance_daily`, `market_sentiment_daily`, `job_type`에 SECTORS_US·SECTORS_KR | — |
+| `008_ingest_cursor.sql` | `ingest_cursor`(DART 사업보고서 목록 증분 기준점) | — |
+| `009_cap_rank.sql` | `stocks.cap_rank`·`cap_ranked_at`(미국 시가총액 순위 — 백그라운드 재무 적재 우선순위) | — |
+| `010_kis_source.sql` | `valuation_snapshots.source`에 `KIS`(한국투자증권 Open API) 허용 | — |
 
-기존 그룹은 모두 `kind = 'theme'`(화면 경쟁 비교용)이 된다. 업종 섹터 그룹(`kind = 'sector'`)은 비교군 선정 때 만들어지고, 그 `is_primary` 구성원이 매력도 섹터 중립화 표본이다. 화면 경쟁 비교·그룹 통계(`peers.sql`·`stock_groups.sql`·`stats_overview.sql`·`stats_peer_group_valuation.sql`)는 테마 그룹만 쓴다.
+## 9. 검증 결과
+2026-10-22 `docker compose run --rm api pytest -v` 전체 **507 passed**(테스트 DB `stockdb_test`) 중 DB 설계 관련 결과다. 테스트 전체 목록은 `07_테스트_결과서.md`에 있다.
 
-### 10-2. 테이블·컬럼 정의서
-
-#### `stocks` 추가 컬럼
-
-| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
-|---|---|---|---|---|---|
-| industry | character varying(64) | Y |  |  | 국내 KRX 업종명 / 미국 SEC SIC 설명 |
-| sic | smallint | Y |  |  | 미국 SEC SIC 코드 |
-| sector | character varying(32) | Y |  |  | `config/universe.yaml` sectors 매핑 결과. NULL = 매핑 없음·금융 등 제외 업종 |
-| industry_checked_at | timestamp with time zone | Y |  |  | 업종을 마지막으로 확인한 시각(미국 SIC는 1년마다 다시 확인) |
-
-#### `peer_groups` 추가 컬럼
-
-| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
-|---|---|---|---|---|---|
-| kind | character varying(10) | N | 'theme' | CHECK IN (theme, sector) | theme = 화면 경쟁 비교 / sector = 매력도 섹터 중립화 |
-
-#### `data_freshness`
-
-| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
-|---|---|---|---|---|---|
-| stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
-| kind | character varying(16) | N |  | PK, CHECK IN (financials, disclosures, price_history) | 데이터 종류 |
-| fetched_at | timestamp with time zone | N |  |  | 마지막 시도 시각 |
-| valid_until | timestamp with time zone | N |  | CHECK ≥ fetched_at | 이 시각 전에는 다시 받지 않는다 |
-| status | character varying(10) | N |  | CHECK IN (SUCCESS, FAILED) | 마지막 시도 결과 |
-| error | text | Y |  |  | 실패 사유 |
-
-일봉은 이 표와 관계없이 항상 빠진 날짜만 증분으로 받는다(`price_history`는 2년 백필 여부만 정한다).
-
-#### `fundamental_bases`
-
-| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
-|---|---|---|---|---|---|
-| stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
-| shares_outstanding | bigint | Y |  | CHECK > 0 | 발행주식수 |
-| shares_as_of | date | Y |  |  | 발행주식수 기준일 |
-| dps | numeric(18,4) | Y |  | CHECK ≥ 0 | 최근 FY 주당 배당(선언 기준), NULL = 공시값 없음 |
-| dps_period_end | date | Y |  |  | 배당 기준 결산일 |
-| source | character varying(20) | N |  |  | 데이터 출처 |
-| updated_at | timestamp with time zone | N | now() |  | 수정 시각 |
-
-미국 종목 PER·PBR·시가총액을 '기초값 × 종가'로 계산할 때 쓴다. SEC companyfacts에서 재무와 같은 호출로 받고, 유효기간은 `data_freshness.financials`를 따른다.
-
-### 10-3. 검증
-| 검증 | 결과 |
-|---|---|
-| 원본 대비 schema·ORM·import 계약 | `python team/tools/check_contract.py 5` 통과 |
-| ORM ↔ DDL 일치, Stage 1~5 외 테이블 없음 | `test_orm_matches_schema`, `test_tables_are_stage1_to_5_only` 통과 |
-| Stage 5-D 제약 위반 4건(그룹 kind, 유효기간 < 시도 시각, 유효기간 kind, 발행주식수 0) 거부 | `test_constraints_reject_bad_rows` 통과 |
-
-## 11. Stage 6 — 상장 목록·배당·홈 위젯 (D 계약)
-
-새로 만드는 DB는 `schema.sql`에 반영되어 있고, 이미 적재된 DB는 마이그레이션으로 바꾼다.
-
-### 11-1. 마이그레이션
-| 파일 | 내용 | 실행 |
+| 검증 | 결과 | 테스트 |
 |---|---|---|
-| `backend/db/migrations/005_listed_dividend.sql` | `stocks.coverage`에 `listed`(상장 보통주 목록) 허용, `valuation_snapshots.dps`(CHECK ≥ 0) — 멱등 | `python -m app.ingest migrate 005_listed_dividend` (상장 목록 적재는 B의 `listing`) |
-| `backend/db/migrations/007_home_widgets.sql` | `sector_performance_daily`, `market_sentiment_daily` 생성, `ingestion_logs.job_type`에 `SECTORS_US`·`SECTORS_KR` — 멱등 | `python -m app.ingest migrate 007_home_widgets` |
+| ORM ↔ DDL 컬럼·타입·NULL 일치 (25개 테이블) | 차이 0 | `test_schema::test_orm_matches_schema` |
+| 정의된 테이블 외 다른 테이블 없음 | 25개 일치 | `test_schema::test_tables_are_stage1_to_6_only` |
+| 제약 위반 행 거부 — 고가<저가, 음수 거래량, 가격 0, PK·UNIQUE 중복, 없는 FK, 잘못된 국가·통화·granularity·job_type·결산 구분·source, 환율 0, 종료<시작, 시드 0, 수량 0, 담은 가격 0, 점수 101, 유효 팩터 6개, 가중치 1 초과, 주 그룹 2개, 그룹 kind, 유효기간 < 시도 시각, 발행주식수 0 등 | 47/47 거부 | `test_schema::test_constraints_reject_bad_rows` (47케이스) |
+| 종목 삭제 시 일봉·밸류에이션·그룹 소속·재무·공시·지표값·점수 CASCADE, 로그의 stock_id는 SET NULL, 그룹·프리셋 삭제 시 소속·가중치 CASCADE (담긴 종목 삭제 RESTRICT는 위 47케이스에 포함) | 확인 | `test_schema::test_delete_cascades` |
+| 사용자 삭제 시 관심종목·포트폴리오·항목 CASCADE, UPDATE 시 `updated_at` 트리거 갱신(portfolios·watchlist_items), `cost_krw` 생성 컬럼(2주 × 195달러 × 1,300원 = 507,000원) | 확인 | `test_schema::test_user_delete_cascades_and_updated_at_trigger` |
+| `v_stock_metrics` 지표를 파이썬 손계산과 비교(허용 오차 1e-4), 데이터 부족 시 NULL, 직전 FY가 2년 전이면 YoY NULL | 일치 | `test_analysis::test_stock_metrics_match_hand_calculation` 외 2건 |
+| 같은 데이터 재적재 시 행 수 불변(upsert) | 확인 | `test_ingest::test_sample_reload_is_idempotent`, `test_load_financials_and_disclosures_upsert_and_are_idempotent`, `test_dart_bulk::test_load_bulk_is_idempotent_and_seeds_cursor` |
 
-### 11-2. 테이블·컬럼 정의서
+## 10. 분석 쿼리와 SQL 요소
+조회·분석 쿼리는 모두 `backend/app/queries/*.sql`에 원문으로 두고 SQLAlchemy `text()`로 실행한다. 아래 표는 각 파일에서 주석을 뺀 본문을 스캔해 만들었다(2026-10-22, 31개 파일). 가이드의 필수 요소(SELECT·WHERE·JOIN·GROUP BY·HAVING·ORDER BY·AVG·SUM·COUNT·MAX·MIN)는 모두 쓰였다.
 
-#### `valuation_snapshots` 추가 컬럼
+| SQL 파일 | SELECT | WHERE | JOIN | GROUP BY | HAVING | ORDER BY | AVG | SUM | COUNT | MAX | MIN | 윈도우 함수 | CTE | LATERAL | 사용한 윈도우 함수 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `backend/app/queries/analysis.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  | ✓ | ✓ |  | COUNT, PERCENT_RANK, RANK |
+| `backend/app/queries/candles.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  | ✓ |  |  |  |  |  |
+| `backend/app/queries/disclosures.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  |  |  |  |  |  |  |
+| `backend/app/queries/fin_basis.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ |  |  | ✓ | ✓ |  |  | ✓ |  |  |
+| `backend/app/queries/financials.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  |  |  |  |  |  |  |
+| `backend/app/queries/fx_daily_recent.sql` | ✓ | ✓ |  |  |  | ✓ |  |  |  | ✓ |  |  | ✓ |  |  |
+| `backend/app/queries/home_attractiveness.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  | ✓ | ✓ | ✓ | RANK |
+| `backend/app/queries/home_volume_surge.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | ✓ | ✓ |  | ✓ | ✓ | ✓ | RANK, ROW_NUMBER |
+| `backend/app/queries/market_indices.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  | ✓ | ✓ | ✓ | ✓ | ✓ | ROW_NUMBER |
+| `backend/app/queries/peers.sql` | ✓ | ✓ | ✓ |  |  | ✓ | ✓ |  | ✓ |  |  | ✓ | ✓ | ✓ | AVG, COUNT, RANK |
+| `backend/app/queries/peers_chart.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  | ✓ |  | ✓ | ✓ |  | FIRST_VALUE |
+| `backend/app/queries/portfolio_items_valued.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| `backend/app/queries/score_aggregate.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | AVG, STDDEV_SAMP |
+| `backend/app/queries/score_metrics.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ |  |  |  | ✓ |  | ✓ | ✓ | ✓ | LAG, ROW_NUMBER |
+| `backend/app/queries/score_neutralize.sql` | ✓ | ✓ | ✓ |  |  |  | ✓ |  | ✓ |  |  | ✓ | ✓ |  | AVG, COUNT |
+| `backend/app/queries/score_zscore.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | ✓ |  |  |  | ✓ |  |  |
+| `backend/app/queries/sector_flow.sql` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |  | ✓ | ✓ |  | ✓ | ✓ |  | ROW_NUMBER |
+| `backend/app/queries/stats_data_quality.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ |  | ✓ | ✓ | ✓ |  |  | ✓ |  |  |
+| `backend/app/queries/stats_disclosure_frequency.sql` | ✓ | ✓ |  | ✓ |  | ✓ |  | ✓ | ✓ |  |  | ✓ | ✓ |  | SUM |
+| `backend/app/queries/stats_market_excluded.sql` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |
+| `backend/app/queries/stats_market_valuation.sql` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |  |  |  |
+| `backend/app/queries/stats_monthly.sql` | ✓ | ✓ |  | ✓ |  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  | FIRST_VALUE, LAST_VALUE |
+| `backend/app/queries/stats_overview.sql` | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ | ✓ |  |  |  |  |
+| `backend/app/queries/stats_peer_group_valuation.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  | ✓ |  |  |
+| `backend/app/queries/stats_ranking.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  | ✓ | ✓ |  | COUNT, RANK |
+| `backend/app/queries/stock_detail.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| `backend/app/queries/stock_groups.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  |  |  |  |  |
+| `backend/app/queries/stock_list.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  | ✓ | ✓ | ✓ | COUNT, RANK |
+| `backend/app/queries/stock_search.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  |  |  |
+| `backend/app/queries/watchlist.sql` | ✓ | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| `backend/db/views.sql` | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | LAG, MAX, ROW_NUMBER |
+| **사용 파일 수** | 31 | 31 | 24 | 13 | 3 | 29 | 9 | 6 | 19 | 15 | 6 | 15 | 20 | 10 | |
 
-| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
-|---|---|---|---|---|---|
-| dps | numeric(18,4) | Y |  | CHECK ≥ 0 | 주당배당금(연간, 종목 통화). 0 = 무배당, NULL = 미제공 |
-
-#### `sector_performance_daily` (섹터 히트맵, 캐시 성격 — 30일 지난 행은 갱신 작업이 정리)
-
-| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
-|---|---|---|---|---|---|
-| id | bigint | N | bigserial | PK | |
-| market | character(2) | N |  | UNIQUE①, CHECK IN (KR, US) | 시장 |
-| sector_code | character varying(16) | N |  | UNIQUE① | 미국 섹터 ETF 티커(XLK…) / KRX 섹터 지수 코드 |
-| sector_name | character varying(40) | N |  |  | 섹터 이름 |
-| trade_date | date | N |  | UNIQUE① | 거래일 |
-| change_pct | numeric(8,4) | Y |  |  | 전일 대비 %(1.23 = 1.23%) |
-| fetched_at | timestamp with time zone | N | now() |  | 수집 시각 |
-
-가중치(타일 크기)는 저장하지 않고 코드 상수(`app/services/sectors.py`)로 둔다.
-
-#### `market_sentiment_daily` (시장 심리 지수 — StockMind 간이 계산, 0~100 높을수록 탐욕)
-
-| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
-|---|---|---|---|---|---|
-| id | bigint | N | bigserial | PK | |
-| market | character(2) | N |  | UNIQUE①, CHECK IN (KR, US) | 시장 |
-| trade_date | date | N |  | UNIQUE① | 기준 지수(KOSPI·S&P 500)의 거래일 |
-| score | numeric(5,2) | N |  | CHECK 0~100 | 종합 점수 |
-| label | character varying(10) | N |  |  | 점수 구간 이름 |
-| price_position · ma_gap_score · rsi_score · vix_score | numeric(5,2) | Y |  | CHECK 0~100 | 구성요소 점수(52주 위치·이동평균 괴리·RSI·VIX — VIX는 미국만) |
-| formula_version | smallint | N |  |  | 계산식 버전 |
-| computed_at | timestamp with time zone | N | now() |  | 계산 시각 |
+주요 쿼리:
+| 쿼리 | 용도 | 핵심 기법 |
+|---|---|---|
+| `backend/db/views.sql` `v_stock_metrics` | 종목별 수익률·변동성·MDD·이동평균·52주·재무 지표 | CTE 여러 단계, ROW_NUMBER로 최근 N거래일, LAG 일수익률, 누적 MAX OVER(MDD), STDDEV_SAMP, AVG FILTER, LATERAL 기준일 종가 |
+| `score_metrics.sql` | 매력도 지표 원값 9종 | CTE, LAG(직전 FY), ROW_NUMBER(t−21·126·252거래일), MAX FILTER 피벗, CROSS JOIN LATERAL (VALUES …)로 지표 행 펼치기 |
+| `score_zscore.sql` | 국가 내 로버스트 Z | `PERCENTILE_CONT(0.5) WITHIN GROUP`으로 중앙값·MAD, LEAST/GREATEST 클리핑, UPDATE … FROM |
+| `score_neutralize.sql` | 섹터 중립화 | 주 그룹(부분 UNIQUE) LEFT JOIN, COUNT·AVG OVER (PARTITION BY 그룹, 지표)로 n/(n+k) 축소 |
+| `score_aggregate.sql` | 프리셋별 점수 | AVG GROUP BY(팩터), CROSS JOIN 프리셋, FILTER 피벗, SUM(w·F)/SUM(w) 재정규화, AVG·STDDEV_SAMP OVER 재표준화, `erf`로 100·Φ |
+| `analysis.sql` | 국가 내 순위·백분위 | RANK·PERCENT_RANK OVER (같은 as_of·프리셋·country) |
+| `peers.sql` | 경쟁 그룹 비교 | 그룹별 RANK() OVER, AVG() OVER, COUNT OVER(그룹 크기) |
+| `peers_chart.sql` | 기준일=100 추이 | FIRST_VALUE OVER로 구간 첫 종가 |
+| `stats_market_valuation.sql` | 시장별 평균 밸류에이션 | GROUP BY + HAVING(표본 수), AVG/MIN/MAX FILTER, SUM |
+| `stats_peer_group_valuation.sql` | 그룹별 평균·최고·최저 | CTE + GROUP BY, COUNT FILTER |
+| `stats_disclosure_frequency.sql` | 기간별 공시 빈도 | date_trunc, COUNT FILTER, SUM(CASE), 구성비 SUM() OVER (), 누적 SUM() OVER (ORDER BY) |
+| `stats_monthly.sql` | 종목 월별 집계(거래일 수·평균 종가·최고/최저·월 수익률·거래량) | date_trunc + GROUP BY, 월 파티션 FIRST_VALUE·LAST_VALUE(이름 붙인 WINDOW) |
+| `stats_ranking.sql` | 지표별 TOP N | v_stock_metrics 재사용, CASE로 지표 선택(컬럼명 문자열 조립 없음), RANK()(동점 같은 순위, NULL 제외) |
+| `stats_data_quality.sql` | 작업별 데이터 품질 | GROUP BY + COUNT FILTER + MAX, 격리 행 수 SUM |
+| `home_volume_surge.sql` | 홈 '거래량 급증' TOP 5 | ROW_NUMBER로 직전 20거래일, AVG, RANK, LATERAL |
+| `home_attractiveness.sql` | 홈 '매력도 순위' TOP 5 | 저장된 `stock_scores` 최신 점수만 읽기, RANK |
+| `sector_flow.sql` | 시장·섹터 점수의 섹터 흐름 | 같은 국가·섹터 5거래일 수익률 중앙값, GROUP BY + HAVING(최소 표본), ROW_NUMBER |
+| `stock_search.sql` | 상단 검색 자동완성 | LIKE 부분 일치(서버가 `%`·`_` 이스케이프), CASE로 일치 순위 정렬 |
