@@ -2,8 +2,8 @@
 // 체결 기록이 아니라 "시드 안에서 담아보는 계산기"다. 종목 담기는 담기 모달(add-to-portfolio.js)에서 한다.
 import {
   addPortfolioItem, createPortfolio, deletePortfolio, deletePortfolioItem, getPortfolioSummary, getPortfolios,
-  previewEqualWeight, updatePortfolio, updatePortfolioItem,
-} from "../api.js";   // [S5-A] addPortfolioItem·previewEqualWeight
+  isLoggedIn, previewEqualWeight, updatePortfolio, updatePortfolioItem,
+} from "../api.js";   // [S5-A] addPortfolioItem·previewEqualWeight · 2차 로그인 isLoggedIn
 import { DASH, changeHtml, dateTime, esc, initials, krw, num, pct, price, signedKrw, stockUrl } from "../format.js";
 import { color, dashedAxis, draw, plainAxis } from "../components/charts.js";
 import { mountSidebar } from "../components/sidebar.js";
@@ -11,6 +11,11 @@ import { emptyState, errorState, h, openModal, segmented, skeleton, toast } from
 
 mountSidebar("portfolio");
 const $ = (sel) => document.querySelector(sel);
+// 2차 로그인: 비로그인은 예시(demo) 포트폴리오를 보기만 한다. 저장하려 하면 서버가 401 AUTH_REQUIRED로 막는다
+if (!isLoggedIn()) {
+  $("#picker").before(h(`<p class="notice" role="note">지금은 예시 포트폴리오를 보고 있어요. 로그인하면 내 포트폴리오를 만들고 저장할 수 있어요.
+    <a href="/login?next=/portfolio">로그인</a></p>`));
+}
 const DONUT = [color("--ice"), color("--lavender"), "#5ea8ff", "#f5c26b", "#4fd1c5", "#f0a6ca", "#9ccc65", "#b39ddb"];
 
 let portfolios = [];

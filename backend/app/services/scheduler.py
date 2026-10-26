@@ -3,6 +3,7 @@
 - 노출 종목(+관심종목·포트폴리오 종목) 갱신: REFRESH_TTL_HOURS(4시간)마다 POST /market/refresh와 같은 작업
 - 비교군 갱신: 매일 daily_at_kst(07:00 KST) 이후 1회 — 공시 증분·선정(30일마다)·평시 데이터·점수
 - 백그라운드 재무 적재: 매일 background.run_at_kst(08:00 KST) 이후 1회 — listed 종목을 하루 예산만큼(app/ingest/background.py)
+- 게스트 정리(2차 로그인): 1시간마다 — 마지막 접속 후 GUEST_RETENTION_DAYS(3일) 지난 게스트 삭제(app/services/guest.py)
 - check_minutes(5분)마다 할 일이 있는지만 확인한다. 실제 작업은 별도 스레드에서 돌아 API 응답을 막지 않는다.
 - 같은 작업이 여러 프로세스(워커 여러 개, CLI 수동 실행)에서 겹치지 않도록 PostgreSQL advisory lock을 쓴다.
 서버를 띄우지 않는 환경이면 같은 작업을 cron·작업 스케줄러로 `python -m app.ingest refresh` / `benchmark`로 돌린다.
@@ -18,11 +19,13 @@ from sqlalchemy import Engine, text
 
 from app.core.config import get_settings
 from app.ingest import background, benchmark
+from app.services.guest import cleanup_guests
 
 log = logging.getLogger(__name__)
 SEOUL = ZoneInfo("Asia/Seoul")
 # 작업이 실패하면 성공 기록이 없어 매 확인마다 '해야 할 일'이 된다 → 시도 사이 최소 간격으로 외부 호출 폭주를 막는다
-MIN_RETRY = {"refresh": timedelta(minutes=30), "benchmark": timedelta(minutes=60), "background": timedelta(minutes=60)}
+MIN_RETRY = {"refresh": timedelta(minutes=30), "benchmark": timedelta(minutes=60), "background": timedelta(minutes=60),
+             "guests": timedelta(minutes=60)}
 
 
 def daily_boundary(now: datetime, at: time) -> datetime:
@@ -81,6 +84,9 @@ class Scheduler:
         if benchmark_due(last_background_success(self.engine), now, self.background_at) and self._may_try("background", now):
             if background.run_background(self.engine, self.providers(), now=now) is not None:
                 ran.append("background")
+        if self._may_try("guests", now):          # 외부 호출 없는 DELETE 한 번이라 성공 기록 없이 1시간 간격만 지킨다
+            cleanup_guests(self.engine, get_settings().guest_retention_days)
+            ran.append("guests")
         return ran
 
     async def run_forever(self) -> None:

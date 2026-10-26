@@ -1,6 +1,6 @@
 // 사이드바(데스크톱) / 하단 탭 바(768px 미만) — 모든 페이지 공통
 // 마지막 갱신 시각·새로고침 버튼은 Stage 3(작업별 최신/오래됨 포함), 상단 검색은 Stage 5에서 추가한다.
-import { getRefreshStatus, postRefresh } from "../api.js";   // [S3-A]
+import { getMe, getRefreshStatus, isLoggedIn, loadPrefs, logout, postRefresh } from "../api.js";   // [S3-A] · 2차 로그인
 import { dateTime, esc, relative } from "../format.js";   // [S3-A]
 import { icons } from "./icons.js";
 import { h, toast } from "./ui.js";   // [S3-A] toast
@@ -28,6 +28,7 @@ export function mountSidebar(active) {
         <span class="nav__icon-wrap"><span class="nav__icon">${n.icon}</span></span><span>${n.label}</span></a>`).join("")}
     </nav>`),
     h(`<div class="sidebar__foot">
+        <div class="account" data-account></div>
         <span class="label">마지막 갱신</span>
         <span class="value" data-refreshed>–</span>
         <div class="basis" data-jobs></div>
@@ -35,6 +36,7 @@ export function mountSidebar(active) {
         <button class="btn btn--sm" type="button" data-refresh aria-label="시장 데이터 새로고침">${icons.refresh}<span>새로고침</span></button>
       </div>`),
   );
+  mountAccount(aside.querySelector("[data-account]"));
   // ── [S3-A] 마지막 갱신 시각 · 작업별 상태 · 새로고침 버튼 ──
   const label = aside.querySelector("[data-refreshed]");
   const jobs = aside.querySelector("[data-jobs]");
@@ -69,4 +71,24 @@ export function mountSidebar(active) {
       btn.removeAttribute("aria-busy");
     }
   });
+}
+
+// ── 2차 로그인: 계정 표시 (휴대폰 하단 탭 바에서는 숨기고, 설정 화면의 계정 칸을 쓴다) ──
+// 로그인했으면 탭마다 한 번 계정 설정을 가져오고, 이 브라우저 값과 다르면 다시 그린다
+function mountAccount(box) {
+  const next = encodeURIComponent(location.pathname + location.search);
+  const showLoggedOut = () => box.replaceChildren(h(`<div class="account__row">
+      <span class="label">로그인하지 않음</span>
+      <a class="btn btn--sm btn--primary" href="/login?next=${next}">로그인</a></div>`));
+  if (!isLoggedIn()) return showLoggedOut();
+  getMe().then(async (me) => {
+    if (!me.logged_in) return showLoggedOut();
+    box.replaceChildren(h(`<div class="account__row">
+        <a class="value account__name" href="/settings" title="${esc(me.email)}">${esc(me.nickname)}</a>
+        <button class="btn btn--sm" type="button">로그아웃</button></div>`));
+    box.querySelector("button").addEventListener("click", async () => {
+      try { await logout(); location.reload(); } catch (e) { toast(e.message, "error"); }
+    });
+    if (await loadPrefs().catch(() => false)) location.reload();
+  }).catch(showLoggedOut);
 }

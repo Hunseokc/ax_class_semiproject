@@ -19,7 +19,8 @@ STAGE4_TABLES = {"scoring_presets", "scoring_weights", "stock_metric_values", "s
 STAGE5_TABLES = {"data_freshness", "fundamental_bases"}
 STAGE6_TABLES = {"sector_performance_daily", "market_sentiment_daily"}
 EXTRA_TABLES = {"ingest_cursor"}                     # 추가 기능 4-1
-ALL_TABLES = STAGE1_TABLES | STAGE2_TABLES | STAGE3_TABLES | STAGE4_TABLES | STAGE5_TABLES | STAGE6_TABLES | EXTRA_TABLES
+AUTH_TABLES = {"user_preferences"}                  # 2차 로그인
+ALL_TABLES = STAGE1_TABLES | STAGE2_TABLES | STAGE3_TABLES | STAGE4_TABLES | STAGE5_TABLES | STAGE6_TABLES | EXTRA_TABLES | AUTH_TABLES
 
 
 def test_orm_matches_schema(engine):
@@ -66,6 +67,10 @@ def test_tables_are_stage1_to_6_only(engine):
                   "VALUES ('INTERNAL', 'PRICES', 'SUCCESS', now(), now() - interval '1 hour')"),
     # ── Stage 2 ──
     ("닉네임 중복", "INSERT INTO users (nickname) VALUES ('demo')"),
+    ("이메일 대문자", "INSERT INTO users (nickname, email, password_hash) VALUES ('a', 'A@x.com', 'h')"),
+    ("이메일만 있고 로그인 수단 없음", "INSERT INTO users (nickname, email) VALUES ('a', 'a@x.com')"),
+    ("이메일 없는 비밀번호", "INSERT INTO users (nickname, password_hash) VALUES ('a', 'h')"),
+    ("설정이 객체가 아님", "INSERT INTO user_preferences (user_id, prefs) VALUES (1, '[]')"),
     ("관심종목 중복(PK)", "INSERT INTO watchlist_items (user_id, stock_id) VALUES (1, 1), (1, 1)"),
     ("없는 사용자 관심종목 FK", "INSERT INTO watchlist_items (user_id, stock_id) VALUES (999, 1)"),
     ("시드 0", "INSERT INTO portfolios (user_id, name, seed_krw) VALUES (1, 'P', 0)"),

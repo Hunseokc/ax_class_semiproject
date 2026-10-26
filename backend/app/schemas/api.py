@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -610,3 +610,79 @@ class SearchItem(Schema):
 class SearchOut(Schema):
     q: str
     items: list[SearchItem]
+
+
+# ── 2차 로그인 ────────────────────────────────────────────────────
+# (가입·로그인·Google·비밀번호 변경·탈퇴 요청, 토큰·내 계정·설정 응답. 형식만 여기서 보고 중복·일치 여부는 services/auth.py가 본다)
+EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+Email = Field(max_length=254, pattern=EMAIL_PATTERN, examples=["me@example.com"])
+Password = Field(min_length=8, max_length=128, description="8~128자")
+
+
+class SignupIn(Schema):
+    email: str = Email
+    password: str = Password
+    nickname: str = Field(min_length=2, max_length=20, pattern=r"^[0-9A-Za-z가-힣_.-]+$",
+                          description="2~20자, 한글·영문·숫자·_.- (guest-로 시작하거나 demo는 안 됨)")
+
+    @field_validator("nickname")
+    @classmethod
+    def _reserved(cls, v: str) -> str:
+        if v.lower().startswith("guest-") or v.lower() in {"demo", "other"}:
+            raise ValueError("쓸 수 없는 닉네임입니다")
+        return v
+
+
+class LoginIn(Schema):
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=128)
+
+
+class GoogleLoginIn(Schema):
+    credential: str = Field(max_length=4096, description="Google Identity Services가 준 ID token(JWT)")
+
+
+class PasswordChangeIn(Schema):
+    current_password: str | None = Field(None, max_length=128, description="Google로만 가입해 비밀번호가 없으면 비운다")
+    new_password: str = Password
+
+
+class WithdrawIn(Schema):
+    password: str | None = Field(None, max_length=128, description="비밀번호가 있는 계정만 필요")
+
+
+class MeOut(Schema):
+    logged_in: bool
+    user_id: int | None              # 로그인하지 않았으면 null
+    nickname: str | None
+    email: str | None
+    has_password: bool = False
+    has_google: bool = False
+
+
+class TokenOut(Schema):
+    access_token: str                # Authorization: Bearer 로 보낸다. refresh token은 httpOnly 쿠키로만 간다
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int                  # 초
+    user: MeOut
+
+
+class AuthConfigOut(Schema):
+    google_client_id: str | None     # 없으면 Google 로그인 버튼을 숨긴다
+
+
+class PrefsIn(Schema):
+    """보낸 칸만 바꾼다. null을 보내면 그 칸을 지운다."""
+    theme: Literal["light", "dark"] | None = None
+    preset: str | None = Field(None, max_length=20)
+    metrics: list[Annotated[str, Field(max_length=40)]] | None = Field(None, max_length=30)
+    watch_view: Literal["card", "compact"] | None = None
+    home_portfolio: int | None = Field(None, ge=1, le=INT_MAX)
+
+
+class PrefsOut(Schema):
+    theme: Literal["light", "dark"] | None = None
+    preset: str | None = None
+    metrics: list[str] | None = None
+    watch_view: Literal["card", "compact"] | None = None
+    home_portfolio: int | None = None

@@ -143,7 +143,7 @@ def test_scheduler_tick_runs_due_jobs_once(engine, monkeypatch):
     monkeypatch.setattr(benchmark, "run_benchmark", fake_run)
     monkeypatch.setattr(background, "run_background", fake_background)
     sch = Scheduler(engine, lambda: RefreshService(engine, p, FxService(engine, p.fx, 4), 4), lambda: p, None)
-    assert sch.tick() == ["refresh", "benchmark", "background"]
+    assert sch.tick() == ["refresh", "benchmark", "background", "guests"]
     assert sch.tick() == []                                            # 4시간 TTL·오늘 07:00·08:00 이후 이미 실행
     assert ran == ["benchmark", "background"]
 

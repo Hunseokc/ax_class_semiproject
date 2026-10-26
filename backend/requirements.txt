@@ -13,3 +13,6 @@ pykrx==1.2.9
 exchange-calendars==4.13.2
 yfinance==1.7.0
 python-dotenv==1.2.4
+PyJWT[crypto]==2.15.1
+argon2-cffi==25.1.0
+redis==8.1.0

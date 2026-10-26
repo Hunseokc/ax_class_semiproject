@@ -1,4 +1,5 @@
 // 대시보드 '주요 지수 · 환율'에 표시할 지표 선택 — 카드 줄 아래 펼침 박스. 선택은 브라우저에 저장한다.
+import { savePref } from "../api.js";   // 2차 로그인: 계정에도 저장
 import { esc } from "../format.js";
 import { icons } from "./icons.js";
 import { h } from "./ui.js";
@@ -20,6 +21,7 @@ export function storedMetrics(available) {
 
 function saveMetrics(codes) {
   try { localStorage.setItem(KEY, JSON.stringify(codes)); } catch { /* 저장 불가(사생활 보호 모드 등)면 이번 화면에서만 유지 */ }
+  savePref("metrics");
 }
 
 /**

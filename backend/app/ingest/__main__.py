@@ -15,7 +15,8 @@
     python -m app.ingest explain             # 인덱스 전후 EXPLAIN 비교 → 개발산출물/explain_result.md
     python -m app.ingest seed-demo           # demo 관심종목 8건 + 모의 포트폴리오 2개
     python -m app.ingest status              # 테이블별 행 수·기간·최근 실패
-    python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용)
+    python -m app.ingest refresh             # POST /market/refresh와 같은 TTL 갱신 (cron용) + 오래된 게스트 정리
+    python -m app.ingest cleanup-guests      # 마지막 접속 후 GUEST_RETENTION_DAYS(3일) 지난 게스트 삭제
     python -m app.ingest benchmark [--reselect]   # 매력도 비교군: 선정(30일마다/강제) → 평시 데이터 → 점수
     python -m app.ingest hydrate 042700      # 비교군 종목 상세(공시·2년 일봉·5개년 재무) 받기
     python -m app.ingest listing             # 상장 보통주 목록(국내 pykrx·미국 SEC) → 검색용 마스터(coverage=listed)
@@ -110,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tickers", nargs="*")
     # ── [S3-D] 갱신 ──
     sub.add_parser("refresh")
+    sub.add_parser("cleanup-guests")
     # ── [S3-C] 밸류에이션·전체 적재 ──
     p = sub.add_parser("valuation")
     p.add_argument("--full", action="store_true")
@@ -184,6 +186,12 @@ def main(argv: list[str] | None = None) -> int:
         for j in result.jobs:
             print(f"{j.job_type:<10} {j.status:<8} {j.detail or ''}")
         print("next_refresh_available_at:", result.next_refresh_available_at.isoformat())
+        # 서버가 0대까지 줄어드는 배포(Cloud Run)는 앱 안 스케줄러가 멈추므로 갱신 Job이 게스트 정리도 맡는다
+        from app.services.guest import cleanup_guests
+        print("guests_removed:", cleanup_guests(engine, get_settings().guest_retention_days))
+    elif args.cmd == "cleanup-guests":
+        from app.services.guest import cleanup_guests
+        print("guests_removed:", cleanup_guests(engine, get_settings().guest_retention_days))
     # ── [S3-C] 밸류에이션·전체 적재 ──
     elif args.cmd == "valuation":
         jobs.load_valuations(engine, providers(), full=args.full, tickers=args.tickers)

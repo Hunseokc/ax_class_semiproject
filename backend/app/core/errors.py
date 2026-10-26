@@ -44,6 +44,15 @@ class ServiceUnavailable(AppError):
     status_code, code = 503, "SERVICE_UNAVAILABLE"
 
 
+# ── 2차 로그인 ──
+class Unauthorized(AppError):
+    status_code, code = 401, "AUTH_REQUIRED"
+
+
+class TooManyRequests(AppError):
+    status_code, code = 429, "TOO_MANY_REQUESTS"
+
+
 def _body(code: str, message: str, detail: Any = None) -> dict:
     return {"error": {"code": code, "message": message, "detail": jsonable_encoder(detail)}}
 

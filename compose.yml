@@ -24,6 +24,19 @@ services:
       retries: 10
     restart: unless-stopped
 
+  redis:                        # 2차 로그인: refresh token 저장·폐기, 로그인 시도 제한 (배포는 Upstash)
+    image: redis:7.4-alpine
+    container_name: stockmind_redis
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -35,6 +48,8 @@ services:
       # .env의 localhost:5433(호스트에서 접속하는 주소)을 컨테이너 네트워크 주소로 덮어쓴다
       DATABASE_URL: postgresql+psycopg://stock:stock@db:5432/stockdb
       TEST_DATABASE_URL: postgresql+psycopg://stock:stock@db:5432/stockdb_test
+      REDIS_URL: redis://redis:6379/0
+      TEST_REDIS_URL: redis://redis:6379/15
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
@@ -42,6 +57,8 @@ services:
       - ${EXTRA_CA_DIR:-./certs}:/certs:ro      # 추가 CA(*.pem·*.crt). 없으면 시스템 CA만 사용
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 

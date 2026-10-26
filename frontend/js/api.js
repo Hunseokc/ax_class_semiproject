@@ -16,25 +16,85 @@ export async function request(method, path, { params, body, signal } = {}) {
   for (const [k, v] of Object.entries(params || {})) {
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
   }
-  let res;
-  try {
-    res = await fetch(url, {
-      method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-      signal,
-    });
-  } catch (e) {
-    if (e.name === "AbortError") throw e;            // 이어 입력해서 취소한 요청은 호출한 쪽이 무시한다
-    throw new ApiError(0, "NETWORK_ERROR", "서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+  // [2차 로그인] 로그인했으면 access token을 싣는다. 만료(401 TOKEN_EXPIRED)면 refresh 후 한 번 다시 보낸다
+  const authPath = ["/auth/refresh", "/auth/login", "/auth/signup", "/auth/google"].some((x) => path.startsWith(x));
+  if (!authPath) await ensureAccess();
+  const send = async () => {
+    const headers = body ? { "Content-Type": "application/json" } : {};
+    if (!authPath && auth.token) headers.Authorization = `Bearer ${auth.token}`;
+    try {
+      return await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal });
+    } catch (e) {
+      if (e.name === "AbortError") throw e;            // 이어 입력해서 취소한 요청은 호출한 쪽이 무시한다
+      throw new ApiError(0, "NETWORK_ERROR", "서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+    }
+  };
+  const read = async (r) => (r.status === 204 ? null : r.json().catch(() => null));
+  let res = await send();
+  let data = await read(res);
+  if (res.status === 401 && !authPath && auth.token && ["TOKEN_EXPIRED", "INVALID_TOKEN"].includes(data?.error?.code)) {
+    await refreshAccess();                            // 실패하면 토큰을 지운다 → 로그인 없이 다시 보낸다
+    res = await send();
+    data = await read(res);
   }
   if (res.status === 204) return null;
-  const data = await res.json().catch(() => null);
   if (!res.ok) {
     const e = data?.error || {};
     throw new ApiError(res.status, e.code || "HTTP_ERROR", e.message || `요청이 실패했습니다 (${res.status})`, e.detail);
   }
   return data;
+}
+
+// ── 2차 로그인: access token 보관 ──
+// access token(15분)은 이 탭의 sessionStorage에만 둔다(화면을 옮겨도 다시 받지 않게). refresh token은 httpOnly 쿠키라 JS가 못 본다.
+// "로그인한 적 있음" 표시(localStorage)가 있을 때만 새 탭에서 refresh를 시도한다 → 로그인하지 않은 사람은 refresh 호출이 없다.
+const AT_KEY = "stockmind:at";
+const HINT_KEY = "stockmind:logged-in";
+const auth = { token: null, exp: 0, pending: null };
+try {
+  const saved = JSON.parse(sessionStorage.getItem(AT_KEY));
+  if (saved?.token) Object.assign(auth, { token: saved.token, exp: saved.exp });
+} catch { /* 저장 불가면 탭마다 refresh */ }
+
+function setAccess(t) {
+  auth.token = t?.access_token ?? null;
+  auth.exp = t ? Date.now() + t.expires_in * 1000 : 0;
+  try {
+    if (auth.token) {
+      sessionStorage.setItem(AT_KEY, JSON.stringify({ token: auth.token, exp: auth.exp }));
+      localStorage.setItem(HINT_KEY, "1");
+    } else {
+      sessionStorage.removeItem(AT_KEY);
+      localStorage.removeItem(HINT_KEY);
+    }
+  } catch { /* 저장 불가면 이번 화면에서만 유지 */ }
+  return t;
+}
+
+const loggedInHint = () => { try { return localStorage.getItem(HINT_KEY) === "1"; } catch { return false; } };
+
+/** refresh token으로 access token을 다시 받는다(동시에 여러 번 불러도 한 번만). 다른 탭과 겹치면(REFRESH_RETRY) 잠시 뒤 한 번 더. */
+async function refreshAccess() {
+  if (!auth.pending) {
+    auth.pending = (async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const res = await fetch(BASE + "/auth/refresh", { method: "POST" }).catch(() => null);
+        const data = res ? await res.json().catch(() => null) : null;
+        if (res?.ok) return setAccess(data);
+        if (data?.error?.code !== "REFRESH_RETRY") break;
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      return setAccess(null);
+    })().finally(() => { auth.pending = null; });
+  }
+  return auth.pending;
+}
+
+/** 요청 전에: 토큰이 곧(30초 안) 만료되거나, 새 탭이라 없는데 로그인한 적이 있으면 먼저 refresh */
+async function ensureAccess() {
+  if (auth.pending) return auth.pending;
+  if (auth.token ? auth.exp - Date.now() < 30_000 : loggedInHint()) return refreshAccess();
+  return null;
 }
 
 export const api = {
@@ -109,6 +169,7 @@ export function getPreset() {
 
 export function setPreset(code, { silent = false } = {}) {
   try { localStorage.setItem(PRESET_KEY, code); } catch { /* 저장 불가(사생활 보호 모드 등)면 URL로만 유지 */ }
+  if (!silent) savePref("preset");   // [2차 로그인] 사용자가 바꾼 값만 계정에도 저장
   const url = new URL(location.href);
   url.searchParams.set("preset", code);
   history.replaceState(history.state, "", url);
@@ -160,3 +221,63 @@ export const searchStocks = (q, signal) => request("GET", "/stocks/search", { pa
 export const getHomeRanking = (kind, country, limit = 5) => api.get("/home/ranking", { kind, country, limit, preset: getPreset() });
 export const getSectors = (country) => api.get("/home/sectors", { country });
 export const getSentiment = (country) => api.get("/home/sentiment", { country });
+
+// ── 2차 로그인 ──
+// getMe → {logged_in, user_id, nickname, email, has_password, has_google}. 로그인·가입·Google은 받은 access token을 보관한다
+export const getAuthConfig = () => api.get("/auth/config");
+export const getMe = () => api.get("/auth/me");
+export const isLoggedIn = () => Boolean(auth.token) || loggedInHint();
+export const signup = async (email, password, nickname) => setAccess(await api.post("/auth/signup", { email, password, nickname })).user;
+export const login = async (email, password) => setAccess(await api.post("/auth/login", { email, password })).user;
+export const googleLogin = async (credential) => setAccess(await api.post("/auth/google", { credential })).user;
+export const logout = async () => { try { await api.post("/auth/logout"); } finally { setAccess(null); } };
+export const logoutAll = async () => { await api.post("/auth/logout-all"); setAccess(null); };
+export const changePassword = (current_password, new_password) => api.put("/auth/password", { current_password, new_password });
+export const withdraw = async (password) => { await request("DELETE", "/auth/me", { body: { password } }); setAccess(null); };
+
+// 사용자별 설정 — 화면은 지금처럼 localStorage를 읽고 쓰고, 로그인했으면 계정에도 저장한다(다른 기기에서 이어짐).
+// 서버 칸 → localStorage 키·형식 (app/services/auth.py PREF_KEYS와 같은 목록)
+const PREF_STORAGE = {
+  theme: ["stockmind:theme", "str"], preset: ["scorePreset", "str"], metrics: ["marketMetrics", "json"],
+  watch_view: ["watchViewHome", "str"], home_portfolio: ["homePortfolio", "num"],
+};
+const PREFS_SYNCED = "stockmind:prefs-synced";
+const readPref = (name) => {
+  const [key, kind] = PREF_STORAGE[name];
+  try {
+    const v = localStorage.getItem(key);
+    if (v === null) return null;
+    return kind === "json" ? JSON.parse(v) : kind === "num" ? Number(v) || null : v;
+  } catch { return null; }
+};
+let prefTimer = null;
+const dirtyPrefs = new Set();
+
+/** localStorage에 저장한 설정 하나를 계정에도 저장한다(로그인했을 때만, 0.5초 모아서). */
+export function savePref(name) {
+  if (!PREF_STORAGE[name] || !isLoggedIn()) return;
+  dirtyPrefs.add(name);
+  clearTimeout(prefTimer);
+  prefTimer = setTimeout(() => {
+    const body = Object.fromEntries([...dirtyPrefs].map((n) => [n, readPref(n)]));
+    dirtyPrefs.clear();
+    api.put("/auth/me/preferences", body).catch(() => { /* 저장 실패해도 이 브라우저 값은 그대로 */ });
+  }, 500);
+}
+
+/** 계정 설정을 localStorage로 가져온다(탭마다 한 번, force면 바로). 바뀐 게 있으면 true. */
+export async function loadPrefs({ force = false } = {}) {
+  try { if (!force && sessionStorage.getItem(PREFS_SYNCED)) return false; } catch { /* 계속 */ }
+  const prefs = await api.get("/auth/me/preferences");
+  let changed = false;
+  for (const [name, [key, kind]] of Object.entries(PREF_STORAGE)) {
+    const v = prefs[name];
+    if (v === null || v === undefined) continue;
+    const raw = kind === "json" ? JSON.stringify(v) : String(v);
+    try {
+      if (localStorage.getItem(key) !== raw) { localStorage.setItem(key, raw); changed = true; }
+    } catch { /* 저장 불가 */ }
+  }
+  try { sessionStorage.setItem(PREFS_SYNCED, "1"); } catch { /* 저장 불가 */ }
+  return changed;
+}

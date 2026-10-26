@@ -16,6 +16,7 @@
 --            sector_performance_daily·market_sentiment_daily (+ ingestion_logs.job_type에 SECTORS_US·SECTORS_KR) — 기존 DB는 007_home_widgets
 --   추가 기능 4-1: ingest_cursor(공시 목록 증분 기준점) — 기존 DB는 008_ingest_cursor
 --   추가 기능 4-3: stocks.cap_rank·cap_ranked_at(미국 시가총액 순위) — 기존 DB는 009_cap_rank
+--   2차 로그인: users.email·password_hash·google_sub·last_login_at·last_seen_at, user_preferences — 기존 DB는 011_auth
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -179,11 +180,21 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 사용자: 인증 없음. 기본 사용자 1명(demo)은 load_master가 시드한다(get_current_user_id = 설정 DEFAULT_USER_ID). 2차에서 로그인으로 대체
+-- 사용자: 기본 사용자 1명(demo)은 load_master가 시드한다(get_current_user_id = 설정 DEFAULT_USER_ID).
+-- 계정 = email이 있는 사용자(비밀번호와 Google 중 하나 이상, migration 011). 게스트·demo는 email이 NULL.
+-- 토큰은 DB에 두지 않는다: access token(JWT)은 서명으로 검증, refresh token·로그인 시도 제한은 Redis
 CREATE TABLE users (
-  user_id    SERIAL PRIMARY KEY,
-  nickname   VARCHAR(50) NOT NULL UNIQUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  user_id       SERIAL PRIMARY KEY,
+  nickname      VARCHAR(50)  NOT NULL UNIQUE,
+  created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  email         VARCHAR(254) UNIQUE CHECK (email = lower(email)),
+  password_hash VARCHAR(200),
+  google_sub    VARCHAR(255) UNIQUE,
+  last_login_at TIMESTAMPTZ,
+  last_seen_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),   -- 게스트 마지막 접속(1시간에 한 번 갱신) — 3일 지나면 정리 작업이 지운다
+  CONSTRAINT users_account_check
+    CHECK (email IS NULL AND password_hash IS NULL AND google_sub IS NULL
+           OR email IS NOT NULL AND (password_hash IS NOT NULL OR google_sub IS NOT NULL))
 );
 
 -- 관심종목: 사용자 ↔ 종목 N:M 교차 테이블 + 정렬 순서·메모·목표가
@@ -397,4 +408,12 @@ CREATE TABLE ingest_cursor (
   last_rcept_no CHAR(14)     NOT NULL CHECK (last_rcept_no ~ '^[0-9]{14}$'),
   last_rcept_dt DATE         NOT NULL,
   updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+-- ── 2차 로그인 (migration 011) ──
+-- 사용자별 설정(테마·투자 성향·지표 선택 등). 키 목록은 app/services/auth.py PREF_KEYS
+CREATE TABLE user_preferences (
+  user_id    INT          PRIMARY KEY REFERENCES users ON DELETE CASCADE,
+  prefs      JSONB        NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(prefs) = 'object'),
+  updated_at TIMESTAMPTZ  NOT NULL DEFAULT now()
 );

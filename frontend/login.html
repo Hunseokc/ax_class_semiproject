@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>로그인 · StockMind</title>
+  <meta name="description" content="StockMind 로그인·회원가입">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>let t = null; try { t = localStorage.getItem("stockmind:theme"); } catch {} if (t !== "dark") document.documentElement.dataset.theme = "light";</script>   <!-- 테마(기본 라이트): 첫 그리기 전에 적용 (깜빡임 방지) -->
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/pages.css">
+  <script type="module" src="/static/js/pages/login.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="main__inner">
+        <header class="page-head">
+          <div><p class="subtle">Account</p><h1 data-title>로그인</h1></div>
+        </header>
+        <section class="card auth" aria-labelledby="h-auth">
+          <h2 id="h-auth" class="sr-only">로그인 또는 회원가입</h2>
+          <div id="auth-tabs"></div>
+          <form id="auth-form" class="auth__form" novalidate>
+            <div class="field"><label for="email">이메일</label>
+              <input class="input" id="email" name="email" type="email" autocomplete="email" required maxlength="254"></div>
+            <div class="field"><label for="password">비밀번호</label>
+              <input class="input" id="password" name="password" type="password" autocomplete="current-password" required maxlength="128">
+              <p class="subtle auth__hint" data-signup hidden>8자 이상</p></div>
+            <div class="field" data-signup hidden><label for="nickname">닉네임</label>
+              <input class="input" id="nickname" name="nickname" autocomplete="nickname" maxlength="20">
+              <p class="subtle auth__hint">2~20자, 한글·영문·숫자·_.-</p></div>
+            <p class="auth__error" role="alert" data-error hidden></p>
+            <button class="btn btn--primary" type="submit" data-submit>로그인</button>
+            <p class="subtle auth__note" data-signup hidden>지금 이 브라우저에서 담은 관심종목은 가입한 계정으로 그대로 옮겨져요.</p>
+          </form>
+          <div class="auth__google" data-google hidden>
+            <p class="subtle auth__or">또는</p>
+            <div data-google-button></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
