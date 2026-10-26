@@ -271,7 +271,8 @@ def test_google_rejects_bad_tokens(google, over):
     assert err(google(**over)) == (401, "INVALID_GOOGLE_TOKEN")
 
 
-def test_google_disabled_without_client_id(web):
+def test_google_disabled_without_client_id(web, monkeypatch):
+    monkeypatch.setattr(auth_api, "get_settings", lambda: Settings(google_client_id=""))   # 로컬 .env 값과 상관없이
     assert err(web.post("/api/v1/auth/google", json={"credential": "x"})) == (503, "GOOGLE_LOGIN_DISABLED")
     assert web.get("/api/v1/auth/config").json() == {"google_client_id": None}
 
