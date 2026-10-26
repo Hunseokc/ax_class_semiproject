@@ -580,3 +580,15 @@ a.home-pf__legend-row:hover .home-pf__legend-name { text-decoration: underline; 
 /* ---------------------------------------------------------------- 설정 */
 .settings__row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-4); }
 .settings__title { font-size: var(--fs-md); margin: 0 0 var(--sp-1); }
+
+/* ---------------------------------------------------------------- 2차 로그인 */
+.auth { max-width: 440px; display: flex; flex-direction: column; gap: var(--sp-5); }
+.auth__form { display: flex; flex-direction: column; gap: var(--sp-4); }
+.auth__hint, .auth__note { margin: 0; font-size: var(--fs-xs); }
+.auth__error { margin: 0; color: var(--danger-text); font-size: var(--fs-sm); }
+.settings__account { display: flex; flex-direction: column; gap: var(--sp-5); }
+.settings__account form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3); }
+.settings__account form .field { flex: 1 1 180px; }
+.settings__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.auth__google { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+.auth__or { margin: 0; font-size: var(--fs-xs); }

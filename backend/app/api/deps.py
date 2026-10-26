@@ -1,6 +1,8 @@
 """FastAPI 의존성. 테스트는 get_engine_dep·get_providers를 override해 테스트 DB·fake provider를 주입한다."""
 from __future__ import annotations
 
+import secrets
+import time
 from collections.abc import Iterator
 from functools import lru_cache
 from typing import Annotated
@@ -11,12 +13,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import get_engine, session_factory
-from app.core.errors import NotFound, Unprocessable
+from app.core.errors import NotFound, Unauthorized, Unprocessable
+from app.core.redis import get_redis
 from app.ingest.benchmark import config as benchmark_config
 from app.providers.factory import Providers, default_providers
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN
+from app.services.auth import RefreshStore, read_access_token
 from app.services.fx import FxService
-from app.services.guest import create_guest, user_exists
+from app.services.guest import TOUCH_SECONDS, create_guest, touch_guest, user_exists
 from app.services.hydration import Hydrator
 from app.services.portfolio import PortfolioService
 from app.services.refresh import RefreshService
@@ -53,28 +57,78 @@ def resolve_stock(db: Session, market: str, ticker: str) -> dict:
     return dict(row)
 
 
-# ── [S2-D] 현재 사용자·경로 id ──
+# ── [S2-D] 현재 사용자·경로 id ── (2차: 로그인 = Authorization: Bearer <JWT access token>)
 READ_METHODS = {"GET", "HEAD", "OPTIONS"}
+_DEV_JWT_SECRET = secrets.token_hex(32)     # JWT_SECRET이 없을 때(개발) 프로세스마다 새로 — 재시작하면 모두 다시 로그인
 
 
-def get_current_user_id(request: Request, db: Session = Depends(get_db)) -> int:
-    """요청 사용자. 기본은 단일 사용자(데모) 모드라 설정값을 그대로 쓴다. 2차에서 JWT 검증으로 교체한다.
+def jwt_secret() -> str:
+    return get_settings().jwt_secret or _DEV_JWT_SECRET
 
-    GUEST_SESSION_ENABLED면 브라우저마다 세션 쿠키로 게스트를 나눈다.
-    쿠키가 없을 때 조회는 데모 사용자를 보여 주고, 첫 쓰기 요청에서 데모 데이터를 복사한 게스트를 만들어 쿠키에 담는다
+
+def get_refresh_store() -> RefreshStore:
+    return RefreshStore(get_redis(), get_settings().refresh_token_days)
+
+
+def get_auth_user_id(request: Request, db: Session = Depends(get_db)) -> int | None:
+    """로그인한 사용자의 user_id. Authorization 헤더가 없으면 None.
+    헤더가 있는데 만료·위조면 401(TOKEN_EXPIRED·INVALID_TOKEN) → 화면이 refresh 후 다시 요청한다. 탈퇴한 사용자도 401."""
+    auth = request.headers.get("authorization", "")
+    if not auth:
+        return None
+    scheme, _, token = auth.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise Unauthorized("로그인 정보가 올바르지 않아요", code="INVALID_TOKEN")
+    uid = read_access_token(token, jwt_secret())
+    if not user_exists(db, uid):
+        raise Unauthorized("로그인 정보가 올바르지 않아요", code="INVALID_TOKEN")
+    return uid
+
+
+def require_login(user_id: int | None = Depends(get_auth_user_id)) -> int:
+    """로그인이 필요한 기능에 쓴다. 로그인하지 않았으면 401 AUTH_REQUIRED."""
+    if user_id is None:
+        raise Unauthorized("로그인이 필요해요")
+    return user_id
+
+
+def get_current_user_id(request: Request, db: Session = Depends(get_db),
+                        auth_user_id: int | None = Depends(get_auth_user_id)) -> int:
+    """요청 사용자. 로그인했으면 그 계정이다. 아니면 기본은 단일 사용자(데모) 모드라 설정값을 그대로 쓴다.
+
+    GUEST_SESSION_ENABLED면 브라우저마다 세션 쿠키로 게스트를 나눈다(관심종목만 저장, 3일 미접속 시 정리).
+    쿠키가 없을 때 조회는 데모 사용자를 보여 주고, 첫 쓰기 요청에서 데모 관심종목을 복사한 게스트를 만들어 쿠키에 담는다
     (조회만 하는 봇·미리보기 요청마다 사용자가 생기지 않게).
     """
+    if auth_user_id is not None:
+        return auth_user_id
     settings = get_settings()
     if not settings.guest_session_enabled:
         return settings.default_user_id
     uid = request.session.get("user_id")
-    if isinstance(uid, int) and user_exists(db, uid):     # DB를 비운 뒤 남은 옛 쿠키는 없는 것으로 본다
+    if isinstance(uid, int) and user_exists(db, uid):     # DB를 비운 뒤·정리된 뒤 남은 옛 쿠키는 없는 것으로 본다
+        now = int(time.time())
+        if now - int(request.session.get("seen", 0)) >= TOUCH_SECONDS:     # 마지막 접속은 1시간에 한 번만 기록
+            touch_guest(db, uid)
+            request.session["seen"] = now
         return uid
     if request.method in READ_METHODS:
         return settings.default_user_id
     uid = create_guest(db, settings.default_user_id)
     request.session["user_id"] = uid
+    request.session["seen"] = int(time.time())
     return uid
+
+
+def get_portfolio_user_id(request: Request, auth_user_id: int | None = Depends(get_auth_user_id),
+                          current_user_id: int = Depends(get_current_user_id)) -> int:
+    """포트폴리오 주인. 게스트(GUEST_SESSION_ENABLED, 비로그인)는 데모 포트폴리오를 보기만 하고 저장은 401 AUTH_REQUIRED."""
+    settings = get_settings()
+    if auth_user_id is not None or not settings.guest_session_enabled:
+        return current_user_id
+    if request.method in READ_METHODS:
+        return settings.default_user_id
+    raise Unauthorized("포트폴리오는 로그인하면 저장할 수 있어요")
 
 
 # 정수 id 경로 파라미터(portfolio_id·item_id 등) — 범위 밖이면 DB 조회 전에 422 VALIDATION_ERROR
@@ -97,7 +151,7 @@ def get_fx_service(engine: Engine = Depends(get_engine_dep), providers: Provider
 
 
 def get_portfolio_service(db: Session = Depends(get_db), fx: FxService = Depends(get_fx_service),
-                          user_id: int = Depends(get_current_user_id)) -> PortfolioService:
+                          user_id: int = Depends(get_portfolio_user_id)) -> PortfolioService:
     return PortfolioService(db, fx, user_id)
 
 

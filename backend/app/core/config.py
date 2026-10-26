@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     # ── [S3-D] 스케줄러 ──
     scheduler_enabled: bool = True                       # 앱 안 스케줄러(주가·지수·환율 1시간·그 밖 4시간 갱신·비교군 1일 갱신)
     scheduler_check_minutes: int = Field(default=5, ge=1)
+    # ── 2차 로그인 ── (JWT access 15분 + refresh 14일 httpOnly 쿠키, refresh·시도 제한은 Redis)
+    jwt_secret: str = ""                             # access token 서명 키(HS256). 배포(guest_session_enabled=true)면 필수
+    access_token_minutes: int = Field(default=15, ge=1, le=60)
+    refresh_token_days: int = Field(default=14, ge=1, le=90)
+    redis_url: str = "redis://localhost:6380/0"      # 배포는 Upstash(rediss://…)
+    test_redis_url: str = "redis://localhost:6380/15"
+    google_client_id: str = ""                       # Google 로그인(Google Identity Services). 비우면 Google 버튼을 숨긴다
+    guest_retention_days: int = Field(default=3, ge=1)   # 게스트(비로그인) 데이터는 마지막 접속 후 이 기간이 지나면 지운다
     # 이후 단계 설정은 해당 단계 담당자가 이 클래스에 추가한다
 
 

@@ -5,7 +5,8 @@ Stage 1 테이블 10개 + Stage 2 테이블 4개(users·watchlist_items·portfol
 + Stage 4 테이블 4개(scoring_presets·scoring_weights·stock_metric_values·stock_scores)
 + Stage 5-D 테이블 2개(data_freshness·fundamental_bases)
 + Stage 6 테이블 2개(sector_performance_daily·market_sentiment_daily)
-+ 추가 기능 테이블 1개(ingest_cursor).
++ 추가 기능 테이블 1개(ingest_cursor)
++ 2차 로그인 테이블 1개(user_preferences).
 """
 from __future__ import annotations
 
@@ -146,10 +147,19 @@ class IngestionLog(Base):
 
 # ── [S2-D] 사용자·관심종목·모의 포트폴리오 ── (updated_at은 DB 트리거 set_updated_at이 갱신한다. watchlist의 memo·target_price·updated_at은 Stage 5)
 class User(Base):
+    """계정 = email이 있는 사용자(비밀번호·Google 중 하나 이상, 2차 로그인). 게스트·demo는 email이 NULL."""
     __tablename__ = "users"
     user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     nickname: Mapped[str] = mapped_column(String(50), unique=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    email: Mapped[str | None] = mapped_column(String(254), unique=True)
+    password_hash: Mapped[str | None] = mapped_column(String(200))
+    google_sub: Mapped[str | None] = mapped_column(String(255), unique=True)
+    last_login_at: Mapped[datetime | None]
+    last_seen_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    __table_args__ = (CheckConstraint("email = lower(email)"),
+                      CheckConstraint("email IS NULL AND password_hash IS NULL AND google_sub IS NULL OR email IS NOT NULL "
+                                      "AND (password_hash IS NOT NULL OR google_sub IS NOT NULL)", name="users_account_check"))
 
 
 class WatchlistItem(Base):
@@ -343,3 +353,13 @@ class IngestCursor(Base):
     last_rcept_dt: Mapped[date] = mapped_column(Date)
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
     __table_args__ = (CheckConstraint("last_rcept_no ~ '^[0-9]{14}$'"),)
+
+
+# ── 2차 로그인 ──
+class UserPreference(Base):
+    """사용자별 설정(테마·투자 성향·지표 선택 등) — 키 목록은 app/services/auth.py PREF_KEYS."""
+    __tablename__ = "user_preferences"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True)
+    prefs: Mapped[dict] = mapped_column(JSONB, server_default="{}")
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    __table_args__ = (CheckConstraint("jsonb_typeof(prefs) = 'object'"),)

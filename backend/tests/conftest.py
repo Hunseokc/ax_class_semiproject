@@ -21,6 +21,7 @@ os.environ["SCHEDULER_ENABLED"] = "false"      # 테스트 중에는 앱 안 스
 from datetime import date, timedelta  # noqa: E402
 
 import pytest
+import redis
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
@@ -28,10 +29,11 @@ from app.api import deps
 from app.core.config import get_settings
 from app.ingest.jobs import init_db
 from app.main import app
+from app.services.auth import RefreshStore
 from app.services.hydration import ON_DEMAND
 from tests.fakes import FakeFx, make_providers
 
-TABLES = ["ingest_cursor", "sector_performance_daily", "market_sentiment_daily", "portfolio_items", "portfolios", "watchlist_items", "users", "ingestion_logs", "fx_rates", "index_daily_prices", "indices", "valuation_snapshots",
+TABLES = ["user_preferences", "ingest_cursor", "sector_performance_daily", "market_sentiment_daily", "portfolio_items", "portfolios", "watchlist_items", "users", "ingestion_logs", "fx_rates", "index_daily_prices", "indices", "valuation_snapshots",
           "daily_prices", "peer_group_members", "peer_groups", "stocks", "markets"]
 
 TODAY = date.today()
@@ -115,12 +117,27 @@ def hydrator():
     return RecordingHydrator()
 
 
+@pytest.fixture(scope="session")
+def redis_client():
+    """테스트 Redis(TEST_REDIS_URL, 기본 db 15). 테스트마다 비운다."""
+    r = redis.Redis.from_url(get_settings().test_redis_url, decode_responses=True)
+    assert r.connection_pool.connection_kwargs.get("db") != 0, "테스트는 Redis db 0을 쓰지 않는다"
+    return r
+
+
 @pytest.fixture
-def client(engine, providers, hydrator):
+def refresh_store(redis_client):
+    redis_client.flushdb()
+    return RefreshStore(redis_client, get_settings().refresh_token_days)
+
+
+@pytest.fixture
+def client(engine, providers, hydrator, refresh_store):
     app.dependency_overrides[deps.get_engine_dep] = lambda: engine
     app.dependency_overrides[deps.get_providers] = lambda: providers
     app.dependency_overrides[deps.get_scorer] = lambda: None
     app.dependency_overrides[deps.get_hydrator] = lambda: hydrator
+    app.dependency_overrides[deps.get_refresh_store] = lambda: refresh_store
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
@@ -128,7 +145,7 @@ def client(engine, providers, hydrator):
 
 @pytest.fixture
 def as_user(client):
-    """이후 요청을 지정한 사용자로 보낸다 (2차에서 JWT가 정할 사용자를 대신함)."""
+    """이후 요청을 지정한 사용자로 보낸다 (로그인(JWT)으로 정할 사용자를 대신함 — 실제 토큰 흐름은 test_auth)."""
     def _set(user_id: int) -> None:
         app.dependency_overrides[deps.get_current_user_id] = lambda: user_id
     return _set

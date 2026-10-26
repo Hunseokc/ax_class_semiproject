@@ -1,4 +1,4 @@
-"""FastAPI 앱. API는 /api/v1, 정적 파일은 /static, 화면은 /, /stocks, /stocks/{market}/{ticker}, /portfolio, /settings.
+"""FastAPI 앱. API는 /api/v1, 정적 파일은 /static, 화면은 /, /stocks, /stocks/{market}/{ticker}, /portfolio, /settings, /login.
 
 실행: uvicorn app.main:app --reload
 """
@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import analysis, deps, health, home, market, portfolios, stocks, watchlist
+from app.api import analysis, auth, deps, health, home, market, portfolios, stocks, watchlist
 from app.core.config import FRONTEND_DIR, get_settings
 from app.core.db import get_engine
 from app.core.errors import NotFound, install_error_handlers, internal_error_response
@@ -60,8 +60,11 @@ app = FastAPI(
 install_error_handlers(app)
 
 # ── [S4-D] 게스트 세션 ── (GUEST_SESSION_ENABLED일 때만 deps.get_current_user_id가 쿠키를 읽고 쓴다)
+# 2차 로그인은 이 쿠키를 쓰지 않는다(JWT access + refresh 쿠키, app/api/auth.py). 배포에서는 JWT_SECRET도 필수
 if get_settings().guest_session_enabled and not get_settings().session_secret:
     raise RuntimeError("GUEST_SESSION_ENABLED=true면 SESSION_SECRET이 필요합니다")
+if get_settings().guest_session_enabled and len(get_settings().jwt_secret) < 32:
+    raise RuntimeError("GUEST_SESSION_ENABLED=true면 32자 이상의 JWT_SECRET이 필요합니다")
 app.add_middleware(SessionMiddleware, secret_key=get_settings().session_secret or secrets.token_hex(32),
                    session_cookie="stockmind_session", max_age=365 * 24 * 3600, same_site="lax", https_only=True)
 
@@ -111,6 +114,9 @@ for r in (analysis.router, analysis.stats_router, analysis.scoring_router):
 # ── [S6] 홈 위젯 ──
 api.include_router(home.router)
 
+# ── 2차 로그인 ──
+api.include_router(auth.router)
+
 app.include_router(api)
 app.include_router(health.router)       # /health, /health/db — /api/v1 밖
 
@@ -150,3 +156,8 @@ def page_portfolio():
 @app.get("/settings", include_in_schema=False)
 def page_settings():
     return _page("settings.html")
+
+
+@app.get("/login", include_in_schema=False)
+def page_login():
+    return _page("login.html")

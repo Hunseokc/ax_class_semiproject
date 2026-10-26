@@ -1,5 +1,5 @@
 // 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
-import { PRESET_EVENT, getFx, getIndices, getPortfolioSummary, getPortfolios, getPreset, getHomeRanking, getSectors, getSentiment, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S6-A] getHomeRanking·getSectors·getSentiment · 포트폴리오 요약
+import { PRESET_EVENT, savePref, getFx, getIndices, getPortfolioSummary, getPortfolios, getPreset, getHomeRanking, getSectors, getSentiment, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S6-A] getHomeRanking·getSectors·getSentiment · 포트폴리오 요약
 import { DASH, changeHtml, changeLabel, date, dateTime, esc, krw, num, pct, price, shortDate, signedKrw, stockUrl, usd } from "../format.js";   // [S5-A] pct
 import { color, destroyCharts, draw, scoreBand, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
@@ -320,6 +320,7 @@ function renderWatch(items) {
 $("#watch-view").append(segmented([{ value: "compact", label: "리스트" }, { value: "card", label: "카드" }], watchView, (v) => {
   watchView = v;
   try { localStorage.setItem(WATCH_VIEW_KEY, v); } catch { /* 저장 불가면 이번 화면에서만 유지 */ }
+  savePref("watch_view");   // 2차 로그인: 계정에도 저장
   if (watchItems && watchItems.length) $("#watchlist").replaceChildren(renderWatch(watchItems));
 }, { label: "관심종목 보기 방식" }));
 
@@ -589,6 +590,7 @@ async function loadPortfolioWidget() {
   $("#pf-tabs").replaceChildren(...(list.length > 1 ? [segmented(list.map((p) => ({ value: p.portfolio_id, label: p.name })), pfId, (v) => {
     pfId = v;
     try { localStorage.setItem(PF_KEY, String(v)); } catch { /* 저장 불가면 이번 화면에서만 유지 */ }
+    savePref("home_portfolio");   // 2차 로그인: 계정에도 저장
     loadPortfolioSummary();
   }, { label: "포트폴리오 선택" })] : []));
   loadPortfolioSummary();
