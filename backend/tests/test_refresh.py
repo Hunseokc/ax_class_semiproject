@@ -19,6 +19,15 @@ def call_counts(p) -> dict:
             "prices": p.kr_price.count, "valuation": p.kr_valuation.count}
 
 
+def keep_weekday_gap(engine) -> None:
+    """다음 갱신이 받을 구간에 확정된 평일이 꼭 들어가게 기준일 3일 전 이후의 일봉·지수·밸류에이션을 지운다.
+    그대로 두면 구간이 주말뿐인 날(토·일, 한국 월요일 장 마감 전)에는 코드가 의도대로 외부 호출 없이
+    '최신 상태(주말)'로 건너뛰어 호출 수가 요일·시각에 따라 달라진다. 지우면 구간이 4일 이상이라 요일과 상관없다."""
+    with engine.begin() as conn:
+        for table, col in (("daily_prices", "trade_date"), ("index_daily_prices", "trade_date"), ("valuation_snapshots", "as_of")):
+            conn.execute(text(f"DELETE FROM {table} WHERE {col} > :d"), {"d": D - timedelta(days=3)})
+
+
 def expire_all(engine) -> None:
     with engine.begin() as conn:
         conn.execute(text("UPDATE ingestion_logs SET started_at = started_at - interval '5 hours', "
@@ -69,12 +78,7 @@ def test_refresh_after_ttl_calls_each_job_exactly_once_more(engine):
     svc = service(engine, p)
     svc.refresh()
     expire_all(engine)
-    # 증분 구간에 확정된 평일이 꼭 들어가도록 최근 일봉·밸류에이션을 비운다. 그대로 두면 한국 월요일 오전(뉴욕은 일요일)에는
-    # 미국 일봉 구간이 주말뿐이고, 국내 밸류에이션은 KRX 공표 전이라 외부 호출 없이 '최신 상태'로 건너뛰어
-    # 호출 수가 요일·시각에 따라 달라진다(동작은 의도대로)
-    with engine.begin() as conn:
-        conn.execute(text("DELETE FROM daily_prices WHERE trade_date > :d"), {"d": D - timedelta(days=3)})
-        conn.execute(text("DELETE FROM valuation_snapshots WHERE as_of > :d"), {"d": D - timedelta(days=3)})
+    keep_weekday_gap(engine)
     svc.refresh()
     assert call_counts(p) == {k: v * 2 for k, v in EXPECTED_ONE_RUN.items()}
 
@@ -87,7 +91,7 @@ def test_fast_jobs_rerun_after_fast_ttl_others_stay_skipped(engine):
     with engine.begin() as conn:
         conn.execute(text("UPDATE ingestion_logs SET started_at = started_at - interval '55 minutes', "
                           "finished_at = finished_at - interval '55 minutes'"))   # 매시 스케줄 여유(FAST_GRACE) 안
-        conn.execute(text("DELETE FROM daily_prices WHERE trade_date > :d"), {"d": D - timedelta(days=3)})
+    keep_weekday_gap(engine)
     second = svc.refresh()
     status = {j.job_type: j.status for j in second.jobs}
     assert status["FX"] == status["INDICES"] == status["PRICES"] == "SUCCESS"
@@ -101,7 +105,11 @@ def test_incremental_prices_start_after_last_stored_date(engine):
     service(engine, p).refresh()
     starts = {ticker: start for ticker, start, _ in p.kr_price.calls}
     assert starts == {t: D + timedelta(days=1) for t in ("005930", "000660", "AAPL", "NVDA")}
+    # 마지막 저장일을 기준일 2일 전으로 되돌려, 다음 구간(4일 이상)에 확정된 평일이 꼭 들어가게 한다(keep_weekday_gap과 같은 이유)
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM daily_prices WHERE trade_date > :d"), {"d": D - timedelta(days=2)})
     last = scalar(engine, "SELECT max(trade_date) FROM daily_prices WHERE stock_id = 1")
+    assert last == D - timedelta(days=2)
     expire_all(engine)
     p.kr_price.calls.clear()
     service(engine, p).refresh()
