@@ -54,6 +54,7 @@
 .badge--kr { background: var(--badge-kr-bg); color: var(--badge-kr-text); }
 .badge--us { background: var(--badge-us-bg); color: var(--badge-us-text); }
 .badge--sector { background: transparent; border: 1px solid var(--line); color: var(--text-2); }
+.badge--commodity { background: var(--warn-bg); color: var(--warn-text); }
 .row__sub .badge { padding: 0 6px; font-size: 10px; line-height: 16px; }   /* 행 부제(티커 옆) 시장 표기는 티커 글자 크기에 맞춰 작게 */
 
 .btn {

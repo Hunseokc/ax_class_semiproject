@@ -49,6 +49,7 @@ class Stock(Base):
     detail_synced_at: Mapped[datetime | None] = mapped_column()
     industry: Mapped[str | None] = mapped_column(String(64))
     sic: Mapped[int | None] = mapped_column(SmallInteger)
+    ksic: Mapped[str | None] = mapped_column(String(10))          # 국내 KSIC(DART induty_code) — migration 012
     sector: Mapped[str | None] = mapped_column(String(32))
     industry_checked_at: Mapped[datetime | None] = mapped_column()
     cap_rank: Mapped[int | None] = mapped_column(Integer)          # 미국 시가총액 순위(상위 1,500개) — migration 009
@@ -63,7 +64,11 @@ class PeerGroup(Base):
     name: Mapped[str] = mapped_column(String(64), unique=True)
     description: Mapped[str | None] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(String(10), server_default="theme")
-    __table_args__ = (CheckConstraint("kind IN ('theme','sector')"),)
+    sector: Mapped[str | None] = mapped_column(String(32))        # 부모 섹터 — migration 012
+    scoring: Mapped[str] = mapped_column(String(10), server_default="general")
+    commodity_linked: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    __table_args__ = (CheckConstraint("kind IN ('theme','sector')"),
+                      CheckConstraint("scoring IN ('general','financial','none')"))
 
 
 class PeerGroupMember(Base):
@@ -109,6 +114,9 @@ class Index(Base):
     market_id: Mapped[int | None] = mapped_column(ForeignKey("markets.market_id"))
     source_symbol: Mapped[str] = mapped_column(String(32))
     display_order: Mapped[int] = mapped_column(SmallInteger, server_default="0")
+    category: Mapped[str] = mapped_column(String(10), server_default="index")   # index / commodity — migration 012
+    unit: Mapped[str | None] = mapped_column(String(16))
+    __table_args__ = (CheckConstraint("category IN ('index','commodity')"),)
 
 
 class IndexDailyPrice(Base):

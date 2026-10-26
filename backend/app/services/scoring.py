@@ -2,8 +2,9 @@
 
 계산은 SQL 3단계(app/queries/score_*.sql), 같은 as_of는 한 트랜잭션에서 DELETE 후 INSERT로 재생성한다.
   1) 지표 원값 → stock_metric_values.raw_value
-  2) 국가 내 로버스트 Z(z_raw) → 주 그룹 축소 추정 섹터 중립화(z_adj)   — 프리셋과 무관, as_of당 1회
-  3) 프리셋별 팩터 점수·종합·100·Φ 변환 → stock_scores
+  2) 국가·점수 묶음(family) 내 로버스트 Z(z_raw) → 주 테마 축소 추정 섹터 중립화(z_adj)   — 프리셋과 무관, as_of당 1회
+  3) 프리셋별 팩터 점수·종합·100·Φ 변환(국가·묶음 안) → stock_scores
+점수 묶음(family): 주 테마의 scoring — general / financial(금융끼리). none(리츠)은 점수를 내지 않는다
 정의·근거는 개발산출물/09_매력도_점수_정의서.md.
 """
 from __future__ import annotations
@@ -25,6 +26,7 @@ from app.queries import sql
 SEOUL = ZoneInfo("Asia/Seoul")
 FACTORS = ("value", "quality", "growth", "safety", "momentum")
 MIN_FACTORS = 3
+FAMILY_LABEL = {"general": None, "financial": "금융"}     # data_quality.partition 표시(KR·금융)
 
 
 @dataclass(frozen=True)
@@ -101,36 +103,46 @@ def sync_presets(conn: Connection, cfg: dict | None = None) -> None:
 
 
 # ------------------------------------------------------------------ 계산 단계
-def insert_metric_values(conn: Connection, as_of: date) -> dict[int, list[str]]:
-    """1단계. 반환: 종목별 메모(대체 계산·고정 사유)."""
+def partition_label(country: str, family: str) -> str:
+    return "·".join(x for x in (country, FAMILY_LABEL.get(family)) if x)
+
+
+def insert_metric_values(conn: Connection, as_of: date) -> tuple[dict[int, list[str]], dict[int, dict[str, str]]]:
+    """1단계. 반환: (종목별 메모 — 대체 계산·고정 사유, 종목별 업종 규칙으로 비운 지표 {metric: 사유})."""
     rows = conn.execute(sql("score_metrics"), {"stock_id": None}).mappings().all()
     if rows:
         conn.execute(text("""INSERT INTO stock_metric_values (stock_id, as_of, metric, factor, raw_value, z_raw)
                              VALUES (:stock_id, :as_of, :metric, :factor, :raw_value, :z_fixed)"""),
                      [{**r, "as_of": as_of} for r in rows])
     notes: dict[int, list[str]] = {}
+    excluded: dict[int, dict[str, str]] = {}
     for r in rows:
         if r["note"]:
             notes.setdefault(r["stock_id"], []).append(f"{r['metric']}: {r['note']}")
-    return notes
+        if r["null_note"]:
+            excluded.setdefault(r["stock_id"], {})[r["metric"]] = r["null_note"]
+    return notes, excluded
 
 
 def normalize(conn: Connection, as_of: date, k: float) -> None:
-    """2단계. z_raw(국가 내 로버스트 Z) → z_adj(섹터 중립화)."""
+    """2단계. z_raw(국가·묶음 내 로버스트 Z) → z_adj(주 테마 섹터 중립화)."""
     conn.execute(sql("score_zscore"), {"as_of": as_of, "negatives": NEGATIVE_METRICS})
     conn.execute(sql("score_neutralize"), {"as_of": as_of, "k": k})
 
 
-def aggregate(conn: Connection, as_of: date, notes: dict[int, list[str]] | None = None) -> int:
+def aggregate(conn: Connection, as_of: date, notes: dict[int, list[str]] | None = None,
+              excluded: dict[int, dict[str, str]] | None = None) -> int:
     """3단계. 프리셋별 점수 → stock_scores. 반환: 생성 행 수."""
     rows = conn.execute(sql("score_aggregate"), {"as_of": as_of}).mappings().all()
+    excluded = excluded or {}
     missing: dict[int, dict[str, str]] = {}
     for r in conn.execute(text("SELECT stock_id, metric FROM stock_metric_values WHERE as_of = :d AND z_adj IS NULL"),
                           {"d": as_of}):
-        missing.setdefault(r.stock_id, {})[r.metric] = METRICS[r.metric].null_reason
+        missing.setdefault(r.stock_id, {})[r.metric] = (excluded.get(r.stock_id, {}).get(r.metric)
+                                                        or METRICS[r.metric].null_reason)
     out = []
     for r in rows:
-        dq: dict = {"partition": r["country"]}
+        dq: dict = {"partition": partition_label(r["country"], r["family"]), "family": r["family"]}
         if r["stock_id"] in missing:
             dq["missing_metrics"] = missing[r["stock_id"]]
         unavailable = [f for f in FACTORS if r[f"{f}_score"] is None]
@@ -159,9 +171,9 @@ def compute_scores(engine: Engine, as_of: date | None = None) -> int:
             sync_presets(conn, cfg)
             conn.execute(text("DELETE FROM stock_scores WHERE as_of = :d"), {"d": as_of})
             conn.execute(text("DELETE FROM stock_metric_values WHERE as_of = :d"), {"d": as_of})
-            notes = insert_metric_values(conn, as_of)
+            notes, excluded = insert_metric_values(conn, as_of)
             normalize(conn, as_of, cfg["shrinkage_k"])
-            res.rows = aggregate(conn, as_of, notes)
+            res.rows = aggregate(conn, as_of, notes, excluded)
         res.notes.append(f"presets={len(cfg['presets'])}, k={cfg['shrinkage_k']}")
     if res.status != "SUCCESS":
         raise RuntimeError("점수 계산 실패 — ingestion_logs 참고")

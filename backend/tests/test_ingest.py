@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from app.ingest import jobs, sample
 from app.ingest.preprocess import Bar, FxPoint, clean_bars, clean_fx
+from app.ingest.sectors import secondary_themes, themes
 from app.ingest.universe import StockSpec, load_universe
 from tests.conftest import TABLES, scalar
 
@@ -68,7 +69,7 @@ def test_master_failure_is_logged_and_raised(engine, monkeypatch):
 
 
 def test_master_rejects_ticker_listed_in_two_markets(engine, monkeypatch):
-    """peer_groups.members는 티커만 적으므로, 같은 티커가 두 시장에 있으면 적재 전에 멈춘다."""
+    """themes.tickers는 티커만 적으므로, 같은 티커가 두 시장에 있으면 적재 전에 멈춘다."""
     u = load_universe()
     dup = replace(u, stocks=u.stocks + (StockSpec("NASDAQ", "005930", "Dup", "005930"),))
     monkeypatch.setattr(jobs, "load_universe", lambda: dup)
@@ -108,8 +109,9 @@ def test_sample_reload_is_idempotent(engine):
     assert first["markets"] == len(u.markets)
     assert first["stocks"] == len(u.stocks)
     assert first["indices"] == len(u.indices)
-    assert first["peer_groups"] == len(u.peer_groups)
-    assert first["peer_group_members"] == sum(len(g.members) for g in u.peer_groups)
+    assert first["peer_groups"] == len(themes())
+    # 노출 종목마다 주 테마 1개(themes.tickers) + 보조 테마(secondary_themes)
+    assert first["peer_group_members"] == sum(1 + len(secondary_themes(s.ticker)) for s in u.stocks)
     assert first["daily_prices"] == _csv_rows("daily_prices.csv")
     assert first["valuation_snapshots"] == _csv_rows("valuation_snapshots.csv")
     assert first["index_daily_prices"] == _csv_rows("index_daily_prices.csv")

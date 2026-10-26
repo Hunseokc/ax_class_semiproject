@@ -536,3 +536,87 @@ def test_analysis_includes_fin_basis(client, engine, universe):
     us = client.get(f"{API}/stocks/NASDAQ/AAPL/analysis").json()["attractiveness"]
     assert kr["fin_basis"] == [{"fiscal_year": 2024, "stocks": 5}]       # KR 재무 있는 5종목 모두 FY2024
     assert us["fin_basis"] == [{"fiscal_year": 2025, "stocks": 1}, {"fiscal_year": 2024, "stocks": 1}]
+
+
+# ------------------------------------------------------------------ 테마 규칙 (개발산출물/09 2~4절)
+def _theme_rule(engine, group_id: int, **cols):
+    with engine.begin() as conn:
+        conn.execute(text(f"UPDATE peer_groups SET {', '.join(f'{k} = :{k}' for k in cols)} WHERE group_id = :g"),
+                     {**cols, "g": group_id})
+
+
+def test_neutralized_z_is_clipped_to_3(engine):
+    """그룹 평균이 크게 음수면 z − n/(n+k)·평균이 3을 넘는다 → 다시 ±3으로 자른다(Alcoa처럼 적자 종목이 섞인 그룹)."""
+    with engine.begin() as conn:
+        add_kr_stocks(conn, [5])
+        conn.execute(text("INSERT INTO peer_group_members VALUES (1, 5, true)"))       # 반도체(KR): 1, 2, 5
+        conn.execute(text("""INSERT INTO stock_metric_values (stock_id, as_of, metric, factor, raw_value, z_raw)
+                             VALUES (1, :d, 'roe', 'quality', 0, 3), (2, :d, 'roe', 'quality', 0, -3),
+                                    (5, :d, 'roe', 'quality', 0, -3)"""), {"d": D})
+        conn.execute(sql("score_neutralize"), {"as_of": D, "k": K})
+        adj = read(conn, "z_adj", "roe")
+    assert 3 - 3 / (3 + K) * (-1) > 3 and adj[1] == 3                       # 3.375 → 3
+    assert adj[2] == pytest.approx(-3 - 3 / (3 + K) * (-1), abs=1e-4)      # −2.625(범위 안이면 그대로)
+
+
+def test_financial_theme_drops_revenue_metrics_and_scores_separately(engine, universe):
+    _theme_rule(engine, 3, scoring="financial")                             # 자동차(5, 6)를 금융 묶음으로
+    compute_scores(engine, as_of=D)
+    with engine.connect() as conn:
+        mv = {(r.stock_id, r.metric): r for r in conn.execute(
+            text("SELECT * FROM stock_metric_values WHERE as_of = :d"), {"d": D})}
+        st = scores_by(conn)
+    for s in (5, 6):
+        assert mv[(s, "operating_margin")].raw_value is None and mv[(s, "revenue_yoy")].raw_value is None
+        dq = st[s]["data_quality"]
+        assert dq["partition"] == "KR·금융" and dq["family"] == "financial"
+        assert dq["missing_metrics"]["operating_margin"] == "금융 업종 — 매출 기준 지표는 쓰지 않음"
+    assert mv[(1, "operating_margin")].raw_value is not None and st[1]["data_quality"]["partition"] == "KR"
+    # 금융 2종목끼리 표준화: B/P는 표본 2개 → 평균·표준편차 Z = ±1/√2, 0~100도 둘이 대칭
+    assert {round(float(mv[(s, "book_yield")].z_raw), 4) for s in (5, 6)} == {0.7071, -0.7071}
+    assert float(st[5]["score"]) + float(st[6]["score"]) == pytest.approx(100, abs=0.02)
+
+
+def test_commodity_theme_uses_three_year_average_earnings(engine, universe, client):
+    with engine.begin() as conn:                                            # 삼성전자에 FY 하나 더 → 순이익 4, 8, 12
+        conn.execute(text("""INSERT INTO financial_statements (stock_id, period_end, period_type, revenue, operating_income,
+                             net_income, total_equity, total_debt, data_source) VALUES (1, '2022-12-31', 'FY', 90, 9, 4, 90, 50, 'DART')"""))
+    _theme_rule(engine, 1, commodity_linked=True)                           # 반도체(1, 2, 4)를 원자재 연동으로
+    with engine.connect() as conn:
+        rows = {(r["stock_id"], r["metric"]): r for r in conn.execute(sql("score_metrics"), {"stock_id": None}).mappings()}
+    close = universe[1][-1]
+    assert float(rows[(1, "earnings_yield")]["raw_value"]) == pytest.approx(8 / 1000 / close, rel=1e-4)   # 공급사 EPS(8) 대신 평균
+    assert rows[(1, "earnings_yield")]["note"] == "원자재 연동 업종 → 최근 3개 FY 평균 순이익 / 주식수"
+    assert rows[(2, "earnings_yield")]["note"] == "원자재 연동 업종이지만 FY 재무 3개 미만 → 최신 FY 기준"
+    assert rows[(1, "eps_change_yield")]["raw_value"] is None and "원자재" in rows[(1, "eps_change_yield")]["null_note"]
+    assert rows[(5, "eps_change_yield")]["raw_value"] is not None                # 연동이 아닌 테마는 그대로
+
+
+def test_reit_theme_is_not_scored_and_reference_explains(client, engine, universe):
+    _theme_rule(engine, 3, scoring="none")                                  # 자동차(5, 6)를 점수 없음(리츠)으로
+    compute_scores(engine, as_of=D)
+    assert scalar(engine, "SELECT count(*) FROM stock_metric_values WHERE stock_id IN (5, 6)") == 0
+    with engine.begin() as conn:                                            # 상장 목록 리츠 종목 → 사유만
+        conn.execute(text("UPDATE stocks SET coverage = 'listed' WHERE stock_id = 5"))
+    a = client.get(f"{API}/stocks/KOSPI/035420/analysis").json()["attractiveness"]
+    assert a["score"] is None and a["as_of"] is None and "리츠" in a["unscored_reason"]
+
+
+def test_reference_score_neutralizes_with_primary_theme(engine, universe):
+    from app.services.reference_score import neutralize, reference_score
+    compute_scores(engine, as_of=D)
+    with engine.begin() as conn:                                            # 상장 목록 종목 9 → 반도체 주 테마
+        conn.execute(text("INSERT INTO stocks (stock_id, market_id, ticker, name, coverage) VALUES (9, 1, '999999', '상장', 'listed')"))
+        conn.execute(text("INSERT INTO peer_group_members VALUES (1, 9, true)"))
+        conn.execute(text("""INSERT INTO valuation_snapshots (stock_id, as_of, eps, bps, shares_outstanding, source)
+                             VALUES (9, :d, 5, 50, 1000, 'PYKRX')"""), {"d": D})
+    _replace_prices(engine, 9, _path(300, 0, .5), D)
+    with engine.connect() as conn:
+        preset = conn.execute(text("SELECT preset_id, code, name, description FROM scoring_presets WHERE code = 'balanced'")).mappings().one()
+        out = reference_score(conn, 9, "KR", dict(preset))
+        peers = [float(z) for z in conn.execute(text("""SELECT z_raw FROM stock_metric_values
+                 WHERE as_of = :d AND metric = 'book_yield' AND stock_id IN (1, 2)"""), {"d": D}).scalars()]
+    by = {m["metric"]: m for m in out["metrics"]}
+    assert float(by["book_yield"]["z_adj"]) == pytest.approx(neutralize(float(by["book_yield"]["z_raw"]), peers, K), abs=2e-4)
+    assert by["volatility"]["z_adj"] == by["volatility"]["z_raw"]           # 안정성은 중립화하지 않는다
+    assert "주 테마 '반도체' 비교군 2개로 섹터 중립화" in out["reference_note"] and out["rank"]["family"] == "general"

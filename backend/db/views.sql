@@ -198,3 +198,14 @@ LEFT JOIN LATERAL (SELECT vs.as_of, vs.per, vs.pbr, vs.eps, vs.bps, vs.market_ca
                    ORDER BY vs.as_of DESC LIMIT 1) v ON true
 LEFT JOIN v_fx_latest fx ON true
 LEFT JOIN fin fn ON fn.stock_id = l.stock_id;
+
+-- ---------------------------------------------------------------------
+-- v_stock_theme: 종목별 주 테마 1행(peer_group_members.is_primary) — migration 012
+--   family = 매력도 표준화 묶음: financial(금융끼리) / none(점수 없음 — 리츠) / general(그 밖, 주 테마가 없어도 general)
+--   주 테마가 없는 종목은 행이 없다 → LEFT JOIN 후 COALESCE(t.family, 'general')
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE VIEW v_stock_theme AS
+SELECT gm.stock_id, g.group_id, g.name AS theme, g.sector, g.scoring AS family, g.commodity_linked
+FROM peer_group_members gm
+JOIN peer_groups g ON g.group_id = gm.group_id
+WHERE gm.is_primary;

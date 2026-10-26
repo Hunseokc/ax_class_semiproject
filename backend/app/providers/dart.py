@@ -109,6 +109,11 @@ class DartClient:
         """기업개황: corp_name_eng, acc_mt(결산월) 등."""
         return self._get("company.json", corp_code=corp_code)
 
+    def get_ksic(self, corp_code: str) -> str | None:
+        """기업개황의 업종 코드(induty_code, 한국표준산업분류 KSIC 2~5자리). 없으면 None — 테마 분류(app/ingest/sectors.py)용."""
+        code = (self.company(corp_code).get("induty_code") or "").strip()
+        return code if code.isdigit() else None
+
     # ------------------------------------------------------------ 재무
     def _statement(self, corp_code: str, year: int) -> tuple[list[dict], str | None]:
         for fs_div in ("CFS", "OFS"):

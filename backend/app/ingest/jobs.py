@@ -16,6 +16,7 @@ from app.core.config import ROOT_DIR
 from app.ingest.preprocess import Quarantined, clean_bars, clean_fx, unfinished_session_date
 from app.ingest.store import (DART_LOCK_KEY, LOCK_WAIT_NOTE_SECONDS, BatchWriter, LockSession, Unit, default_flush_every,
                               error_text, job_log, provider_lock_key, upsert)
+from app.ingest.sectors import assign_themes, primary_theme, sync_themes
 from app.ingest.universe import index_refs, load_universe, stock_refs
 from app.providers.base import Financial, ProviderError, StockRef
 from app.providers.factory import Providers
@@ -57,17 +58,17 @@ def migrate(engine: Engine, name: str) -> None:
 
 # ---------------------------------------------------------------- 마스터
 def load_master(engine: Engine, offline: bool = False) -> None:
-    """universe.yaml → markets·stocks·indices·peer_groups·peer_group_members + 기본 사용자 demo (재실행해도 행 수 불변).
+    """universe.yaml → markets·stocks·indices·peer_groups(테마)·peer_group_members + 기본 사용자 demo (재실행해도 행 수 불변).
 
     offline이 아니면 이어서 DART corp_code·SEC CIK를 매핑한다(재무·공시 수집에 필요).
     """
     u = load_universe()
-    # peer_groups.members는 티커만 적는다 → 같은 티커가 두 시장에 있으면 어느 종목인지 정할 수 없으므로 적재 전에 막는다
+    # themes.tickers·secondary_themes는 티커만 적는다 → 같은 티커가 두 시장에 있으면 어느 종목인지 정할 수 없으므로 적재 전에 막는다
     market_of: dict[str, str] = {}
     for s in u.stocks:
         if s.ticker in market_of:
             raise ValueError(f"universe.yaml: 티커 {s.ticker}가 {market_of[s.ticker]}·{s.market}에 중복 — "
-                             "peer_groups.members가 가리키는 종목을 정할 수 없다")
+                             "themes.tickers가 가리키는 종목을 정할 수 없다")
         market_of[s.ticker] = s.market
     # 마스터가 실패하면 뒤따르는 적재가 모두 의미 없으므로 FAILED를 기록한 뒤 예외를 전파한다(CLI가 0이 아닌 코드로 끝난다)
     with job_log(engine, source="INTERNAL", job_type="MASTER", label="universe", reraise=True) as res:
@@ -81,24 +82,15 @@ def load_master(engine: Engine, offline: bool = False) -> None:
                  "name_en": s.name if s.market in ("NASDAQ", "NYSE") else None, "is_active": True}
                 for s in u.stocks], ["market_id", "ticker"], update=["name", "is_active"])
             res.rows += upsert(conn, "indices", [
-                {"code": i.code, "name": i.name, "market_id": mid[i.market],
-                 "source_symbol": i.source_symbol, "display_order": i.display_order}
+                {"code": i.code, "name": i.name, "market_id": mid[i.market], "source_symbol": i.source_symbol,
+                 "display_order": i.display_order, "category": i.category, "unit": i.unit}
                 for i in u.indices], ["code"])
-            res.rows += upsert(conn, "peer_groups", [{"name": g.name} for g in u.peer_groups], ["name"])
-            gid = dict(conn.execute(text("SELECT name, group_id FROM peer_groups")).all())
-            sid = {(m, t): i for i, m, t in conn.execute(text(
-                "SELECT s.stock_id, m.code, s.ticker FROM stocks s JOIN markets m USING (market_id)")).all()}
-            # [S4-D] 주 그룹(섹터 중립화·비교군 선정 기준) = universe.yaml에서 종목이 처음 나오는 그룹
-            seen: set[int] = set()
-            members = []
-            for g in u.peer_groups:
-                for t in g.members:
-                    s_id = sid[(market_of[t], t)]
-                    members.append({"group_id": gid[g.name], "stock_id": s_id, "is_primary": s_id not in seen})
-                    seen.add(s_id)
-            conn.execute(text("UPDATE peer_group_members SET is_primary = false WHERE is_primary AND stock_id = ANY(:ids)"),
-                         {"ids": list(seen)})      # 노출 종목만 다시 정한다(비교군 종목의 주 그룹은 그대로)
-            res.rows += upsert(conn, "peer_group_members", members, ["group_id", "stock_id"], update=["is_primary"])
+            # 테마(peer_groups) → 주 테마·보조 테마(peer_group_members)·stocks.sector. 노출 종목은 themes.tickers로 정해진다
+            res.rows += sync_themes(conn)
+            unthemed = [s.ticker for s in u.stocks if primary_theme("", s.ticker) is None]
+            if unthemed:
+                raise ValueError(f"universe.yaml: 노출 종목 {', '.join(unthemed)}이(가) themes.tickers에 없다")
+            res.notes.append("테마: 주 {primary} · 보조 {secondary}".format(**assign_themes(conn)))
             # ── [S2-D] 기본 사용자(demo) — get_current_user_id가 돌려주는 DEFAULT_USER_ID(=1)의 행 ──
             conn.execute(text("INSERT INTO users (nickname) VALUES ('demo') ON CONFLICT (nickname) DO NOTHING"))
     if offline:

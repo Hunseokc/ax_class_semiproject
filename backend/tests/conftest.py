@@ -58,7 +58,7 @@ def load_fixture(conn) -> None:
         INSERT INTO stocks (stock_id, market_id, ticker, name, name_en) VALUES
           (1, 1, '005930', '삼성전자', 'Samsung Electronics'), (2, 1, '000660', 'SK하이닉스', 'SK hynix'),
           (3, 2, 'AAPL', 'Apple', 'Apple'), (4, 2, 'NVDA', 'NVIDIA', 'NVIDIA');
-        INSERT INTO peer_groups (group_id, name) VALUES (1, '반도체'), (2, '빅테크');
+        INSERT INTO peer_groups (group_id, name, sector) VALUES (1, '반도체', '반도체·전자'), (2, '빅테크', 'IT·인터넷');
         INSERT INTO peer_group_members VALUES (1, 1, true), (1, 2, true), (1, 4, true), (2, 3, true);
         INSERT INTO users (user_id, nickname) VALUES (1, 'demo'), (2, 'other');
         INSERT INTO indices (index_id, code, name, market_id, source_symbol, display_order)

@@ -1,5 +1,5 @@
 -- 종목 수치 분석: v_stock_metrics 1행 + 선택한 프리셋의 최신 매력도
---   국가 내 순위·백분위는 같은 as_of·프리셋에서 점수가 있는 같은 country 종목끼리 (RANK·PERCENT_RANK)
+--   순위·백분위는 같은 as_of·프리셋에서 점수가 있는 같은 country·같은 점수 묶음(family — 금융끼리) 종목끼리 (RANK·PERCENT_RANK)
 WITH sc AS (
     SELECT st.*
     FROM stock_scores st
@@ -15,9 +15,11 @@ ranked AS (
     FROM stock_scores st
     JOIN stocks s   ON s.stock_id = st.stock_id
     JOIN markets mk ON mk.market_id = s.market_id
+    LEFT JOIN v_stock_theme t ON t.stock_id = st.stock_id
     WHERE st.preset_id = :preset_id AND st.as_of = (SELECT as_of FROM sc) AND st.score IS NOT NULL
-      AND mk.country = (SELECT m2.country FROM stocks s2 JOIN markets m2 ON m2.market_id = s2.market_id
-                        WHERE s2.stock_id = :stock_id)
+      AND (mk.country, COALESCE(t.family, 'general')) =
+          (SELECT m2.country, COALESCE(t2.family, 'general') FROM stocks s2 JOIN markets m2 ON m2.market_id = s2.market_id
+           LEFT JOIN v_stock_theme t2 ON t2.stock_id = s2.stock_id WHERE s2.stock_id = :stock_id)
 )
 SELECT vm.*,
        sc.as_of AS score_as_of, sc.score, sc.composite, sc.factor_coverage, sc.data_quality,

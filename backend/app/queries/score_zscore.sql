@@ -1,30 +1,33 @@
--- 매력도 2단계-1: 지표별 국가(country) 내 로버스트 Z → stock_metric_values.z_raw
+-- 매력도 2단계-1: 지표별 국가(country)·점수 묶음(family) 내 로버스트 Z → stock_metric_values.z_raw
 -- 파라미터: as_of, negatives(방향이 −인 지표 목록)
+--   family = 주 테마의 scoring(v_stock_theme): financial(금융끼리) / general(그 밖, 주 테마가 없어도 general)
+--     금융은 PER·PBR이 구조적으로 낮아 일반 기업과 섞으면 저평가가 늘 상위가 된다 (개발산출물/09 3절)
 --   Z = (x − 중앙값) / (1.4826 × MAD),  MAD = median(|x − 중앙값|)
 --   유효 표본 < 5 또는 MAD = 0 → 평균·표본표준편차 Z, 표준편차도 0(또는 표본 1개)이면 Z = 0
 --   방향 −는 부호를 뒤집고, 모든 Z를 [−3, 3]으로 자른다
 --   z_raw가 이미 채워진 행(z_fixed — 지금 쓰는 지표 없음, 고정 규칙이 생기면 재사용)은 통계에서 빼고 건드리지 않는다
 WITH v AS (
-    SELECT mv.stock_id, mv.metric, mv.raw_value, mk.country
+    SELECT mv.stock_id, mv.metric, mv.raw_value, mk.country, COALESCE(t.family, 'general') AS family
     FROM stock_metric_values mv
     JOIN stocks s   ON s.stock_id = mv.stock_id
     JOIN markets mk ON mk.market_id = s.market_id
+    LEFT JOIN v_stock_theme t ON t.stock_id = mv.stock_id
     WHERE mv.as_of = :as_of AND mv.raw_value IS NOT NULL AND mv.z_raw IS NULL
 ),
-med AS (                              -- 국가·지표별 중앙값과 평균·표준편차
-    SELECT v.country, v.metric, COUNT(*) AS n,
+med AS (                              -- 국가·묶음·지표별 중앙값과 평균·표준편차
+    SELECT v.country, v.family, v.metric, COUNT(*) AS n,
            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY v.raw_value) AS m,
            AVG(v.raw_value)         AS mean,
            STDDEV_SAMP(v.raw_value) AS sd
     FROM v
-    GROUP BY v.country, v.metric
+    GROUP BY v.country, v.family, v.metric
 ),
 mad AS (                              -- MAD = 중앙값으로부터의 절대 편차의 중앙값
-    SELECT v.country, v.metric,
+    SELECT v.country, v.family, v.metric,
            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ABS(v.raw_value - med.m)) AS mad
     FROM v
-    JOIN med ON med.country = v.country AND med.metric = v.metric
-    GROUP BY v.country, v.metric
+    JOIN med ON med.country = v.country AND med.family = v.family AND med.metric = v.metric
+    GROUP BY v.country, v.family, v.metric
 ),
 z AS (
     SELECT v.stock_id, v.metric,
@@ -32,8 +35,8 @@ z AS (
                 WHEN med.sd > 0                 THEN CAST((v.raw_value - med.mean) / med.sd AS double precision)
                 ELSE 0 END AS z
     FROM v
-    JOIN med ON med.country = v.country AND med.metric = v.metric
-    JOIN mad ON mad.country = v.country AND mad.metric = v.metric
+    JOIN med ON med.country = v.country AND med.family = v.family AND med.metric = v.metric
+    JOIN mad ON mad.country = v.country AND mad.family = v.family AND mad.metric = v.metric
 )
 UPDATE stock_metric_values t
 SET z_raw = LEAST(3, GREATEST(-3, CASE WHEN t.metric = ANY(CAST(:negatives AS text[])) THEN -z.z ELSE z.z END))

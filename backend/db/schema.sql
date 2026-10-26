@@ -17,6 +17,7 @@
 --   추가 기능 4-1: ingest_cursor(공시 목록 증분 기준점) — 기존 DB는 008_ingest_cursor
 --   추가 기능 4-3: stocks.cap_rank·cap_ranked_at(미국 시가총액 순위) — 기존 DB는 009_cap_rank
 --   2차 로그인: users.email·password_hash·google_sub·last_login_at·last_seen_at, user_preferences — 기존 DB는 011_auth
+--   2차 테마 분류: stocks.ksic, peer_groups.sector·scoring·commodity_linked, indices.category·unit — 기존 DB는 012_themes
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -46,25 +47,29 @@ CREATE TABLE stocks (
   -- listed: 상장 보통주 목록(이름·티커만). 상세를 열 때 데이터를 받고, 매력도 유니버스에는 들어가지 않는다 (migration 005)
   coverage  VARCHAR(10)  NOT NULL DEFAULT 'featured' CHECK (coverage IN ('featured','benchmark','listed')),
   detail_synced_at TIMESTAMPTZ,                                  -- benchmark·listed 종목의 상세(공시·2년 일봉·5개년 재무)를 마지막으로 받은 시각
-  -- 업종 (migration 006): 국내 KRX 업종명 / 미국 SEC SIC 설명. sector는 config/universe.yaml sectors 매핑 결과(점수 비교 표본의 섹터)
+  -- 업종 (migration 006·012): 국내 KRX 업종명 / 미국 SEC SIC 설명. sector는 주 테마의 섹터(config/universe.yaml themes)
   industry  VARCHAR(64),
   sic       SMALLINT,                                            -- 미국 SEC SIC 코드
-  sector    VARCHAR(32),                                         -- NULL: 매핑 없음·금융 등 제외 업종
-  industry_checked_at TIMESTAMPTZ,                               -- 업종을 마지막으로 확인한 시각(미국 SIC는 1년마다 다시 확인)
+  ksic      VARCHAR(10),                                         -- 국내 DART 기업개황 induty_code(KSIC) — migration 012
+  sector    VARCHAR(32),                                         -- NULL: 주 테마 없음(분류되지 않은 업종)
+  industry_checked_at TIMESTAMPTZ,                               -- 업종 코드(KSIC·SIC)를 마지막으로 확인한 시각(1년마다 다시 확인)
   -- 시가총액 순위 (migration 009): 미국 상위 1,500개만 값이 있다. 백그라운드 재무 적재 우선순위용(화면에는 쓰지 않음)
   cap_rank      INT CHECK (cap_rank > 0),
   cap_ranked_at TIMESTAMPTZ,
   UNIQUE (market_id, ticker)
 );
 
--- 경쟁 그룹
--- kind (migration 006): theme = 화면 경쟁 비교용 테마 그룹(universe.yaml peer_groups)
---                       sector = 매력도 섹터 중립화용 업종 그룹(universe.yaml sectors, 비교군 선정 때 구성)
+-- 경쟁 그룹 = 테마 (config/universe.yaml themes — 섹터 중립화의 주 그룹, 비교군 선정 단위, 화면 경쟁 비교)
+-- kind (migration 006): 모두 theme. sector 값은 남겨 두었지만 쓰지 않는다
+-- sector·scoring·commodity_linked (migration 012): 부모 섹터 / general·financial(금융끼리 표준화)·none(점수 없음 — 리츠) / 원자재 연동
 CREATE TABLE peer_groups (
   group_id    SERIAL PRIMARY KEY,
   name        VARCHAR(64) NOT NULL UNIQUE,
   description TEXT,
-  kind        VARCHAR(10) NOT NULL DEFAULT 'theme' CHECK (kind IN ('theme','sector'))
+  kind        VARCHAR(10) NOT NULL DEFAULT 'theme' CHECK (kind IN ('theme','sector')),
+  sector      VARCHAR(32),
+  scoring     VARCHAR(10) NOT NULL DEFAULT 'general' CHECK (scoring IN ('general','financial','none')),
+  commodity_linked BOOLEAN NOT NULL DEFAULT false
 );
 
 -- 종목 ↔ 경쟁 그룹 N:M 교차 테이블 (국내·해외 종목 혼합 가능)
@@ -120,7 +125,10 @@ CREATE TABLE indices (
   name          VARCHAR(64) NOT NULL,
   market_id     SMALLINT    REFERENCES markets,
   source_symbol VARCHAR(32) NOT NULL,                            -- 라이브러리 조회용 심볼 (1001, ^GSPC …)
-  display_order SMALLINT    NOT NULL DEFAULT 0
+  display_order SMALLINT    NOT NULL DEFAULT 0,
+  -- migration 012: index = 지수 / commodity = 원자재 선물(대시보드 '원자재' 묶음, 원자재 연동 테마 종목의 가격 위치)
+  category      VARCHAR(10) NOT NULL DEFAULT 'index' CHECK (category IN ('index','commodity')),
+  unit          VARCHAR(16)                                      -- 원자재 가격 단위($/톤 등). 지수는 NULL
 );
 
 CREATE TABLE index_daily_prices (

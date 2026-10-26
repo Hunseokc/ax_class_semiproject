@@ -51,6 +51,8 @@ class IndexOut(Schema):
     name: str
     country: str | None
     currency: str | None
+    category: Literal["index", "commodity"] = "index"   # commodity = 원자재 선물(화면 '원자재' 묶음)
+    unit: str | None = None                  # 원자재 가격 단위($/톤 등). 지수는 null
     as_of: date | None
     close: Num | None
     prev_close: Num | None
@@ -127,6 +129,26 @@ class StockListOut(Schema):
 class GroupRef(Schema):
     group_id: int
     name: str
+    is_primary: bool = False                 # 주 테마(섹터 중립화 기준). 나머지는 보조 테마
+
+
+class ThemeOut(Schema):
+    name: str                                # 주 테마 (config/universe.yaml themes)
+    sector: str | None                       # 부모 섹터 (peer_groups.sector)
+    family: Literal["general", "financial", "none"]   # 점수 묶음 — financial 금융끼리, none 점수 없음(리츠)
+    commodity_linked: bool                   # 원자재 연동 테마
+
+
+class CommodityOut(Schema):
+    """원자재 연동 테마 종목의 연결 원자재와 그 가격의 1년 위치 — 매력도와 별개의 위험 표시(투자 권유 아님)."""
+    code: str | None                         # indices.code. 연동이지만 무료 시세가 없는 원자재(리튬 등)면 null
+    name: str | None
+    unit: str | None
+    as_of: date | None
+    close: Num | None
+    change_1y: Num | None                    # 1년 등락률(소수) — 1년치가 없으면 null
+    position_52w: Num | None                 # 52주 범위 안 위치 0~1 — 1년치가 없으면 null
+    note: str                                # 화면 안내 문구
 
 
 class MarketConditionOut(Schema):
@@ -176,11 +198,13 @@ class StockDetailOut(Schema):
     score: Num | None
     score_as_of: date | None
     preset: str
-    groups: list[GroupRef]                   # 소속 경쟁 그룹(없으면 빈 목록)
+    groups: list[GroupRef]                   # 소속 테마(주 테마 먼저, 없으면 빈 목록)
     is_watched: bool
     coverage: str
     detail_status: str              # ready / loading(비교군 상세 데이터 받는 중) / failed
     market_condition: MarketConditionOut   # 시장·섹터 점수 (매력도와 별개, 투자 권유 아님)
+    theme: ThemeOut | None = None            # 주 테마. 분류되지 않은 업종이면 null
+    commodity: CommodityOut | None = None    # 원자재 연동 테마 종목만. 그 밖은 null
 
 
 class Candle(Schema):

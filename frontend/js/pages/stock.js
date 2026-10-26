@@ -20,11 +20,22 @@ const signColor = (v, c) => (v > 0 ? upColor(c) : v < 0 ? downColor(c) : color("
 const money = (v, cur, compact = true) => (cur === "USD" ? usd(v, { compact }) : krw(v, { compact }));
 
 // ---------------------------------------------------------------- 헤더
+// 주 테마(점수 비교 기준)는 채운 배지, 보조 테마(함께 하는 사업)는 테두리 배지, 원자재 연동이면 경고 배지
+function themeBadges(s) {
+  const groups = s.groups.map((g) => g.is_primary
+    ? `<span class="badge badge--market" title="주 테마 — 매력도를 이 테마 종목과 비교합니다">${esc(g.name)}</span>`
+    : `<span class="badge badge--sector" title="함께 속한 테마">${esc(g.name)}</span>`);
+  if (s.theme?.commodity_linked) {
+    groups.push(`<span class="badge badge--commodity" title="원자재 가격을 따라 이익이 크게 바뀌는 업종">원자재 연동</span>`);
+  }
+  return groups.join(" ");
+}
+
 function renderHeader(s) {
   document.title = `${s.name} (${s.ticker}) · StockMind`;
   const el = h(`<header class="stock-head">
       <div class="stock-head__id">
-        <p class="subtle">${esc(s.ticker)} ${marketBadge(s.market, s.country)} ${s.groups.map((g) => `<span class="badge badge--market">${esc(g.name)}</span>`).join(" ")}</p>
+        <p class="subtle">${esc(s.ticker)} ${marketBadge(s.market, s.country)} ${themeBadges(s)}</p>
         <h1>${esc(s.name)}</h1>
         ${s.name_en && s.name_en !== s.name ? `<p class="subtle">${esc(s.name_en)}</p>` : ""}
       </div>
@@ -334,8 +345,27 @@ function conditionRow(mc) {
     </div>`;
 }
 
+// 원자재 연동 업종 — 연결 원자재 가격의 1년 위치(매력도와 별개의 위험 표시)
+function commodityRow(c) {
+  const where = c.position_52w === null ? "" : c.position_52w >= 0.67 ? "상단" : c.position_52w <= 0.33 ? "하단" : "중간";
+  const quote = c.code && c.close !== null
+    ? `<p><strong>${esc(c.name)}</strong> ${num(c.close, 2)} ${esc(c.unit || "")}${
+        c.change_1y === null ? "" : ` · 1년 ${pct(c.change_1y, { digits: 1, sign: true })}`}${
+        where ? ` · 1년 범위 중 <strong>${where}</strong> (${Math.round(c.position_52w * 100)}%)` : ""}</p>
+       <p class="score-row__date">선물 가격 ${dotDate(c.as_of)} 기준</p>`
+    : "";
+  return `<div class="score-row commodity-row">
+      <span class="badge badge--commodity">원자재 연동</span>
+      <div class="score-row__text score-row__sector">${quote}<p class="subtle">${esc(c.note)}</p></div>
+    </div>`;
+}
+
 function renderScore(a) {
   const s = a.attractiveness;
+  if (s.unscored_reason) {
+    $("#score").replaceChildren(emptyState({ title: "이 업종은 매력도 점수를 내지 않습니다", body: s.unscored_reason }));
+    return;
+  }
   if (!s.as_of) {
     $("#score").replaceChildren(emptyState({
       title: "매력도가 아직 계산되지 않았습니다",
@@ -347,7 +377,8 @@ function renderScore(a) {
   const factors = Object.entries(s.factors);
   const pos = Object.fromEntries(FACTORS.map((f) => [f.key, s.factors[f.key]?.available ? toPos(s.factors[f.key].score) : null]));
   const band = scoreBand(s.score);
-  const rankText = !s.rank ? "순위 없음" : `${market} 비교군 ${s.rank.total}개 중 <strong>${s.rank.position}위</strong>`;
+  const peerWord = `${market}${s.rank?.family === "financial" ? " 금융" : ""} 비교군`;   // 금융은 금융끼리의 순위
+  const rankText = !s.rank ? "순위 없음" : `${peerWord} ${s.rank.total}개 중 <strong>${s.rank.position}위</strong>`;
   const mc = stock?.market_condition;   // 시장·섹터 점수는 상세 응답에서 — 프리셋을 바꿔 다시 그려도 그대로
   const el = h(`<div class="score-panel">
       <div class="score-panel__gauge score-panel__left">
@@ -359,6 +390,7 @@ function renderScore(a) {
             <p class="subtle">${esc(s.preset.name)} 성향 · ${date(s.as_of)} 기준</p></div>
         </div>
         ${mc ? conditionRow(mc) : ""}
+        ${stock?.commodity ? commodityRow(stock.commodity) : ""}
       </div>
       <div class="score-panel__radar">
         <div class="chart-box chart-box--radar"><canvas role="img" aria-label="매력도 5요소 레이더 (같은 시장 안 위치 0~100, 50 = 시장 중앙)"></canvas></div>

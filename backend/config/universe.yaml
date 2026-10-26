@@ -19,6 +19,13 @@ indices:
   - {code: RUT,    name: Russell 2000,       market: NYSE,   yf_symbol: "^RUT",  display_order: 8}
   - {code: SOX,    name: 필라델피아 반도체,  market: NASDAQ, yf_symbol: "^SOX",  display_order: 9}
   - {code: VIX,    name: VIX,                market: NYSE,   yf_symbol: "^VIX",  display_order: 10}
+  # 원자재(선물 연속 월물, yfinance) — 대시보드 '원자재' 묶음에서 고르고, 원자재 연동 테마 종목 상세의 가격 위치에 쓴다
+  # 미국 장 달력(NYSE)으로 수집한다. 월물이 바뀌는 날 가격이 툭 튈 수 있다
+  - {code: WTI,      name: WTI 원유, market: NYSE, yf_symbol: "CL=F",  display_order: 11, category: commodity, unit: "$/배럴"}
+  - {code: GOLD,     name: 금,       market: NYSE, yf_symbol: "GC=F",  display_order: 12, category: commodity, unit: "$/온스"}
+  - {code: COPPER,   name: 구리,     market: NYSE, yf_symbol: "HG=F",  display_order: 13, category: commodity, unit: "$/파운드"}
+  - {code: ALUMINUM, name: 알루미늄, market: NYSE, yf_symbol: "ALI=F", display_order: 14, category: commodity, unit: "$/톤"}
+  - {code: HRC,      name: 열연강판, market: NYSE, yf_symbol: "HRC=F", display_order: 15, category: commodity, unit: "$/숏톤"}
 
 fx:
   usd_krw: {yf_symbol: "KRW=X"}
@@ -50,234 +57,112 @@ stocks:
   - {market: NASDAQ, ticker: AVGO,  name: Broadcom,  yf_symbol: AVGO}
   - {market: NASDAQ, ticker: AMD,   name: AMD,       yf_symbol: AMD}
 
-# 화면 경쟁 비교용 테마 그룹 (국내·해외 종목 혼합 가능)
-peer_groups:
-  - {name: 반도체,        members: ["005930", "000660", NVDA, AVGO, AMD]}
-  - {name: 자동차,        members: ["005380", "000270", TSLA]}
-  - {name: 인터넷·플랫폼, members: ["035420", "035720", GOOGL, META]}
-  - {name: 빅테크,        members: [AAPL, MSFT, AMZN]}
-  - {name: 2차전지,       members: ["373220", "006400", "247540"]}
-  - {name: 바이오,        members: ["207940", "068270"]}
-  - {name: 철강,          members: ["005490", "004020"]}
-  - {name: 방산,          members: ["012450", "047810", "064350"]}
-
-
 # ---------------------------------------------------------------------
-# 매력도 비교군(benchmark) — 화면 노출 종목(위 stocks)과 함께 점수의 비교 표본이 된다 (개발산출물/09 9절)
-# 국가별·섹터별 비교군 = 그 섹터의 노출 종목 + 아래 후보 중 시가총액 상위 (per_sector − 노출 종목 수)개
-# 섹터 정의(2차전지·방산·빅테크 등)가 KRX 업종·GICS와 1:1로 맞지 않아 후보 풀은 직접 정하고,
-# 선정은 적재 시점의 실제 시가총액으로 자동으로 한다. 금융 섹터는 지표 구조가 달라 넣지 않는다.
+# 매력도 비교군(benchmark) — 화면 노출 종목(위 stocks)과 함께 점수의 비교 표본이 된다 (개발산출물/09 11절)
+# 국가별·테마별 비교군 = 그 테마의 노출 종목 + 같은 주 테마로 분류된 상장 종목 중 시가총액 상위 (per_sector − 노출 종목 수)개
+# 순서: 국내는 KRX 전 종목 시가총액(1회 조회, 실패하면 DB 최신값), 미국은 stocks.cap_rank(SEC 발행주식수 × 종가 순위, app/ingest/background.py)
 benchmark:
-  per_sector: 10          # 국가별 섹터당 최대 종목 수(노출 종목 포함)
+  per_sector: 10          # 국가별 테마당 최대 종목 수(노출 종목 포함)
   price_days: 400         # 일봉 보관 기간(달력일) — 변동성·12-1개월 모멘텀에 거래일 253개 필요
-  fin_years: 3            # FY 재무 연수 (유효기간은 data_freshness — 공시 일정 기반 + 90일 상한)
+  fin_years: 3            # FY 재무 연수 — 원자재 연동 테마의 3년 평균 순이익에도 쓴다 (유효기간은 data_freshness — 공시 일정 기반 + 90일 상한)
   reselect_days: 30       # 시가총액 순위로 다시 고르는 주기(매일 고르면 경계 종목이 들락날락)
   daily_at_kst: "07:00"   # 매일 이 시각 이후 1회 갱신(미국 장 마감 후)
   detail_ttl_hours: 24    # 상세 화면을 열면 가격 증분 + 유효기간이 지난 데이터만 받고, 이 시간 동안은 다시 확인하지 않음
   fin_daily_budget: 100   # 07:00 갱신이 하루에 재무를 받는 비교군 종목 수 상한(유효기간이 가장 오래 지난 순). 노출·관심 종목은 무관 (D4 임시값 — 첫 배포 뒤 BENCHMARK 실행 시간을 보고 확정)
+  industry_recheck_days: 365   # 업종 코드(국내 KSIC·미국 SIC)는 거의 바뀌지 않아 이 주기로만 다시 확인(종목마다 DART·SEC 호출 1번)
+  classify_per_run: 3000       # 한 번의 선정에서 업종 코드를 받는 종목 수 상한(국가별). 처음 적재는 국내 약 2,500 · 미국 약 1,500
 
-benchmark_candidates:
-  반도체:
-    KR:
-      - {market: KOSPI,  ticker: "042700", name: 한미반도체}
-      - {market: KOSPI,  ticker: "000990", name: DB하이텍}
-      - {market: KOSDAQ, ticker: "403870", name: HPSP}
-      - {market: KOSDAQ, ticker: "058470", name: 리노공업}
-      - {market: KOSDAQ, ticker: "039030", name: 이오테크닉스}
-      - {market: KOSDAQ, ticker: "240810", name: 원익IPS}
-      - {market: KOSDAQ, ticker: "357780", name: 솔브레인}
-      - {market: KOSDAQ, ticker: "095340", name: ISC}
-      - {market: KOSDAQ, ticker: "036930", name: 주성엔지니어링}
-      - {market: KOSDAQ, ticker: "166090", name: 하나머티리얼즈}
-      - {market: KOSDAQ, ticker: "140860", name: 파크시스템스}
-    US:
-      - {market: NASDAQ, ticker: QCOM, name: Qualcomm}
-      - {market: NASDAQ, ticker: TXN,  name: Texas Instruments}
-      - {market: NASDAQ, ticker: INTC, name: Intel}
-      - {market: NASDAQ, ticker: MU,   name: Micron Technology}
-      - {market: NASDAQ, ticker: AMAT, name: Applied Materials}
-      - {market: NASDAQ, ticker: LRCX, name: Lam Research}
-      - {market: NASDAQ, ticker: KLAC, name: KLA}
-      - {market: NASDAQ, ticker: ADI,  name: Analog Devices}
-      - {market: NASDAQ, ticker: MRVL, name: Marvell Technology}
-      - {market: NASDAQ, ticker: MCHP, name: Microchip Technology}
-      - {market: NASDAQ, ticker: "ON", name: ON Semiconductor}
-  자동차:
-    KR:
-      - {market: KOSPI, ticker: "012330", name: 현대모비스}
-      - {market: KOSPI, ticker: "018880", name: 한온시스템}
-      - {market: KOSPI, ticker: "204320", name: HL만도}
-      - {market: KOSPI, ticker: "161390", name: 한국타이어앤테크놀로지}
-      - {market: KOSPI, ticker: "011210", name: 현대위아}
-      - {market: KOSPI, ticker: "073240", name: 금호타이어}
-      - {market: KOSPI, ticker: "005850", name: 에스엘}
-      - {market: KOSPI, ticker: "002350", name: 넥센타이어}
-      - {market: KOSPI, ticker: "064960", name: SNT모티브}
-    US:
-      - {market: NYSE,   ticker: GM,   name: General Motors}
-      - {market: NYSE,   ticker: F,    name: Ford Motor}
-      - {market: NASDAQ, ticker: RIVN, name: Rivian Automotive}
-      - {market: NASDAQ, ticker: LCID, name: Lucid Group}
-      - {market: NYSE,   ticker: APTV, name: Aptiv}
-      - {market: NYSE,   ticker: BWA,  name: BorgWarner}
-      - {market: NYSE,   ticker: LEA,  name: Lear}
-      - {market: NASDAQ, ticker: GT,   name: Goodyear Tire and Rubber}
-      - {market: NYSE,   ticker: ALV,  name: Autoliv}
-      - {market: NASDAQ, ticker: LKQ,  name: LKQ}
-  인터넷·플랫폼:
-    KR:
-      - {market: KOSPI,  ticker: "259960", name: 크래프톤}
-      - {market: KOSPI,  ticker: "036570", name: 엔씨소프트}
-      - {market: KOSPI,  ticker: "251270", name: 넷마블}
-      - {market: KOSPI,  ticker: "377300", name: 카카오페이}
-      - {market: KOSPI,  ticker: "018260", name: 삼성에스디에스}
-      - {market: KOSPI,  ticker: "012510", name: 더존비즈온}
-      - {market: KOSPI,  ticker: "181710", name: NHN}
-      - {market: KOSDAQ, ticker: "263750", name: 펄어비스}
-      - {market: KOSDAQ, ticker: "293490", name: 카카오게임즈}
-      - {market: KOSDAQ, ticker: "112040", name: 위메이드}
-    US:
-      - {market: NASDAQ, ticker: NFLX, name: Netflix}
-      - {market: NASDAQ, ticker: BKNG, name: Booking Holdings}
-      - {market: NYSE,   ticker: UBER, name: Uber Technologies}
-      - {market: NASDAQ, ticker: ABNB, name: Airbnb}
-      - {market: NASDAQ, ticker: DASH, name: DoorDash}
-      - {market: NASDAQ, ticker: EBAY, name: eBay}
-      - {market: NASDAQ, ticker: PYPL, name: PayPal}
-      - {market: NASDAQ, ticker: EXPE, name: Expedia Group}
-      - {market: NYSE,   ticker: PINS, name: Pinterest}
-      - {market: NYSE,   ticker: SNAP, name: Snap}
-  빅테크:
-    US:
-      - {market: NYSE,   ticker: ORCL, name: Oracle}
-      - {market: NYSE,   ticker: CRM,  name: Salesforce}
-      - {market: NASDAQ, ticker: ADBE, name: Adobe}
-      - {market: NYSE,   ticker: IBM,  name: IBM}
-      - {market: NASDAQ, ticker: CSCO, name: Cisco Systems}
-      - {market: NYSE,   ticker: NOW,  name: ServiceNow}
-      - {market: NASDAQ, ticker: INTU, name: Intuit}
-      - {market: NASDAQ, ticker: PLTR, name: Palantir Technologies}
-  2차전지:
-    KR:
-      - {market: KOSDAQ, ticker: "086520", name: 에코프로}
-      - {market: KOSPI,  ticker: "003670", name: 포스코퓨처엠}
-      - {market: KOSDAQ, ticker: "066970", name: 엘앤에프}
-      - {market: KOSPI,  ticker: "005070", name: 코스모신소재}
-      - {market: KOSPI,  ticker: "450080", name: 에코프로머티}
-      - {market: KOSPI,  ticker: "361610", name: SK아이이테크놀로지}
-      - {market: KOSPI,  ticker: "020150", name: 롯데에너지머티리얼즈}
-      - {market: KOSDAQ, ticker: "278280", name: 천보}
-      - {market: KOSPI,  ticker: "096770", name: SK이노베이션}
-    US:
-      - {market: NYSE,   ticker: ALB,  name: Albemarle}
-      - {market: NYSE,   ticker: QS,   name: QuantumScape}
-      - {market: NASDAQ, ticker: FLNC, name: Fluence Energy}
-      - {market: NASDAQ, ticker: ENVX, name: Enovix}
-      - {market: NASDAQ, ticker: EOSE, name: Eos Energy Enterprises}
-      - {market: NASDAQ, ticker: SLDP, name: Solid Power}
-      - {market: NASDAQ, ticker: MVST, name: Microvast}
-  바이오:
-    KR:
-      - {market: KOSDAQ, ticker: "196170", name: 알테오젠}
-      - {market: KOSPI,  ticker: "000100", name: 유한양행}
-      - {market: KOSPI,  ticker: "128940", name: 한미약품}
-      - {market: KOSPI,  ticker: "326030", name: SK바이오팜}
-      - {market: KOSPI,  ticker: "302440", name: SK바이오사이언스}
-      - {market: KOSDAQ, ticker: "028300", name: HLB}
-      - {market: KOSDAQ, ticker: "141080", name: 리가켐바이오}
-      - {market: KOSDAQ, ticker: "145020", name: 휴젤}
-      - {market: KOSPI,  ticker: "185750", name: 종근당}
-      - {market: KOSPI,  ticker: "006280", name: 녹십자}
-    US:
-      - {market: NYSE,   ticker: LLY,  name: Eli Lilly}
-      - {market: NYSE,   ticker: JNJ,  name: Johnson and Johnson}
-      - {market: NYSE,   ticker: ABBV, name: AbbVie}
-      - {market: NYSE,   ticker: MRK,  name: Merck}
-      - {market: NYSE,   ticker: PFE,  name: Pfizer}
-      - {market: NASDAQ, ticker: AMGN, name: Amgen}
-      - {market: NASDAQ, ticker: GILD, name: Gilead Sciences}
-      - {market: NASDAQ, ticker: VRTX, name: Vertex Pharmaceuticals}
-      - {market: NASDAQ, ticker: REGN, name: Regeneron Pharmaceuticals}
-      - {market: NYSE,   ticker: BMY,  name: Bristol-Myers Squibb}
-      - {market: NASDAQ, ticker: BIIB, name: Biogen}
-      - {market: NASDAQ, ticker: MRNA, name: Moderna}
-  철강:
-    KR:
-      - {market: KOSPI, ticker: "460860", name: 동국제강}
-      - {market: KOSPI, ticker: "001230", name: 동국홀딩스}
-      - {market: KOSPI, ticker: "001430", name: 세아베스틸지주}
-      - {market: KOSPI, ticker: "306200", name: 세아제강}
-      - {market: KOSPI, ticker: "104700", name: 한국철강}
-      - {market: KOSPI, ticker: "058430", name: 포스코스틸리온}
-      - {market: KOSPI, ticker: "016380", name: KG스틸}
-      - {market: KOSPI, ticker: "010130", name: 고려아연}
-      - {market: KOSPI, ticker: "084010", name: 대한제강}
-    US:
-      - {market: NYSE,   ticker: NUE,  name: Nucor}
-      - {market: NASDAQ, ticker: STLD, name: Steel Dynamics}
-      - {market: NYSE,   ticker: RS,   name: Reliance}
-      - {market: NYSE,   ticker: CLF,  name: Cleveland-Cliffs}
-      - {market: NYSE,   ticker: CMC,  name: Commercial Metals}
-      - {market: NYSE,   ticker: ATI,  name: ATI}
-      - {market: NYSE,   ticker: CRS,  name: Carpenter Technology}
-      - {market: NYSE,   ticker: AA,   name: Alcoa}
-      - {market: NASDAQ, ticker: CENX, name: Century Aluminum}
-  방산:
-    KR:
-      - {market: KOSPI,  ticker: "079550", name: LIG넥스원}
-      - {market: KOSPI,  ticker: "272210", name: 한화시스템}
-      - {market: KOSPI,  ticker: "103140", name: 풍산}
-      - {market: KOSPI,  ticker: "042660", name: 한화오션}
-      - {market: KOSPI,  ticker: "329180", name: HD현대중공업}
-      - {market: KOSPI,  ticker: "010820", name: 퍼스텍}
-      - {market: KOSDAQ, ticker: "013810", name: 스페코}
-    US:
-      - {market: NYSE,   ticker: LMT,  name: Lockheed Martin}
-      - {market: NYSE,   ticker: RTX,  name: RTX}
-      - {market: NYSE,   ticker: NOC,  name: Northrop Grumman}
-      - {market: NYSE,   ticker: GD,   name: General Dynamics}
-      - {market: NYSE,   ticker: LHX,  name: L3Harris Technologies}
-      - {market: NYSE,   ticker: BA,   name: Boeing}
-      - {market: NYSE,   ticker: HII,  name: Huntington Ingalls Industries}
-      - {market: NYSE,   ticker: TDG,  name: TransDigm Group}
-      - {market: NYSE,   ticker: HWM,  name: Howmet Aerospace}
-      - {market: NASDAQ, ticker: AXON, name: Axon Enterprise}
-      - {market: NYSE,   ticker: LDOS, name: Leidos}
-      - {market: NASDAQ, ticker: KTOS, name: Kratos Defense and Security Solutions}
+# ---------------------------------------------------------------------
+# 업종 섹터 — 화면 섹터 필터·시장·섹터 점수의 섹터 흐름(stocks.sector). 종목의 섹터는 주 테마의 sector다
+sectors: [반도체·전자, IT·인터넷, 헬스케어, 자동차·운송장비, 산업재, 에너지·유틸리티, 소재, 필수소비재, 경기소비재, 금융]
 
-# 점수 비교 표본의 섹터(섹터 중립화 주 그룹). krx: KRX 업종명, sic: SEC SIC 코드 범위("시작-끝" 또는 단일)
-# 한 SIC가 여러 범위에 걸리면 가장 좁은 범위가 이긴다. 어느 섹터에도 없으면 비교 표본에 넣지 않는다
-# 금융·보험·부동산(KRX 기타금융·증권·보험·은행·금융·부동산, SIC 6000-6799)은 매출·영업이익 구조가 달라 제외
-sectors:
-  - name: 반도체·전자
-    krx: [전기·전자]
-    sic: ["3570-3579", "3600-3699"]
-  - name: IT·인터넷
-    krx: [IT 서비스, 통신, 출판·매체복제]
-    sic: ["2700-2799", "4800-4899", "7370-7379"]
-  - name: 헬스케어
-    krx: [제약, 의료·정밀기기]
-    sic: ["2830-2836", "3826", "3840-3851", "5047", "5122", "8000-8099", "8731"]
-  - name: 자동차·운송장비
-    krx: [운송장비·부품]
-    sic: ["3710-3716", "3740-3743", "3750-3751", "3790-3799"]
-  - name: 산업재
-    krx: [기계·장비, 건설, 운송·창고, 기타제조]
-    sic: ["1500-1799", "3400-3569", "3580-3599", "3720-3729", "3730-3732", "3760-3769", "3800-3839",
-          "4000-4799", "5000-5099", "7380-7389", "8700-8748"]
-  - name: 소재
-    krx: [화학, 금속, 비금속, 종이·목재]
-    sic: ["1000-1499", "2400-2499", "2600-2699", "2800-2829", "2850-2899", "3000-3099", "3200-3399"]
-  - name: 필수소비재
-    krx: [음식료·담배, 농업 임업 및 어업]
-    sic: ["0100-0999", "2000-2199", "2840-2844", "5140-5149", "5400-5499", "5900-5912"]
-  - name: 경기소비재
-    krx: [유통, 섬유·의류, 오락·문화, 일반서비스]
-    sic: ["2200-2399", "2500-2599", "3100-3199", "3630-3652", "3860-3999", "5100-5139", "5150-5399",
-          "5500-5899", "5913-5999", "7000-7369", "7500-7999", "8200-8299"]
-  - name: 에너지·유틸리티
-    krx: [전기·가스, 전기·가스·수도]
-    sic: ["1300-1399", "2900-2999", "4900-4999"]
+# 테마 — 매력도 섹터 중립화의 주 그룹, 비교군을 고르는 단위, 화면 경쟁 비교 그룹 (개발산출물/09 4·11절)
+# 종목마다 주 테마 1개: tickers 직접 지정 > 업종 코드. ksic = DART 기업개황 induty_code 접두어(가장 긴 접두어가 이긴다),
+#   sic = SEC SIC 범위("시작-끝" 또는 단일, 가장 좁은 범위가 이긴다). 어느 테마에도 없으면 테마·섹터 없음 → 비교 표본 제외
+# 노출 종목(stocks)은 반드시 tickers로 지정한다(업종 코드를 받기 전에도 master 적재만으로 주 테마가 정해지게)
+# scoring: general(기본) / financial(금융끼리 표준화, 매출 기준 지표 제외) / none(점수를 내지 않음 — 리츠)
+# commodity: 원자재 연동 테마 — 배지, E/P를 3년 평균 순이익으로, EPS 변화 제외. 값은 연결 원자재(indices code, category commodity)
+#   또는 none(연동이지만 무료 시세가 없음). commodity_by_ticker가 종목별로 우선한다
+themes:
+  # ---------------- 반도체·전자
+  - {name: 반도체, sector: 반도체·전자, ksic: ["2611", "2612"], sic: ["3674"],
+     tickers: ["005930", "000660", NVDA, AVGO, AMD]}
+  - {name: 반도체 장비·소재, sector: 반도체·전자, ksic: ["29271", "272", "20129"], sic: ["3559"],
+     tickers: [AMAT, LRCX, KLAC, TER, ASML, "240810", "036930", "357780", "005290", "064760", "166090", "095340", "131970"]}
+  - {name: 전자부품·디스플레이, sector: 반도체·전자, ksic: ["262"], sic: ["3670-3679"], tickers: [GLW, COHR, TEL]}
+  - {name: 하드웨어·통신장비, sector: 반도체·전자, ksic: ["263", "264"], sic: ["3570-3579", "3660-3669"], tickers: [GRMN]}
+  # ---------------- IT·인터넷
+  - {name: 빅테크, sector: IT·인터넷, tickers: [AAPL, MSFT, AMZN, GOOGL, META]}     # 업종 코드 없이 직접 지정만
+  - {name: 소프트웨어·IT서비스, sector: IT·인터넷, ksic: ["582", "620", "631"], sic: ["7371-7379"],
+     tickers: [PAYX, PANW, FTNT, IBM, MSCI]}
+  - {name: 인터넷 플랫폼, sector: IT·인터넷, ksic: ["63120"], sic: ["7370", "7389"],
+     tickers: ["035420", "035720", BKNG, ABNB, EXPE]}
+  - {name: 게임·엔터·미디어, sector: IT·인터넷, ksic: ["5821", "591", "592", "602", "713"],
+     sic: ["2710-2799", "4830-4841", "7810-7841", "7900-7999"], tickers: ["036570", TTWO, EA, RBLX]}
+  - {name: 통신, sector: IT·인터넷, ksic: ["612"], sic: ["4810-4829", "4890-4899"]}
+  # ---------------- 헬스케어
+  - {name: 제약, sector: 헬스케어, ksic: ["212"], sic: ["2833-2834"]}
+  - {name: 바이오, sector: 헬스케어, ksic: ["211", "701"], sic: ["2836"], tickers: ["207940", "068270", "028300"]}
+  - {name: 의료기기·서비스, sector: 헬스케어, ksic: ["213", "271"],
+     sic: ["2835", "3826", "3840-3851", "5047", "5122", "6324", "8000-8099", "8731"], tickers: [DHR, TMO]}
+  # ---------------- 자동차·운송장비
+  - {name: 완성차, sector: 자동차·운송장비, ksic: ["3012"], sic: ["3711"], tickers: ["005380", "000270", TSLA]}
+  - {name: 자동차 부품·타이어, sector: 자동차·운송장비, ksic: ["303", "29172", "221"], sic: ["3011", "3713-3716"],
+     tickers: ["000240"]}
+  - {name: 조선, sector: 자동차·운송장비, ksic: ["311"], sic: ["3730-3732"], tickers: ["009540", "082740", "071970", "443060"]}
+  - {name: 항공우주·방산, sector: 자동차·운송장비, ksic: ["313", "252"], sic: ["3720-3729", "3760-3769", "3795", "3812"],
+     tickers: ["012450", "047810", "064350", "272210", "103140", GD, HII, HWM, GE]}
+  # ---------------- 산업재
+  - {name: 기계·로봇, sector: 산업재, ksic: ["29"],
+     sic: ["3400-3569", "3580-3599", "3600", "3690-3699", "3740-3743", "3820-3829"], tickers: [URI]}
+  - {name: 건설·엔지니어링, sector: 산업재, ksic: ["41", "42", "7212"], sic: ["1500-1799", "8700-8748"]}
+  - {name: 운송·물류, sector: 산업재, ksic: ["49", "50", "51", "52"], sic: ["4000-4799"]}
+  - {name: 지주회사, sector: 산업재, ksic: ["649", "64992"]}     # 비금융 지주(연결재무라 일반 지표가 맞다). 금융지주는 금융 테마로 직접 지정
+  # ---------------- 에너지·유틸리티
+  - {name: 2차전지, sector: 에너지·유틸리티, ksic: ["282"], sic: ["3691"], commodity: none,     # 리튬은 무료 선물 시세가 없다
+     tickers: ["373220", "006400", "247540", "086520", "005070", "003670", ALB, QS]}
+  - {name: 전력 인프라, sector: 에너지·유틸리티, ksic: ["281", "283", "289"], sic: ["3357", "3612-3613", "3620-3629"],
+     tickers: [GEV, ETN, VRT, PWR, "034020", "267260", "298040", "010120", "229640", "006260"]}
+  - {name: 재생에너지, sector: 에너지·유틸리티,                  # 업종 코드로 구분되지 않아 직접 지정만
+     tickers: [FSLR, ENPH, SEDG, BE, PLUG, NXT, ARRY, RUN, "112610", "336260", "322000", "009830", "018000", "010060"]}
+  - {name: 석유·가스, sector: 에너지·유틸리티, ksic: ["06", "19", "46713"], commodity: WTI,
+     sic: ["1300-1399", "2900-2999", "3533", "4610-4619", "4922-4924"]}
+  - {name: 유틸리티, sector: 에너지·유틸리티, ksic: ["35", "36", "37", "38"], sic: ["4900-4999"], tickers: [NGG]}
+  # ---------------- 소재
+  - {name: 철강, sector: 소재, ksic: ["241", "243"], sic: ["3310-3325"], commodity: HRC,
+     tickers: ["005490", "004020", CLF]}                         # CLF: SIC는 금속 채굴(철광석)이지만 철강사
+  - {name: 비철금속, sector: 소재, ksic: ["242", "07"], sic: ["1000-1099", "3330-3369"], commodity: COPPER,
+     commodity_by_ticker: {AA: ALUMINUM, CENX: ALUMINUM, KALU: ALUMINUM, "006110": ALUMINUM, NEM: GOLD, AEM: GOLD, GOLD: GOLD}}
+  - {name: 석유화학, sector: 소재, ksic: ["201", "205"], sic: ["2820-2829", "2860-2869"], commodity: WTI}
+  - {name: 정밀화학, sector: 소재, ksic: ["202", "203", "204"], sic: ["2810-2819", "2850-2859", "2870-2899"]}
+  - {name: 건자재, sector: 소재, ksic: ["16", "17", "23"], sic: ["2400-2499", "2600-2699", "3200-3299"]}
+  # ---------------- 필수소비재
+  - {name: 식음료·담배, sector: 필수소비재, ksic: ["01", "03", "10", "11", "12"], sic: ["0100-0999", "2000-2199"]}
+  - {name: 화장품·생활용품, sector: 필수소비재, ksic: ["2042"], sic: ["2840-2844"]}
+  # ---------------- 경기소비재
+  - {name: 유통·커머스, sector: 경기소비재, ksic: ["46", "47"], sic: ["5000-5999"]}
+  - {name: 레저·의류·소비서비스, sector: 경기소비재, ksic: ["13", "14", "15", "55", "56", "9124", "96"],
+     sic: ["2200-2399", "3100-3199", "3630-3652", "3940-3949", "5810-5813", "7000-7099", "7200-7299", "8200-8299"],
+     tickers: ["111770"]}
+  # ---------------- 금융 (scoring: financial — 금융끼리만 비교, 영업이익률·매출 YoY 제외)
+  - {name: 은행·카드, sector: 금융, scoring: financial, ksic: ["641", "6491"], sic: ["6020-6036", "6100-6199"],
+     tickers: ["105560", "055550", "086790", "316140", "138930", "175330", "139130"]}
+  - {name: 보험, sector: 금융, scoring: financial, ksic: ["65"], sic: ["6310-6411"], tickers: ["138040"]}
+  - {name: 증권·자산운용, sector: 금융, scoring: financial, ksic: ["66"], sic: ["6200-6299"], tickers: ["071050", COIN]}
+  - {name: 리츠·부동산, sector: 금융, scoring: none, ksic: ["68"], sic: ["6500-6553", "6798"]}   # 실적 지표(FFO)가 없어 점수를 내지 않는다
+
+# 보조 테마 — 주 테마 밖의 큰 사업. 경쟁 비교·테마 필터에만 쓰고 섹터 중립화·비교군 선정에는 쓰지 않는다
+secondary_themes:
+  "005930": [하드웨어·통신장비, 전자부품·디스플레이]     # 삼성전자: 모바일·가전, 디스플레이
+  AMZN: [유통·커머스, 소프트웨어·IT서비스]               # 온라인 상거래, 클라우드
+  AAPL: [하드웨어·통신장비]
+  MSFT: [소프트웨어·IT서비스]
+  GOOGL: [인터넷 플랫폼]
+  META: [인터넷 플랫폼]
+  "096770": [2차전지]                                     # SK이노베이션: 배터리
+  "009830": [석유화학]                                    # 한화솔루션: 케미칼
+  "103140": [비철금속]                                    # 풍산: 신동(구리 가공)
+  "064350": [기계·로봇]                                   # 현대로템: 철도차량
 
 # 수집 적재 공통
 ingest:

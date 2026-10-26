@@ -53,6 +53,7 @@ erDiagram
         timestamptz detail_synced_at
         varchar industry
         smallint sic
+        varchar ksic
         varchar sector
         timestamptz industry_checked_at
         int cap_rank
@@ -63,6 +64,9 @@ erDiagram
         varchar name UK
         text description
         varchar kind
+        varchar sector
+        varchar scoring
+        boolean commodity_linked
     }
     peer_group_members {
         int group_id PK,FK
@@ -121,6 +125,8 @@ erDiagram
         smallint market_id FK
         varchar source_symbol
         smallint display_order
+        varchar category
+        varchar unit
     }
     index_daily_prices {
         smallint index_id PK,FK
@@ -276,14 +282,14 @@ FK가 없는 독립 테이블은 4개다.
 | 영역 | 테이블 | 설명 | PK | 행 수 |
 |---|---|---|---|---|
 | 마스터 | markets | 시장(통화·국가·시간대) | market_id | 4 |
-| 마스터 | stocks | 종목 — 노출(featured)·매력도 비교군(benchmark)·상장 목록(listed) | stock_id, UQ (market_id, ticker) | 8,301 (노출 25 · 비교군 121 · 상장 목록 8,155) |
-| 마스터 | peer_groups | 경쟁 그룹(theme) / 업종 섹터 그룹(sector) | group_id | 8 |
-| 마스터 | peer_group_members | 종목↔그룹 N:M, 주 그룹 표시 | (group_id, stock_id) | 146 |
+| 마스터 | stocks | 종목 — 노출(featured)·매력도 비교군(benchmark)·상장 목록(listed) | stock_id, UQ (market_id, ticker) | 8,301 (노출 25 · 비교군 636 · 상장 목록 7,640 — 2026-10-26 테마 재선정 후) |
+| 마스터 | peer_groups | 테마 — 섹터 중립화 주 그룹·비교군 선정 단위·화면 경쟁 비교 | group_id | 38 |
+| 마스터 | peer_group_members | 종목↔테마 N:M, 주 테마 표시(상장 목록 종목 포함) | (group_id, stock_id) | 3,714 (주 테마 3,702 · 보조 12) |
 | 시계열 | daily_prices | 종목 일봉(수정주가) | (stock_id, trade_date) | 45,126 (노출 25종목 2년 12,432 · 비교군 121종목 32,694) |
 | 시계열 | valuation_snapshots | PER·PBR·시총·주당배당 | (stock_id, as_of) | 4,580 (PYKRX 4,200 · DERIVED 292 · YFINANCE 88) |
 | 재무 | financial_statements | 재무제표(FY) | fin_id, UQ (stock_id, period_end, period_type) | 20,896 (DART 7,396 · SEC 13,500) |
 | 공시 | disclosures | 공시 목록(최근 1년) | disclosure_id, UQ (rcept_no) | 1,361 (DART 1,183 · SEC 178) |
-| 배경 | indices | 지수 정의 | index_id | 10 |
+| 배경 | indices | 지수·원자재 선물 정의 | index_id | 15 (지수 10 · 원자재 5) |
 | 배경 | index_daily_prices | 지수 일봉 | (index_id, trade_date) | 4,538 (2024-10-14 ~ 2026-10-22) |
 | 배경 | fx_rates | USD/KRW | fx_id, UQ (granularity, rate_at) | 533 (DAILY 523 · SNAPSHOT 10) |
 | 홈 위젯 | sector_performance_daily | 섹터 전일 대비 등락률(캐시, 30일 보관) | id, UQ (market, sector_code, trade_date) | 176 |
@@ -331,10 +337,11 @@ FK가 없는 독립 테이블은 4개다.
 | is_active | boolean | N | true |  | 수집·점수 계산 대상 여부 (false면 데이터만 보존) |
 | coverage | character varying(10) | N | 'featured' |  | featured(화면 노출 — 주가 1시간·그 밖 4시간 갱신) / benchmark(매력도 비교군, 1일 갱신) / listed(상장 보통주 목록 — 이름·티커만, 상세를 열 때 수집, 점수 유니버스 제외) |
 | detail_synced_at | timestamp with time zone | Y |  |  | 비교군 종목 상세(공시·2년 일봉·5개년 재무)를 마지막으로 받은 시각 |
-| industry | character varying(64) | Y |  |  | 국내 KRX 업종명 / 미국 SEC SIC 설명 |
+| industry | character varying(64) | Y |  |  | 미국 SEC SIC 설명(국내는 012 이전의 KRX 업종명이 남아 있을 수 있음 — 화면·계산에 쓰지 않음) |
 | sic | smallint | Y |  |  | 미국 SEC SIC 코드 |
-| sector | character varying(32) | Y |  |  | `config/universe.yaml` sectors 매핑 결과. NULL = 매핑 없음·금융 등 제외 업종 |
-| industry_checked_at | timestamp with time zone | Y |  |  | 업종을 마지막으로 확인한 시각(미국 SIC는 1년마다 다시 확인) |
+| ksic | character varying(10) | Y |  |  | 국내 DART 기업개황 업종 코드(KSIC 2~5자리) — 테마 분류 (migration 012) |
+| sector | character varying(32) | Y |  |  | 주 테마의 부모 섹터(`config/universe.yaml` themes). NULL = 주 테마 없음(분류되지 않은 업종) |
+| industry_checked_at | timestamp with time zone | Y |  |  | 업종 코드(KSIC·SIC)를 마지막으로 확인한 시각(1년마다 다시 확인) |
 | cap_rank | integer | Y |  |  | 국가 안 시가총액 순위(1 = 가장 큼). 미국 상위 1,500개만 값이 있다 — 백그라운드 재무 적재 우선순위용, 화면에는 쓰지 않음 (migration 009) |
 | cap_ranked_at | timestamp with time zone | Y |  |  | 순위를 매긴 시각(30일마다 다시 매김) |
 
@@ -342,16 +349,19 @@ FK가 없는 독립 테이블은 4개다.
 
 #### `peer_groups`
 
-기존 경쟁 그룹은 `kind = 'theme'`(화면 경쟁 비교용)이다. 업종 섹터 그룹(`kind = 'sector'`)은 비교군 선정 때 만들어지고, 그 `is_primary` 구성원이 매력도 섹터 중립화 표본이다(09 9절). 화면 경쟁 비교·그룹 통계(`peers.sql`·`stock_groups.sql`·`stats_overview.sql`·`stats_peer_group_valuation.sql`)는 테마 그룹만 쓴다.
+테마(`config/universe.yaml themes`, master 적재가 맞추고 설정에서 빠진 그룹은 구성원과 함께 지운다). 종목마다 주 테마 1개(`peer_group_members.is_primary`)가 매력도 섹터 중립화·비교군 선정 기준이고, 보조 테마는 경쟁 비교·테마 필터에만 쓴다(09 4절). 모든 행이 `kind = 'theme'`이다(`sector` 값은 남겨 두었지만 쓰지 않는다). 주 테마는 뷰 `v_stock_theme`(종목별 1행, `family` = `scoring`)로 읽는다.
 
 | 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
 | group_id | integer | N | 자동 증가 | PK | 경쟁 그룹 ID |
 | name | character varying(64) | N |  | UQ | 이름 |
 | description | text | Y |  |  | 설명 |
-| kind | character varying(10) | N | 'theme' |  | theme = 화면 경쟁 비교 / sector = 매력도 섹터 중립화 |
+| kind | character varying(10) | N | 'theme' |  | 모두 theme |
+| sector | character varying(32) | Y |  |  | 부모 섹터(`config/universe.yaml` sectors) — migration 012 |
+| scoring | character varying(10) | N | 'general' |  | general / financial(금융끼리 표준화, 매출 기준 지표 제외) / none(점수 없음 — 리츠) |
+| commodity_linked | boolean | N | false |  | 원자재 연동 테마(E/P 3년 평균 순이익, EPS 변화 제외, 상세 원자재 표시) |
 
-제약: `CHECK (((kind)::text = ANY ((ARRAY['theme'::character varying, 'sector'::character varying])::text[])))`
+제약: `CHECK (((kind)::text = ANY ((ARRAY['theme'::character varying, 'sector'::character varying])::text[])))` / `CHECK (scoring IN ('general','financial','none'))`
 
 #### `peer_group_members`
 
@@ -361,7 +371,7 @@ FK가 없는 독립 테이블은 4개다.
 |---|---|---|---|---|---|
 | group_id | integer | N |  | PK, FK→peer_groups (CASCADE) | 경쟁 그룹 ID |
 | stock_id | integer | N |  | PK, FK→stocks (CASCADE) | 종목 ID |
-| is_primary | boolean | N | false |  | 매력도 섹터 중립화의 주 그룹 여부 |
+| is_primary | boolean | N | false |  | 주 테마 여부(매력도 섹터 중립화·비교군 선정 기준) |
 
 #### `daily_prices`
 
@@ -440,6 +450,8 @@ FK가 없는 독립 테이블은 4개다.
 | market_id | smallint | Y |  | FK→markets | 시장 ID |
 | source_symbol | character varying(32) | N |  |  | 라이브러리 조회용 심볼 (1001, ^GSPC …) |
 | display_order | smallint | N | 0 |  | 화면 표시 순서 |
+| category | character varying(10) | N | 'index' |  | index = 지수 / commodity = 원자재 선물(대시보드 '원자재' 묶음, 원자재 연동 종목의 가격 위치) — migration 012 |
+| unit | character varying(16) | Y |  |  | 원자재 가격 단위($/톤 등). 지수는 NULL |
 
 #### `index_daily_prices`
 
@@ -834,6 +846,8 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | `008_ingest_cursor.sql` | `ingest_cursor`(DART 사업보고서 목록 증분 기준점) | — |
 | `009_cap_rank.sql` | `stocks.cap_rank`·`cap_ranked_at`(미국 시가총액 순위 — 백그라운드 재무 적재 우선순위) | — |
 | `010_kis_source.sql` | `valuation_snapshots.source`에 `KIS`(한국투자증권 Open API) 허용 | — |
+| `011_auth.sql` | `users` 계정 칸(email·password_hash·google_sub·last_login_at·last_seen_at), `user_preferences` | — |
+| `012_themes.sql` | `stocks.ksic`, `peer_groups.sector`·`scoring`·`commodity_linked`, `indices.category`·`unit`, 국내 업종 확인 시각 초기화(뷰 `v_stock_theme`은 views.sql) | `master` → `benchmark --reselect` |
 
 ## 9. 검증 결과
 2026-10-22 `docker compose run --rm api pytest -v` 전체 **507 passed**(테스트 DB `stockdb_test`) 중 DB 설계 관련 결과다. 테스트 전체 목록은 `07_테스트_결과서.md`에 있다.
