@@ -5,7 +5,7 @@
 --   Z = (x − 중앙값) / (1.4826 × MAD),  MAD = median(|x − 중앙값|)
 --   유효 표본 < 5 또는 MAD = 0 → 평균·표본표준편차 Z, 표준편차도 0(또는 표본 1개)이면 Z = 0
 --   방향 −는 부호를 뒤집고, 모든 Z를 [−3, 3]으로 자른다
---   z_raw가 이미 채워진 행(z_fixed — 지금 쓰는 지표 없음, 고정 규칙이 생기면 재사용)은 통계에서 빼고 건드리지 않는다
+--   z_raw가 이미 채워진 행(z_fixed — 자본 ≤ 0인 부채비율 −3)은 통계에서 빼고 건드리지 않는다
 WITH v AS (
     SELECT mv.stock_id, mv.metric, mv.raw_value, mk.country, COALESCE(t.family, 'general') AS family
     FROM stock_metric_values mv

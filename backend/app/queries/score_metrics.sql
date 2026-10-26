@@ -1,8 +1,8 @@
 -- 매력도 1단계: 종목별 지표 원값 (기준: 종목별 최신 거래일 종가·최신 밸류에이션·최신 FY 재무)
 -- 대상: 파라미터 stock_id가 NULL이면 매력도 유니버스(활성 노출 종목 + 비교군, listed 제외)
 --       stock_id를 주면 그 종목만(상장 종목 목록의 참고 점수 계산용 — app/services/reference_score.py)
--- 지표 정의·NULL 사유는 개발산출물/09 2절. 한 종목당 9행(값이 없으면 raw_value NULL)
--- z_fixed: 정규화 없이 Z를 고정하는 경우(지금 쓰는 지표 없음 — 규칙만 남김). note: 대체 계산·고정 사유
+-- 지표 정의·NULL 사유는 개발산출물/09 2절. 한 종목당 10행(값이 없으면 raw_value NULL)
+-- z_fixed: 정규화 없이 Z를 고정하는 경우(자본 ≤ 0인 부채비율 → −3). note: 대체 계산·고정 사유
 -- null_note: 업종 규칙으로 일부러 비운 지표의 사유(missing_metrics에 기본 사유 대신 쓴다)
 -- 주 테마(v_stock_theme) 규칙:
 --   family financial(금융): 영업이익률·매출 YoY를 쓰지 않는다(은행·보험은 매출 구조가 다름)
@@ -100,6 +100,10 @@ CROSS JOIN LATERAL (VALUES
         NULL, NULL, CASE WHEN c.commodity THEN '원자재 연동 업종 — 한 해 이익 변화는 원자재 가격을 따라 출렁여 쓰지 않음' END),
     ('max_drawdown',     'safety',   c.max_drawdown_1y, NULL, NULL, NULL),
     ('volatility',       'safety',   c.volatility_1y, NULL, NULL, NULL),
+    -- 안정성 = 낙폭·변동성·부채비율 평균 → 주가 출렁임 2/3, 부채 1/3
+    ('debt_ratio',       'safety',   CASE WHEN c.total_equity > 0 THEN c.total_debt / c.total_equity END,
+        CASE WHEN c.total_equity <= 0 THEN CAST(-3 AS numeric) END,
+        CASE WHEN c.total_equity <= 0 THEN '자본 ≤ 0 → 부채비율 Z = −3 고정' END, NULL),
     ('momentum',         'momentum', CASE WHEN c.c_252 IS NOT NULL THEN c.c_21 / c.c_252 - 1
                                           WHEN c.c_126 IS NOT NULL THEN c.c_21 / c.c_126 - 1 END,
         NULL,

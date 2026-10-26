@@ -232,12 +232,13 @@ const FACTORS = [
   { key: "value", label: "저평가", desc: "버는 돈·가진 자산에 비해 주가가 싼 편인가" },
   { key: "quality", label: "수익성", desc: "자본과 매출로 돈을 잘 버는가 (최근 연간 기준)" },
   { key: "growth", label: "성장성", desc: "매출과 이익이 작년보다 늘었나" },
-  { key: "safety", label: "안정성", desc: "주가가 덜 출렁이고 덜 빠지는가" },
+  { key: "safety", label: "안정성", desc: "주가가 덜 출렁이고 덜 빠지는가, 빚이 적은가" },
   { key: "momentum", label: "주가 흐름", desc: "최근 1년 주가가 오르는 추세인가" },
 ];
 const FACTOR_LABEL = Object.fromEntries(FACTORS.map((f) => [f.key, f.label]));
 const SIGNED_METRICS = ["revenue_yoy", "eps_change_yield", "momentum"];
 const rawFmt = (m) => (m.raw_value === null ? DASH
+  : m.metric === "debt_ratio" ? `${num(m.raw_value, 2)}배`
   : pct(m.raw_value, { digits: 1, sign: SIGNED_METRICS.includes(m.metric) }));
 const zFmt = (v) => {
   if (v === null || v === undefined) return DASH;
