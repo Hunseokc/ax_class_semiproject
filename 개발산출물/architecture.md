@@ -7,7 +7,7 @@ StockMind의 구성 요소, 데이터 적재 흐름, 요청 하나가 처리되�
 |---|---|
 | 프로젝트 주제 | 국내·미국 주식 데이터 백엔드와 분석 대시보드 (서비스: https://stockmind-538269380647.asia-northeast3.run.app) |
 | 해결하려는 문제 | 시세·지수·환율·재무·공시가 사이트·통화·회계기준마다 흩어져 있어, 국내·미국 종목을 같은 기준으로 비교하고 시드 배분을 계산하기 어렵다(`01` 3절) |
-| 대상 도메인·데이터 | 금융(주식) — pykrx·KIS·yfinance(시세·지수·환율), OpenDART·SEC EDGAR(재무·공시). 노출 25종목 + 매력도 비교군 121종목 + 검색용 상장 목록 8,155개(`03`) |
+| 대상 도메인·데이터 | 금융(주식) — pykrx·KIS·yfinance(시세·지수·환율), OpenDART·SEC EDGAR(재무·공시). 노출 25종목 + 매력도 비교군 636종목(테마 38개 × 국가별 시가총액 상위 10) + 검색용 상장 목록 7,640개(`03`, 2026-10-26) |
 | 사용한 LLM API·모델 | **사용하지 않는다.** 1차 세미프로젝트 규격에서 LLM·RAG는 범위 밖이라, '인사이트'는 SQL 분석(VIEW·윈도우 함수)과 규칙 기반 점수(매력도·시장 심리)로 만든다. 3차에서 분석 JSON을 LLM 입력으로 쓸 수 있게 구조를 맞춰 두었다(4절 끝) |
 | 주요 사용자·시나리오 | 국내·미국 주식을 함께 보는 입문 투자자 — 홈에서 시장 흐름 확인 → 리스트에서 종목 고르기 → 상세에서 매력도·경쟁 비교 → 관심종목 ★ → 모의 포트폴리오에 담아 시드 배분 확인 |
 
@@ -30,8 +30,8 @@ flowchart LR
   end
 
   subgraph DB["PostgreSQL 16"]
-    TBL["테이블 25<br/>시장·종목·시세·재무·공시·사용자·매력도·운영"]
-    VIEW["VIEW 3<br/>v_latest_price · v_fx_latest · v_stock_metrics"]
+    TBL["테이블 26<br/>시장·종목·시세·재무·공시·사용자·설정·매력도·운영"]
+    VIEW["VIEW 4<br/>v_latest_price · v_fx_latest · v_stock_metrics · v_stock_theme"]
   end
 
   subgraph API["FastAPI (app)"]
@@ -61,32 +61,34 @@ flowchart LR
 - **07:00 비교군 재무는 하루 예산**(`benchmark.fin_daily_budget`, 100종목)까지만 유효기간이 가장 오래 지난 순으로 받는다. 노출·관심·포트폴리오 종목은 예산과 무관하다.
 - 로컬 컨테이너는 `db`(PostgreSQL)와 `api`(uvicorn + 스케줄러) 두 개다(`compose.yml`). `api`의 HEALTHCHECK는 `/health/db`.
 
-### 1-1. 배포 구성 (Google Cloud, 2026-10-22 `gcloud run services describe` 등으로 확인)
+### 1-1. 배포 구성 (Google Cloud, 2026-10-26 `gcloud run services describe` 등으로 확인)
 
 ```mermaid
 flowchart LR
-  USER["브라우저<br/>(게스트 세션 쿠키)"] -->|HTTPS| RUN["Cloud Run 서비스 stockmind<br/>FastAPI + 화면 · 최대 인스턴스 1<br/>SCHEDULER_ENABLED=false"]
+  USER["브라우저<br/>(게스트 세션 쿠키 · 로그인 access token + refresh 쿠키)"] -->|HTTPS| RUN["Cloud Run 서비스 stockmind<br/>FastAPI + 화면 · 최대 인스턴스 1<br/>SCHEDULER_ENABLED=false"]
   SCHED["Cloud Scheduler<br/>refresh 매시 5분 · benchmark 07:00 · background 08:00 (KST)"] --> JOBS["Cloud Run Jobs<br/>stockmind-refresh · -benchmark · -background<br/>python -m app.ingest …"]
   RUN & JOBS --> SUPA["Supabase PostgreSQL<br/>(세션 풀러, 풀 5+3 / Job 2+1)"]
   JOBS --> EXT["외부 소스<br/>pykrx·KIS·yfinance·DART·SEC"]
-  SM["Secret Manager<br/>DATABASE_URL·SESSION_SECRET·DART·KRX·KIS 키"] -.-> RUN & JOBS
+  RUN --> REDIS["Upstash Redis<br/>refresh token(해시)·로그인 시도 제한"]
+  SM["Secret Manager<br/>DATABASE_URL·SESSION_SECRET·DART·KRX·KIS 키<br/>+ JWT_SECRET·REDIS_URL·GOOGLE_CLIENT_ID(서비스만)"] -.-> RUN & JOBS
   AR["Artifact Registry<br/>stockmind/api:&lt;커밋&gt;-&lt;날짜시각&gt;"] -.->|같은 이미지| RUN & JOBS
 ```
 
 - 서비스와 Jobs는 **같은 컨테이너 이미지**를 쓴다. 서비스는 화면·API만 맡고(앱 안 스케줄러 끔), 외부 수집은 Cloud Scheduler가 시간마다 실행하는 Job이 맡는다. 그래서 요청이 없어 인스턴스가 쉬어도 갱신이 멈추지 않는다.
-- 비밀 값은 이미지·저장소에 넣지 않고 Secret Manager에서 환경변수로 주입한다. 방문자는 브라우저별 게스트(`GUEST_SESSION_ENABLED=true`)로 나뉜다.
+- 비밀 값은 이미지·저장소에 넣지 않고 Secret Manager에서 환경변수로 주입한다. 방문자는 브라우저별 게스트(`GUEST_SESSION_ENABLED=true`)로 나뉘고, 로그인하면 계정이 된다(2차). 로그인 비밀값(`JWT_SECRET`·`REDIS_URL`·`GOOGLE_CLIENT_ID`)은 화면·API 서비스만 쓴다 — Jobs는 웹 앱을 불러오지 않아 필요 없다.
+- 2026-10-26 배포 이미지: 서비스·Jobs 모두 `api:28ad7f6-10261606`.
 - 재배포·장애 점검 절차는 `operations_guide.md` 7·8절.
 
 ## 2. 데이터 적재 흐름
 
 ```mermaid
 flowchart TD
-  U["backend/config/universe.yaml<br/>노출 25종목·지수 10·경쟁 그룹·비교군 후보"] --> M["master<br/>시장·종목·그룹·지수 + DART corp_code·SEC CIK"]
+  U["backend/config/universe.yaml<br/>노출 25종목·지수 10·원자재 5·섹터 10·테마 38"] --> M["master<br/>시장·종목·지수 + 테마 → 주·보조 테마 + DART corp_code·SEC CIK"]
   M --> P["prices · indices · fx<br/>일봉 2년(증분: 마지막 저장일 다음 날 ~ 시장 현지 날짜)"]
   M --> V["valuation<br/>KR pykrx 일별 1년 · US 스냅샷 · 실패 시 DART 파생"]
   M --> F["financials · disclosures<br/>FY 5개년 · 최근 1년 공시"]
-  P & V & F --> S["scores<br/>지표 → 로버스트 Z → 섹터 중립화 → 프리셋 가중 → 100·Φ"]
-  M --> B["benchmark<br/>국가·섹터별 시총 상위 비교군(121) 선정 + 평시 데이터"]
+  P & V & F --> S["scores<br/>지표(금융·원자재 규칙) → 국가·묶음 로버스트 Z → 주 테마 중립화 → 프리셋 가중 → 100·Φ"]
+  M --> B["benchmark<br/>업종 코드(KSIC·SIC) → 주 테마 → 국가·테마별 시총 상위 비교군(636) 선정 + 평시 데이터"]
   B --> S
   subgraph RUN["주기 실행 (앱 안 스케줄러 또는 CLI)"]
     RF["refresh — FX·INDICES·PRICES 1시간, 그 밖 4시간 TTL<br/>FX → INDICES → SECTORS_US·SECTORS_KR → PRICES → VALUATION → SCORES<br/>부분 실패는 30분 뒤 실패 종목만 재시도"]
@@ -138,6 +140,7 @@ sequenceDiagram
 | TTL 갱신 정책 | 같은 종류 외부 호출은 4시간(주가·지수·환율은 1시간)에 1회, 일봉·지수는 장 마감된 날까지만 요청(장중 호출 0), 작업 단위 기록으로 판단, 부분 실패는 30분 뒤 실패 종목만 재시도, 시장 현지 날짜까지만 요청 | README 갱신 정책, A-109·A-110 |
 | 예외처리 원칙 | 응답 형식 하나(`{"error": {...}}`), 형식 오류는 DB 전에 422, 남의 리소스는 404로 숨김, 처리하지 못한 예외는 내부 정보 없이 500(요청 ID로 로그 추적), 외부 장애는 마지막 값·stale 표시 | `개발산출물/06` 1절·5절 |
 | 대시보드 지표 선정 | 국내·미국 대표 지수 + USD/KRW(미국 종목의 원화 환산·환율 효과 분리에 필요), 사용자가 지수 10개 중 고름. 홈 순위는 리스트와 겹치지 않게 거래량 급증(20거래일 평균 대비)·매력도 순위, 매력도는 같은 시장 안 상대 위치(5개 팩터). 섹터 히트맵·시장 심리 지수는 이미 받는 시세 경로와 저장된 지수 일봉으로 만든다 | A-111·A-130·A-135·A-136, `개발산출물/09` |
-| 인증 | 로그인 없음. 로컬은 단일 사용자(demo), 배포는 서명된 쿠키로 브라우저별 게스트(첫 쓰기 때 demo 데이터 복사). 2차에서 `get_current_user_id()`만 JWT 검증으로 교체 | A-57·A-82, `02` USR-04 |
+| 인증 | 2차(2026-10-26): 로그인 = JWT access 15분(Authorization 헤더) + refresh 14일(httpOnly 쿠키, Redis에 해시만·교체·재사용 감지), 이메일·비밀번호 또는 Google. 로그인하지 않았으면 1차 방식 — 로컬은 단일 사용자(demo), 배포는 서명된 쿠키로 브라우저별 게스트(첫 쓰기 때 demo 관심종목 복사, 포트폴리오 저장은 로그인 후). 2차에서 `get_current_user_id()`만 JWT 검증으로 교체 | A-57·A-82, `02` USR-04 |
+| 테마 분류 (2차) | 섹터 9개로는 2차전지·전력 인프라·재생에너지처럼 다르게 움직이는 업종이 섞여 매력도 중립화가 틀어졌다 → 섹터 아래 테마 38개, 업종 코드(KSIC·SIC)로 자동 분류 + 직접 지정, 금융은 금융끼리, 원자재 연동 업종은 3년 평균 이익 | `개발산출물/09` 11절 |
 
 - **LLM 연동**: 사용하지 않는다. 1차 세미프로젝트 규격에서 LLM은 범위 밖이다. 3차 예정 — `GET /api/v1/statistics/data-quality`와 `stock_scores.data_quality`의 JSON 구조가 입력으로 쓰일 예정이다.

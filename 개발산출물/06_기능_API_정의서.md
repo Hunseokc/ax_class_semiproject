@@ -1,7 +1,7 @@
 # 06. 기능·API 정의서
 
 - 기준: 실행 중인 서버의 OpenAPI(`/openapi.json`)와 **실제 호출 응답**. 배열은 앞 2개만 표시
-- 엔드포인트 목록(2절)·에러 코드(5절)는 2026-10-22 코드 기준으로 맞췄다(경로 43개 — `backend/app/api/*.py`, 에러 코드는 `backend/app/core/errors.py`·서비스의 `code=`와 1:1)
+- 엔드포인트 목록(2절)·에러 코드(5절)는 2026-10-26 코드 기준으로 맞췄다(OpenAPI 경로 46개·메서드 55개 — 2차 로그인 12개 포함, `backend/app/api/*.py`, 에러 코드는 `backend/app/core/errors.py`·서비스의 `code=`와 1:1)
 - 예시 응답은 호출 시각을 제목에 적었다. 표시가 없는 예시는 2026-10-06~12 호출이며, 2026-10-22 지금 서버로 다시 불러 **응답 칸 이름이 그대로임을 확인**했다(값만 그때 기준). 응답 칸이 늘어난 4개(`/stocks` 목록·종목 상세·`/analysis`·`/watchlist`)는 2026-10-22에 다시 호출해 바꿨다
 - Swagger UI: `http://localhost:8000/docs` (로컬 `.env`의 `API_PORT`를 바꿨다면 그 포트) / 배포: `https://stockmind-538269380647.asia-northeast3.run.app/docs`
 
@@ -9,7 +9,7 @@
 | 항목 | 내용 |
 |---|---|
 | Base URL | `/api/v1` (헬스체크 `/health`·`/health/db`만 루트, A-114) |
-| 인증 | 없음(로그인은 2차). 요청 사용자는 서버 의존성 `get_current_user_id()`가 정한다. 클라이언트는 `user_id`를 보내지 않으며 보내도 무시된다. **로컬**: 설정값 `DEFAULT_USER_ID`(기본 1 = demo). **배포**(`GUEST_SESSION_ENABLED=true`): 서명된 세션 쿠키 `stockmind_session`(HttpOnly·Secure·SameSite=Lax, 1년)로 브라우저마다 게스트를 나눈다 — 쿠키가 없을 때 조회(GET·HEAD·OPTIONS)는 demo 화면, 첫 쓰기 요청에서 demo의 관심종목·포트폴리오를 복사한 게스트(`guest-…`)를 만든다. DB에 없는 사용자를 가리키는 옛 쿠키는 무시. 설정된 사용자가 DB에 없으면 404 `USER_NOT_FOUND` |
+| 인증 | **2차 로그인(2026-10-26 배포)**: `Authorization: Bearer <access token>`(JWT HS256 15분, `POST /auth/login`·`/signup`·`/google`·`/refresh`가 본문으로 줌)이 있으면 그 계정이 요청 사용자다. refresh token(14일)은 httpOnly 쿠키 `stockmind_refresh`(Path `/api/v1/auth`, SameSite=Strict)로만 오가고 쓸 때마다 바뀐다(Redis에 해시만). 로그인하지 않았으면 아래 1차 규칙 그대로 — 단 배포 게스트는 포트폴리오를 보기만 하고 저장은 401 `AUTH_REQUIRED`. 1차 규칙: 요청 사용자는 서버 의존성 `get_current_user_id()`가 정한다. 클라이언트는 `user_id`를 보내지 않으며 보내도 무시된다. **로컬**: 설정값 `DEFAULT_USER_ID`(기본 1 = demo). **배포**(`GUEST_SESSION_ENABLED=true`): 서명된 세션 쿠키 `stockmind_session`(HttpOnly·Secure·SameSite=Lax, 1년)로 브라우저마다 게스트를 나눈다 — 쿠키가 없을 때 조회(GET·HEAD·OPTIONS)는 demo 화면, 첫 쓰기 요청에서 demo의 관심종목·포트폴리오를 복사한 게스트(`guest-…`)를 만든다. DB에 없는 사용자를 가리키는 옛 쿠키는 무시. 설정된 사용자가 DB에 없으면 404 `USER_NOT_FOUND` |
 | 소유권 | 포트폴리오·담은 항목·관심종목은 요청 사용자 소유만 조회·변경. 다른 사용자의 리소스는 존재 여부를 드러내지 않도록 없는 리소스와 같은 404(`PORTFOLIO_NOT_FOUND`·`ITEM_NOT_FOUND`·`WATCHLIST_ITEM_NOT_FOUND`) |
 | 오류 형식 | `{"error": {"code", "message", "detail"}}` — 404 NOT_FOUND 계열, 409 CONFLICT 계열, 422 VALIDATION_ERROR·업무 검증, 503 FX_UNAVAILABLE, 500 INTERNAL_ERROR. 코드 전체는 [5절 에러 코드](#5-에러-코드) |
 | 500 처리 | 예상하지 못한 예외는 500 `INTERNAL_ERROR`와 고정 메시지만 응답한다(예외 메시지·스택·SQL·내부 경로는 응답에 넣지 않음). 스택은 서버 로그에 요청 ID와 함께 남고, 응답에도 `X-Request-ID` 헤더가 붙는다 |
@@ -67,6 +67,18 @@
 | 통계 | GET | `/statistics/monthly` | 종목 월별 집계: 거래일 수·평균 종가·최고/최저·월초 대비 월말 수익률·거래량 합계/평균 (date_trunc + GROUP BY, FIRST_VALUE/LAST_VALUE 윈도우). 진행 중인 달은 `is_partial: true` | market, ticker (필수), months (1~24, 기본 12) | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
 | 통계 | GET | `/statistics/ranking` | 지표별 TOP N 랭킹(노출 종목). `v_stock_metrics` + `RANK() OVER` — 같은 값은 같은 순위(1, 1, 3), 지표값 없는 종목 제외. 수익률은 소수, 거래량은 주, 시총은 원화 환산 | metric (return_1m·return_3m·return_1y·volume·market_cap_krw, 필수), country (KR·US, 비우면 전체), order (desc·asc), limit (1~50, 기본 10) | 200 · 422 VALIDATION_ERROR, VOLUME_SORT_REQUIRES_MARKET(전체 + volume) |
 | 통계 | GET | `/statistics/data-quality` | 데이터 품질 현황: 작업 종류별 마지막 성공·실패(사유·대상 티커), 최근 N일 상태별 건수(success·failed는 대상 단위, partial은 갱신 실행 단위, skipped)·격리 행 수, 오래된 4시간 갱신 작업(`stale_jobs`, 작업 단위 성공이 TTL×2 초과). `python -m app.ingest status`와 같은 기준(`backend/app/services/data_quality.py`) | days (1~90, 기본 7) | 200 · 422 VALIDATION_ERROR |
+| 로그인 | GET | `/auth/config` | 로그인 화면 설정 — Google 클라이언트 ID(없으면 null → Google 버튼 숨김) | - | 200 |
+| 로그인 | GET | `/auth/me` | 내 계정. 토큰 없이 부르면 `logged_in: false` | Authorization(선택) | 200 · 401 INVALID_TOKEN, TOKEN_EXPIRED |
+| 로그인 | POST | `/auth/signup` | 가입(이메일·비밀번호 8자 이상·닉네임 2~20자). 이 브라우저의 게스트 관심종목을 이어 쓴다. access token + refresh 쿠키 | body: email, password, nickname | 201 · 409 EMAIL_TAKEN, NICKNAME_TAKEN · 422 VALIDATION_ERROR · 503 AUTH_STORE_UNAVAILABLE |
+| 로그인 | POST | `/auth/login` | 이메일·비밀번호 로그인 | body: email, password | 200 · 401 INVALID_CREDENTIALS · 429 TOO_MANY_LOGIN_ATTEMPTS |
+| 로그인 | POST | `/auth/google` | Google ID token 로그인(처음이면 가입, 같은 이메일 계정이면 연결) | body: credential | 200 · 401 INVALID_GOOGLE_TOKEN · 503 GOOGLE_LOGIN_DISABLED |
+| 로그인 | POST | `/auth/refresh` | refresh 쿠키로 access token 다시 받기(refresh 교체) | 쿠키 `stockmind_refresh` | 200 · 401 REFRESH_INVALID, REFRESH_REUSED, REFRESH_RETRY |
+| 로그인 | POST | `/auth/logout` | 이 기기 로그아웃(refresh 폐기·쿠키 삭제) | - | 204 |
+| 로그인 | POST | `/auth/logout-all` | 모든 기기에서 로그아웃 | Authorization | 204 · 401 AUTH_REQUIRED |
+| 로그인 | PUT | `/auth/password` | 비밀번호 변경·설정(Google 전용 계정은 현재 비밀번호 없이 설정). 다른 기기는 로그아웃 | Authorization, body: current_password, new_password | 204 · 401 AUTH_REQUIRED, INVALID_PASSWORD |
+| 로그인 | DELETE | `/auth/me` | 탈퇴 — 관심종목·포트폴리오·설정까지 삭제(비밀번호가 없는 Google 전용 계정은 비밀번호 없이) | Authorization, body: password | 204 · 401 AUTH_REQUIRED, INVALID_PASSWORD |
+| 로그인 | GET | `/auth/me/preferences` | 내 설정(theme·preset·metrics·watch_view·home_portfolio) | Authorization | 200 · 401 AUTH_REQUIRED |
+| 로그인 | PUT | `/auth/me/preferences` | 내 설정 저장(보낸 칸만, null은 지움) | Authorization, body | 200 · 401 AUTH_REQUIRED · 422 VALIDATION_ERROR |
 
 ※ 오류 열은 엔드포인트별로 실제 발생할 수 있는 상태와 `code`다. 모든 엔드포인트는 예상하지 못한 예외 시 500 `INTERNAL_ERROR`. 코드별 조건은 [5절](#5-에러-코드).
 
@@ -74,7 +86,7 @@
 
 ※ 상장 종목 목록(listed): 검색용 이름·티커 마스터(`python -m app.ingest listing`, 비교군 일일 갱신 때 함께). 주식 리스트(`/stocks`)에는 나오지 않고 상단 검색에서만 찾는다. 매력도 유니버스·통계·경쟁 비교에는 넣지 않는다.
 
-※ 매력도 비교군(benchmark): 점수 비교 표본으로만 쓰는 종목(개발산출물/09 9절). 경쟁 비교(`/peers`, `/peers/chart`)·통계는 노출 종목(+대상 종목) 기준이고, 관심종목에 추가하면(POST `/watchlist`) 상세 데이터 수집을 예약한다.
+※ 매력도 비교군(benchmark): 점수 비교 표본으로만 쓰는 종목(개발산출물/09 11절 — 국가·테마별 시가총액 상위). 경쟁 비교(`/peers`, `/peers/chart`)·통계는 노출 종목(+대상 종목) 기준이고, 관심종목에 추가하면(POST `/watchlist`) 상세 데이터 수집을 예약한다.
 
 ※ `preset`: 투자 성향 프리셋 코드(aggressive·growth·balanced·value, 기본 balanced). 없는 코드(옛 quality 포함)는 422 `UNKNOWN_PRESET`(`detail.presets`에 사용 가능한 코드). 경쟁 비교 표(`/peers`)와 포트폴리오 요약의 매력도는 균형 프리셋 기준. 점수 정의는 개발산출물/09.
 
@@ -1912,6 +1924,42 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
   }
 }
 ```
+### 3-9. 로그인 (2026-10-26 로컬 실제 호출 — 예시 계정은 마지막에 탈퇴)
+#### `POST /api/v1/auth/signup`
+요청: `{"email": "doc-example@example.com", "password": "example-pass-1234", "nickname": "docexample"}` → 응답 `201` (+ `Set-Cookie: stockmind_refresh=…; Path=/api/v1/auth; HttpOnly; Secure; SameSite=Strict`, 14일)
+```json
+{
+  "access_token": "eyJhbGciOi…",
+  "token_type": "bearer",
+  "expires_in": 900,
+  "user": {
+    "logged_in": true,
+    "user_id": 17,
+    "nickname": "docexample",
+    "email": "doc-example@example.com",
+    "has_password": true,
+    "has_google": false
+  }
+}
+```
+같은 이메일로 다시 가입 → `409`:
+```json
+{"error": {"code": "EMAIL_TAKEN", "message": "이미 가입된 이메일이에요", "detail": null}}
+```
+#### `POST /api/v1/auth/login` — 비밀번호가 틀림 → `401`
+```json
+{"error": {"code": "INVALID_CREDENTIALS", "message": "이메일 또는 비밀번호가 맞지 않아요", "detail": null}}
+```
+#### `PUT /api/v1/auth/me/preferences` (Authorization: Bearer …) — 요청 `{"theme": "dark", "preset": "value"}` → `200`
+```json
+{"theme": "dark", "preset": "value", "metrics": null, "watch_view": null, "home_portfolio": null}
+```
+#### `POST /api/v1/auth/refresh` (쿠키만) → `200`, 새 access token + 새 refresh 쿠키. 쿠키가 없으면 `401`:
+```json
+{"error": {"code": "REFRESH_INVALID", "message": "로그인이 필요해요", "detail": null}}
+```
+#### `DELETE /api/v1/auth/me` — 요청 `{"password": "example-pass-1234"}` → `204`. 그 뒤 같은 토큰으로 `/auth/me` → `401 INVALID_TOKEN`
+
 ## 4. 화면 목록과 API 연결
 | 화면 | URL | 영역 | 호출 API |
 |---|---|---|---|
@@ -1931,7 +1979,7 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 | | | 테마 필터 | `GET /peer-groups` |
 | | | ★ 토글 | `POST /watchlist`, `DELETE /watchlist/{market}/{ticker}` |
 | | | 담기 모달 | `GET /portfolios`, `GET /market/fx`(USD), `POST /portfolios/{id}/items` |
-| 종목 상세 | `/stocks/{market}/{ticker}` | 헤더·★·담기 | `GET /stocks/{market}/{ticker}` (+ 위 ★·담기 API) |
+| 종목 상세 | `/stocks/{market}/{ticker}` | 헤더·★·담기 — 주 테마(채운 배지)·보조 테마(테두리 배지)·원자재 연동 배지, 시장·섹터 점수 아래 연결 원자재의 가격·1년 위치 | `GET /stocks/{market}/{ticker}` (`groups`·`theme`·`commodity`) (+ 위 ★·담기 API) |
 | | | 가격 차트 (1M~1Y) | `GET /stocks/{market}/{ticker}/candles?range=` |
 | | | 투자 매력도(게이지·레이더·요소별 카드·계산 근거)·핵심 정보(시총·배당수익률·52주)·투자 지표 상세(접힘) | `GET /stocks/{market}/{ticker}/analysis?preset=` |
 | | | 상장 목록·비교군 종목 수집 대기(2초마다, 일봉이 먼저 오면 가격·매력도부터 표시) | `GET /stocks/{market}/{ticker}` |
@@ -1946,6 +1994,9 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 | | | 종목 담기 패널 | `GET /stocks?limit=100`(검색 목록), `GET /market/fx`, `POST /portfolios/{id}/items` |
 | | | 관심종목 균등 배분 미리보기 → 결과 모달 · '모두 담기' | `POST /portfolios/{id}/preview/equal-weight` → 종목별 `POST /portfolios/{id}/items` |
 | | | 항목 수정·삭제 | `PUT/DELETE /portfolios/{id}/items/{item_id}` |
+| 로그인 (2차) | `/login` | 이메일 가입·로그인, Google 로그인 버튼 | `GET /auth/config`, `POST /auth/signup`·`/login`·`/google` |
+| 공통 (2차) | 모든 화면 | access token 만료(401 TOKEN_EXPIRED) 시 자동 갱신 후 다시 요청, 로그인하면 화면 설정을 계정과 맞춤 | `POST /auth/refresh`, `GET·PUT /auth/me/preferences` |
+| 설정 | `/settings` | 계정(로그인 안내 / 비밀번호 변경·설정 · 모든 기기 로그아웃 · 탈퇴) — 2차 | `GET /auth/me`, `PUT /auth/password`, `POST /auth/logout-all`, `DELETE /auth/me` |
 | 설정 | `/settings` | 화면 테마(라이트 기본 / 다크) — 브라우저 localStorage `stockmind:theme`, 각 화면 head의 인라인 스크립트가 첫 그리기 전에 적용 | (API 없음) |
 | (보고서·발표) | — | 데이터 개요·통계 | `GET /statistics/*` |
 
@@ -1980,3 +2031,16 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 | `VOLUME_SORT_REQUIRES_MARKET` | 422 | 전체 탭(country 없음)에서 거래량 정렬 | `GET /stocks`, `GET /statistics/ranking?metric=volume` | 시장마다 거래량 단위가 달라 '전체'에서는 거래량 정렬을 할 수 없습니다 … | ST-03, AN-20 |
 | `DB_UNAVAILABLE` | 503 | `SELECT 1` 실패(연결 거부·시간 초과 등). 접속 정보는 응답에 넣지 않고 로그에만 | `GET /health/db` | DB에 연결할 수 없습니다 | HL-03, HL-04 |
 | `FX_UNAVAILABLE` | 503 | 환율 조회 실패 + 저장된 환율 없음 | `/market/fx`, USD 종목 상세·담기·평가 | 환율을 조회할 수 없고 저장된 값도 없습니다 | RF-04, ERR-05 |
+| `AUTH_REQUIRED` | 401 | 로그인이 필요한 기능을 토큰 없이 호출, 게스트가 포트폴리오를 저장 | `/auth/logout-all`·`/password`·`DELETE /auth/me`·`/me/preferences`, 배포 게스트의 `POST·PUT·DELETE /portfolios…` | 로그인이 필요해요 | AUTH-14 |
+| `INVALID_TOKEN` | 401 | Authorization 형식 오류·위조·탈퇴한 사용자 | Authorization을 받는 모든 엔드포인트 | 로그인 정보가 올바르지 않아요 | AUTH-02·03·09 |
+| `TOKEN_EXPIRED` | 401 | access token 만료(15분) → 화면이 `/auth/refresh` 후 다시 요청 | 같음 | 로그인이 만료됐어요 | AUTH-02·09 |
+| `INVALID_CREDENTIALS` | 401 | 이메일·비밀번호 불일치(없는 이메일도 같은 응답·같은 시간) | `POST /auth/login` | 이메일 또는 비밀번호가 맞지 않아요 | AUTH-07 |
+| `INVALID_PASSWORD` | 401 | 비밀번호 변경·탈퇴의 현재 비밀번호 불일치 | `PUT /auth/password`, `DELETE /auth/me` | 비밀번호가 맞지 않아요 | AUTH-15·16 |
+| `INVALID_GOOGLE_TOKEN` | 401 | Google ID token 서명·aud·iss·email_verified 검증 실패 | `POST /auth/google` | Google 로그인 정보를 확인하지 못했어요 | AUTH-20 |
+| `REFRESH_INVALID` | 401 | refresh 쿠키 없음·만료·폐기, 탈퇴한 계정 | `POST /auth/refresh` | 로그인이 필요해요 | AUTH-10·11 |
+| `REFRESH_REUSED` | 401 | 이미 교체된 refresh token을 30초 뒤 다시 씀(탈취로 보고 그 기기의 토큰 모두 폐기) | `POST /auth/refresh` | 보안을 위해 이 기기는 로그아웃됐어요 | AUTH-10 |
+| `REFRESH_RETRY` | 401 | 교체 30초 안에 옛 토큰이 다시 옴(탭 두 개 동시 요청) — 쿠키는 그대로, 화면이 다시 시도 | `POST /auth/refresh` | 잠시 후 다시 시도해 주세요 | AUTH-10 |
+| `EMAIL_TAKEN` · `NICKNAME_TAKEN` · `ACCOUNT_TAKEN` | 409 | 이미 가입된 이메일 / 쓰고 있는 닉네임 / 동시 가입 경합 | `POST /auth/signup`, `POST /auth/google` | 이미 가입된 이메일이에요 | AUTH-06 |
+| `TOO_MANY_LOGIN_ATTEMPTS` | 429 | 15분 동안 실패가 이메일당 5회·IP당 20회 초과(`detail.retry_after_minutes`) | `POST /auth/login` | 로그인 시도가 너무 많아요. 15분 뒤에 다시 시도해 주세요 | AUTH-08 |
+| `GOOGLE_LOGIN_DISABLED` | 503 | `GOOGLE_CLIENT_ID` 없음 | `POST /auth/google` | Google 로그인이 설정되지 않았어요 | AUTH-21 |
+| `AUTH_STORE_UNAVAILABLE` | 503 | Redis(refresh token·시도 제한 저장소) 연결 실패 | 가입·로그인·refresh·로그아웃 | 로그인 서버에 잠시 연결할 수 없어요 | — |

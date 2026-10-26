@@ -1,10 +1,10 @@
 # 05. ERD 및 DB 설계서
 
-- DDL 원문: `backend/db/schema.sql` → `backend/db/indexes.sql` → `backend/db/views.sql` 순서로 실행 (`python -m app.ingest init-db`가 같은 순서로 적용). 이미 적재된 DB는 `backend/db/migrations/001~010`으로 바꾼다(8절).
-- DBMS: PostgreSQL 16 / **테이블 25개, VIEW 3개, 보조 인덱스 10개, 부분 UNIQUE 인덱스 1개(주 그룹 제약), 트리거 3개**(updated_at 자동 갱신 — portfolios·portfolio_items·watchlist_items), 생성 컬럼 1개(`portfolio_items.cost_krw`)
+- DDL 원문: `backend/db/schema.sql` → `backend/db/indexes.sql` → `backend/db/views.sql` 순서로 실행 (`python -m app.ingest init-db`가 같은 순서로 적용). 이미 적재된 DB는 `backend/db/migrations/001~012`로 바꾼다(8절).
+- DBMS: PostgreSQL 16 / **테이블 26개, VIEW 4개, 보조 인덱스 10개, 부분 UNIQUE 인덱스 1개(주 그룹 제약), 트리거 3개**(updated_at 자동 갱신 — portfolios·portfolio_items·watchlist_items), 생성 컬럼 1개(`portfolio_items.cost_krw`)
 - 금액·가격은 모두 `NUMERIC`(float 사용 안 함), 시각은 모두 `TIMESTAMPTZ`
 - ORM(`backend/app/models/__init__.py`)은 `schema.sql`과 1:1이며 `tests/test_schema.py::test_orm_matches_schema`가 일치를 검증한다.
-- 3절 테이블 정의와 2절 행 수는 2026-10-22 개발 DB에 DDL을 적용한 상태에서 시스템 카탈로그(`pg_attribute`, `pg_constraint`)와 `count(*)`로 뽑았다.
+- 3절 테이블 정의와 2절 행 수는 2026-10-22 개발 DB에 DDL을 적용한 상태에서 시스템 카탈로그(`pg_attribute`, `pg_constraint`)와 `count(*)`로 뽑았다. 2026-10-26 로그인(migration 011)·테마 분류(012)로 바뀐 테이블은 그날 값으로 고쳤다(행 수 칸에 날짜 표시).
 - 매력도 계산 정의는 `09_매력도_점수_정의서.md`, 데이터 출처는 `03_데이터_조사_정의서.md`를 따른다.
 
 ## 1. ERD
@@ -26,6 +26,7 @@ erDiagram
     scoring_presets ||--o{ scoring_weights : "가중치"
     scoring_presets ||--o{ stock_scores : "프리셋"
     indices ||--o{ index_daily_prices : "지수 일봉"
+    users ||--o| user_preferences : "설정"
     users ||--o{ watchlist_items : ""
     stocks ||--o{ watchlist_items : ""
     users ||--o{ portfolios : "소유"
@@ -169,6 +170,16 @@ erDiagram
         int user_id PK
         varchar nickname UK
         timestamptz created_at
+        varchar email UK
+        varchar password_hash
+        varchar google_sub UK
+        timestamptz last_login_at
+        timestamptz last_seen_at
+    }
+    user_preferences {
+        int user_id PK,FK
+        jsonb prefs
+        timestamptz updated_at
     }
     watchlist_items {
         int user_id PK,FK
@@ -285,23 +296,24 @@ FK가 없는 독립 테이블은 4개다.
 | 마스터 | stocks | 종목 — 노출(featured)·매력도 비교군(benchmark)·상장 목록(listed) | stock_id, UQ (market_id, ticker) | 8,301 (노출 25 · 비교군 636 · 상장 목록 7,640 — 2026-10-26 테마 재선정 후) |
 | 마스터 | peer_groups | 테마 — 섹터 중립화 주 그룹·비교군 선정 단위·화면 경쟁 비교 | group_id | 38 |
 | 마스터 | peer_group_members | 종목↔테마 N:M, 주 테마 표시(상장 목록 종목 포함) | (group_id, stock_id) | 3,714 (주 테마 3,702 · 보조 12) |
-| 시계열 | daily_prices | 종목 일봉(수정주가) | (stock_id, trade_date) | 45,126 (노출 25종목 2년 12,432 · 비교군 121종목 32,694) |
+| 시계열 | daily_prices | 종목 일봉(수정주가) | (stock_id, trade_date) | 190,562 (2026-10-26 — 노출 25 · 비교군 636종목) |
 | 시계열 | valuation_snapshots | PER·PBR·시총·주당배당 | (stock_id, as_of) | 4,580 (PYKRX 4,200 · DERIVED 292 · YFINANCE 88) |
 | 재무 | financial_statements | 재무제표(FY) | fin_id, UQ (stock_id, period_end, period_type) | 20,896 (DART 7,396 · SEC 13,500) |
 | 공시 | disclosures | 공시 목록(최근 1년) | disclosure_id, UQ (rcept_no) | 1,361 (DART 1,183 · SEC 178) |
 | 배경 | indices | 지수·원자재 선물 정의 | index_id | 15 (지수 10 · 원자재 5) |
-| 배경 | index_daily_prices | 지수 일봉 | (index_id, trade_date) | 4,538 (2024-10-14 ~ 2026-10-22) |
+| 배경 | index_daily_prices | 지수 일봉 | (index_id, trade_date) | 7,067 (2026-10-26 — 지수 10 · 원자재 5, 2024-10 ~) |
 | 배경 | fx_rates | USD/KRW | fx_id, UQ (granularity, rate_at) | 533 (DAILY 523 · SNAPSHOT 10) |
 | 홈 위젯 | sector_performance_daily | 섹터 전일 대비 등락률(캐시, 30일 보관) | id, UQ (market, sector_code, trade_date) | 176 |
 | 홈 위젯 | market_sentiment_daily | 시장 심리 지수(StockMind 간이 계산) | id, UQ (market, trade_date) | 14 |
-| 사용자 | users | 사용자(인증 없음 — demo, 배포의 게스트 `guest-…`) | user_id, UQ (nickname) | demo 1 (+ 게스트는 방문 브라우저마다 생김) |
+| 사용자 | users | 사용자 — demo, 배포의 게스트 `guest-…`, 계정(이메일·비밀번호 / Google, 2차) | user_id, UQ (nickname), UQ (email), UQ (google_sub) | demo 1 (+ 게스트는 방문 브라우저마다 생김, 3일 미접속 시 정리) |
+| 사용자 | user_preferences | 계정별 화면 설정(테마·투자 성향·지표 선택 등, JSON) — 2차 | user_id | 0 (로그인한 사용자가 설정을 바꿀 때 생김) |
 | 사용자 | watchlist_items | 관심종목 N:M + 정렬·메모·목표가 | (user_id, stock_id) | demo 8 (`seed-demo`) |
 | 사용자 | portfolios | 모의 포트폴리오 | portfolio_id, UQ (user_id, name) | demo 2 |
 | 사용자 | portfolio_items | 담은 종목(담은 시점 가격·환율 복사) | item_id, UQ (portfolio_id, stock_id) | demo 10 (KRW·USD 혼합) |
 | 설정 | scoring_presets | 투자 성향 프리셋 | preset_id, UQ (code) | 4 |
 | 설정 | scoring_weights | 프리셋별 팩터 가중치 | (preset_id, factor) | 20 (4 × 5) |
-| 파생 | stock_metric_values | 매력도 지표 원값·Z | (stock_id, as_of, metric) | 5,256 |
-| 파생 | stock_scores | 프리셋별 매력도 점수 | (stock_id, as_of, preset_id) | 2,336 |
+| 파생 | stock_metric_values | 매력도 지표 원값·Z | (stock_id, as_of, metric) | 12,501 (2026-10-26 — 기준일 여러 개 누적, 10-26 하루 661종목) |
+| 파생 | stock_scores | 프리셋별 매력도 점수 | (stock_id, as_of, preset_id) | 5,556 (2026-10-26 — 기준일 누적, 10-26 하루 2,636) |
 | 운영 | data_freshness | 종목·데이터 종류별 유효기간 | (stock_id, kind) | 7,203 |
 | 운영 | fundamental_bases | 미국 PER·PBR 계산용 기초값(발행주식수·주당배당) | stock_id | 137 |
 | 운영 | ingest_cursor | 공시 목록 증분 수집 기준점 | source | 1 |
@@ -521,6 +533,25 @@ FK가 없는 독립 테이블은 4개다.
 | user_id | integer | N | 자동 증가 | PK | 사용자 ID |
 | nickname | character varying(50) | N |  | UQ | 닉네임 |
 | created_at | timestamp with time zone | N | now() |  | 생성 시각 |
+| email | character varying(254) | Y |  | UQ | 계정 이메일(소문자). NULL = demo·게스트 — migration 011 |
+| password_hash | character varying(200) | Y |  |  | argon2id 해시. Google로만 가입한 계정은 NULL |
+| google_sub | character varying(255) | Y |  | UQ | Google 계정 고유 ID(ID token `sub`) |
+| last_login_at | timestamp with time zone | Y |  |  | 마지막 로그인 시각 |
+| last_seen_at | timestamp with time zone | N | now() |  | 게스트 마지막 접속(1시간에 한 번 갱신). 3일(`GUEST_RETENTION_DAYS`) 지난 게스트는 `cleanup-guests`가 지운다 |
+
+제약: `CHECK (email = lower(email))` / `users_account_check` — 계정은 이메일과 (비밀번호 해시 또는 Google sub)를 함께 가진다: `CHECK (email IS NULL AND password_hash IS NULL AND google_sub IS NULL OR email IS NOT NULL AND (password_hash IS NOT NULL OR google_sub IS NOT NULL))`. 토큰은 DB에 두지 않는다 — access token(JWT)은 서명으로만 검증하고 refresh token·로그인 시도 제한은 Redis에 둔다.
+
+#### `user_preferences`
+
+계정(로그인한 사용자)만 행을 가진다. 키는 화면 localStorage 키와 1:1(`app/services/auth.py PREF_KEYS`: theme·preset·metrics·watch_view·home_portfolio), 모르는 키는 저장하지 않는다 — migration 011.
+
+| 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
+|---|---|---|---|---|---|
+| user_id | integer | N |  | PK, FK→users (CASCADE) | 사용자 ID |
+| prefs | jsonb | N | '{}' |  | 설정 값 |
+| updated_at | timestamp with time zone | N | now() |  | 마지막 저장 시각 |
+
+제약: `CHECK (jsonb_typeof(prefs) = 'object')`
 
 #### `watchlist_items`
 
@@ -745,7 +776,7 @@ JSONB 컬럼은 `stock_scores.data_quality` 하나뿐이다. 조회·조인에 �
   - `stock_metric_values`: 지표 원값과 Z
   - `stock_scores`: 프리셋별 점수
 - 사유:
-  - 매력도는 같은 시장 전체의 중앙값·MAD, 주 그룹 평균, 국가 내 재표준화를 거치는 상대 점수다. 종목 하나만 보여 줘도 비교 표본 전체(146종목)를 계산해야 한다.
+  - 매력도는 같은 시장(금융은 금융끼리) 전체의 중앙값·MAD, 주 테마 평균, 같은 범위 안 재표준화를 거치는 상대 점수다. 종목 하나만 보여 줘도 비교 표본 전체(2026-10-26 661종목)를 계산해야 한다.
   - 리스트·관심종목·포트폴리오 요약·홈 순위에서 반복해서 조회한다.
   - 상세 화면은 점수의 근거(지표 원값·z_raw·z_adj)를 보여 줘야 한다.
   - 지표 Z는 프리셋과 무관해서 한 번만 저장한다. 프리셋별로는 가중합·변환 결과만 저장한다.
@@ -810,6 +841,7 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 |---|---|---|---|
 | v_latest_price | 종목별 최신 종가·전일 종가·등락·등락률·거래량 | LATERAL, 서브쿼리 LIMIT 2, LAG, NULLIF | `stock_list.sql`, `stock_detail.sql`, `watchlist.sql` |
 | v_fx_latest | 최신 USD/KRW 1행(최신 rate_at, 같은 시각이면 SNAPSHOT 우선) | ORDER BY, LIMIT | 리스트 `fx_rate_at`, 상세·포트폴리오 원화 환산 |
+| v_stock_theme | 종목별 주 테마 1행(`peer_group_members.is_primary` + `peer_groups`) — theme·sector·family(= scoring)·commodity_linked. 주 테마가 없는 종목은 행이 없어 `COALESCE(family, 'general')`로 읽는다 (migration 012와 함께) | JOIN, WHERE | `score_metrics`·`score_zscore`·`score_aggregate`·`analysis`·`stock_detail.sql`, `reference_score.py`, 비교군 선정 |
 | v_stock_metrics | 수익률 5종, 연환산 변동성, MDD, 이동평균 3종, 120일선 괴리율, 52주 고저·위치, 거래량 비율, 최신 밸류에이션, 시총 원화 환산, 영업이익률, ROE, 부채비율, 매출·영업이익 YoY, 주당배당·배당수익률 (42열) | CTE, ROW_NUMBER, LAG, MAX OVER(누적), STDDEV_SAMP, AVG FILTER, LATERAL, GROUP BY, NULLIF | 상세 분석, 매력도 지표, 랭킹·통계 |
 
 `v_stock_metrics` 컬럼 순서(다른 SQL이 이름으로 읽음, `CREATE OR REPLACE VIEW`라 끝에만 붙일 수 있음): `stock_id, market, country, currency, as_of, close, change_rate, return_1w, return_1m, return_3m, return_6m, return_1y, volatility_1y, max_drawdown_1y, ma20, ma60, ma120, ma120_gap, high_52w, low_52w, position_52w, volume, avg_volume_20d, volume_ratio_20d, valuation_as_of, per, pbr, eps, bps, market_cap, market_cap_krw, fx_usd_krw, fx_rate_at, fin_period_end, accounting_std, operating_margin, roe, debt_ratio, revenue_yoy, operating_income_yoy, dps, dividend_yield`
@@ -849,13 +881,16 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | `011_auth.sql` | `users` 계정 칸(email·password_hash·google_sub·last_login_at·last_seen_at), `user_preferences` | — |
 | `012_themes.sql` | `stocks.ksic`, `peer_groups.sector`·`scoring`·`commodity_linked`, `indices.category`·`unit`, 국내 업종 확인 시각 초기화(뷰 `v_stock_theme`은 views.sql) | `master` → `benchmark --reselect` |
 
+**적용 순서 주의 (011·012)**: `migrate`는 마이그레이션 파일 뒤에 `views.sql` 전체를 다시 적용한다. `views.sql`의 `v_stock_theme`이 012에서 생기는 `peer_groups.sector`·`scoring`·`commodity_linked`를 읽기 때문에, **010 이하인 DB에서 011을 먼저 돌리면 뷰 단계에서 실패하고 011 전체가 롤백된다**(파일과 뷰가 한 트랜잭션). 그런 DB는 **012 → 011 순서**로 적용한다(둘 다 멱등이라 다시 돌려도 결과가 같다). 2026-10-26 배포 DB 적용 때 실제로 겪었다(troubleshooting 3).
+- 012 직후 `master`가 테마 38개를 맞춘다. `benchmark --reselect`가 업종 코드(국내 DART KSIC 약 2,500개 — 분당 45회라 약 1시간, 미국 SIC 약 6분)를 받은 뒤 비교군을 고른다. 이미 업종 코드를 받은 DB가 있으면 `stocks.ksic·sic·industry·industry_checked_at`을 시장+티커로 복사해 이 시간을 건너뛸 수 있다(2026-10-26 배포에서 로컬 값 4,089행 복사).
+
 ## 9. 검증 결과
-2026-10-22 `docker compose run --rm api pytest -v` 전체 **507 passed**(테스트 DB `stockdb_test`) 중 DB 설계 관련 결과다. 테스트 전체 목록은 `07_테스트_결과서.md`에 있다.
+2026-10-26 `pytest` 전체 **550 passed**(테스트 DB `stockdb_test`) 중 DB 설계 관련 결과다. 테스트 전체 목록은 `07_테스트_결과서.md`에 있다.
 
 | 검증 | 결과 | 테스트 |
 |---|---|---|
-| ORM ↔ DDL 컬럼·타입·NULL 일치 (25개 테이블) | 차이 0 | `test_schema::test_orm_matches_schema` |
-| 정의된 테이블 외 다른 테이블 없음 | 25개 일치 | `test_schema::test_tables_are_stage1_to_6_only` |
+| ORM ↔ DDL 컬럼·타입·NULL 일치 (26개 테이블) | 차이 0 | `test_schema::test_orm_matches_schema` |
+| 정의된 테이블 외 다른 테이블 없음 | 26개 일치 | `test_schema::test_tables_are_stage1_to_6_only` |
 | 제약 위반 행 거부 — 고가<저가, 음수 거래량, 가격 0, PK·UNIQUE 중복, 없는 FK, 잘못된 국가·통화·granularity·job_type·결산 구분·source, 환율 0, 종료<시작, 시드 0, 수량 0, 담은 가격 0, 점수 101, 유효 팩터 6개, 가중치 1 초과, 주 그룹 2개, 그룹 kind, 유효기간 < 시도 시각, 발행주식수 0 등 | 47/47 거부 | `test_schema::test_constraints_reject_bad_rows` (47케이스) |
 | 종목 삭제 시 일봉·밸류에이션·그룹 소속·재무·공시·지표값·점수 CASCADE, 로그의 stock_id는 SET NULL, 그룹·프리셋 삭제 시 소속·가중치 CASCADE (담긴 종목 삭제 RESTRICT는 위 47케이스에 포함) | 확인 | `test_schema::test_delete_cascades` |
 | 사용자 삭제 시 관심종목·포트폴리오·항목 CASCADE, UPDATE 시 `updated_at` 트리거 갱신(portfolios·watchlist_items), `cost_krw` 생성 컬럼(2주 × 195달러 × 1,300원 = 507,000원) | 확인 | `test_schema::test_user_delete_cascades_and_updated_at_trigger` |
