@@ -167,7 +167,9 @@ def test_detail_krw_stock(client):
     assert (b["per"], b["pbr"], b["market_cap"], b["valuation_source"]) == (12, 1.2, 400_000_000_000_000, "PYKRX")
     assert b["market_cap_krw"] == 400_000_000_000_000 and b["close_krw"] == 70000
     assert b["fx_rate"] is None and b["fx_rate_at"] is None and b["fx_stale"] is False
-    assert b["groups"] == [{"group_id": 1, "name": "반도체"}]
+    assert b["groups"] == [{"group_id": 1, "name": "반도체", "is_primary": True}]
+    assert b["theme"] == {"name": "반도체", "sector": "반도체·전자", "family": "general", "commodity_linked": False}
+    assert b["commodity"] is None                                        # 원자재 연동 테마가 아니다
     assert b["score"] is None and b["score_as_of"] is None and b["preset"] == "balanced"   # 테스트 DB에는 점수 행이 없다
     assert b["is_watched"] is False
 
@@ -177,7 +179,7 @@ def test_detail_usd_stock_converts_to_krw(client):
     assert b["currency"] == "USD" and b["close"] == 200
     assert b["fx_rate"] == 1300 and b["close_krw"] == 260000 and b["fx_rate_at"] is not None
     assert b["market_cap_krw"] == 3_900_000_000_000_000 and b["fx_stale"] is False
-    assert b["groups"] == [{"group_id": 2, "name": "빅테크"}]
+    assert b["groups"] == [{"group_id": 2, "name": "빅테크", "is_primary": True}]
 
 
 def test_detail_accepts_lowercase_path(client):
@@ -267,7 +269,7 @@ def test_indices(client):
     assert (kospi["close"], kospi["prev_close"], kospi["change"]) == (2520, 2510, 10)
     assert kospi["change_rate"] == pytest.approx(0.003984)           # 10 / 2510
     assert kospi["sparkline"] == [{"date": d.isoformat(), "close": 2500 + i * 10} for i, d in enumerate(DAYS)]
-    assert set(kospi) == {"code", "name", "country", "currency", "as_of", "close", "prev_close", "change",
+    assert set(kospi) == {"code", "name", "country", "currency", "category", "unit", "as_of", "close", "prev_close", "change",
                           "change_rate", "sparkline",
                           "high_52w", "low_52w", "position_52w", "session_status"}
 
@@ -414,6 +416,27 @@ def test_stock_detail_includes_market_condition(client, engine):
                              VALUES ('KR', :d, 62.00, '탐욕', 1)"""), {"d": D})
     _, d = get(client, "/stocks/KOSPI/005930")
     assert d["market_condition"]["score"] == 62 and d["market_condition"]["label"] == "높음"   # 섹터 NULL → 시장만
+
+
+def test_commodity_linked_stock_shows_commodity_position(client, engine):
+    """원자재 연동 테마 종목: 연결 원자재(종목별 지정 > 테마 기본)의 1년 등락·52주 위치. 무료 시세가 없는 원자재는 안내만."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO peer_groups (group_id, name, sector, commodity_linked) VALUES (3, '비철금속', '소재', true), (4, '2차전지', '에너지·유틸리티', true);
+            INSERT INTO stocks (stock_id, market_id, ticker, name) VALUES (9, 2, 'AA', 'Alcoa'), (10, 1, '373220', 'LG에너지솔루션');
+            INSERT INTO peer_group_members VALUES (3, 9, true), (4, 10, true);
+            INSERT INTO indices (index_id, code, name, market_id, source_symbol, display_order, category, unit)
+              VALUES (20, 'ALUMINUM', '알루미늄', 2, 'ALI=F', 14, 'commodity', '$/톤')"""))
+        conn.execute(text("INSERT INTO index_daily_prices (index_id, trade_date, close) VALUES (20, :d, :c)"),
+                     [{"d": D - timedelta(days=n), "c": c} for n, c in ((400, 2000), (300, 2500), (200, 2200), (0, 3000))])
+    _, d = get(client, "/stocks/NASDAQ/AA")
+    c = d["commodity"]
+    assert d["theme"]["commodity_linked"] is True and (c["code"], c["name"], c["unit"]) == ("ALUMINUM", "알루미늄", "$/톤")
+    assert c["close"] == 3000 and c["change_1y"] == pytest.approx(0.2) and c["position_52w"] == 1   # 1년 안 첫 값 2500, 범위 2200~3000
+    _, d = get(client, "/stocks/KOSPI/373220")                              # 리튬 — 연동이지만 시세 없음
+    assert d["commodity"]["code"] is None and d["commodity"]["close"] is None and "무료 시세" in d["commodity"]["note"]
+    _, d = get(client, "/market/indices")
+    assert next(i for i in d["indices"] if i["code"] == "ALUMINUM")["category"] == "commodity"
 
 
 # ------------------------------------------------------------------ 추가 기능 4-4: 비교군도 목록에, 섹터 필터, 페이지

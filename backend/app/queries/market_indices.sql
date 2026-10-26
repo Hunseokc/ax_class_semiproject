@@ -1,4 +1,5 @@
 -- 지수별 최신값·전일 대비·최근 1년 스파크라인(화면에서 1개월·3개월·1년으로 자른다)·52주 범위
+-- category: index(지수) / commodity(원자재 선물 — 화면 "원자재" 묶음), unit: 원자재 가격 단위
 -- 52주 범위는 기준일로부터 1년 안의 종가 최고·최저 (1년치가 쌓였을 때만 — 기준일 1년 전 이전 종가가 있어야 함)
 -- 위치 = (현재값 − 52주 저점) / (52주 고점 − 52주 저점), 0~1
 WITH ranked AS (
@@ -6,7 +7,7 @@ WITH ranked AS (
            ROW_NUMBER() OVER (PARTITION BY p.index_id ORDER BY p.trade_date DESC) AS rn
     FROM index_daily_prices p
 )
-SELECT i.index_id, i.code, i.name, m.country, m.currency, i.display_order,
+SELECT i.index_id, i.code, i.name, m.country, m.currency, i.display_order, i.category, i.unit,
        cur.trade_date AS as_of, cur.close,
        prev.close AS prev_close,
        cur.close - prev.close AS change,

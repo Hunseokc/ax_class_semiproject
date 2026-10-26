@@ -5,7 +5,7 @@
 
 Stage 1은 일봉·지수·환율만 둔다. 밸류에이션·재무·공시·대량 조회 인터페이스는 Stage 3에서 추가했다.
 Bar·FxPoint는 Stage 2에서 preprocess.py로부터 이곳으로 옮겼다(서비스·provider가 전처리 모듈에 기대지 않도록).
-Stage 5-D: 업종 분류(Classification)·미국 기초값(ValuationBase)과 ReferenceDataProvider.
+Stage 5-D: 미국 기초값(ValuationBase)과 ReferenceDataProvider. 2차: 국내 업종 코드 KrReferenceProvider(KSIC).
 Stage 6-B: 배당(Valuation.dps)·상장 목록(Listing·ListingProvider).
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import Protocol
 __all__ = ["Bar", "FxPoint", "Valuation", "Financial", "Disclosure", "StockRef", "IndexRef",
            "PriceProvider", "IndexProvider", "FxProvider", "ValuationProvider", "FinancialProvider",
            "DisclosureProvider", "MarketBulkProvider", "BatchPriceProvider", "ProviderError",
-           "Classification", "ValuationBase", "ReferenceDataProvider", "Listing", "ListingProvider"]
+           "ValuationBase", "ReferenceDataProvider", "KrReferenceProvider", "Listing", "ListingProvider"]
 
 
 # ------------------------------------------------------------------ 레코드
@@ -67,15 +67,7 @@ class Financial:
     notes: list[str] = field(default_factory=list)   # 대체 계정 사용 등 추적 정보
 
 
-# ── [S5-D] 업종 분류·미국 밸류에이션 기초값 ──
-@dataclass(frozen=True)
-class Classification:
-    """국내 업종 분류 1행 (KRX 업종명 + 시가총액) — 비교군 선정용."""
-    ticker: str
-    industry: str
-    market_cap: Decimal | None
-
-
+# ── [S5-D] 미국 밸류에이션 기초값 ──
 @dataclass(frozen=True)
 class ValuationBase:
     """미국 밸류에이션 기초값: PER·PBR·시가총액·배당수익률을 '기초값 × 종가'로 계산할 때 쓴다."""
@@ -166,7 +158,6 @@ class MarketBulkProvider(Protocol):
     source: str
     def get_bars_by_date(self, day: date) -> dict[str, Bar]: ...
     def get_valuations_by_date(self, day: date) -> dict[str, Valuation]: ...
-    def get_sector_classifications(self, as_of: date) -> list[Classification]: ...
 
 
 class BatchPriceProvider(Protocol):
@@ -182,6 +173,12 @@ class ReferenceDataProvider(Protocol):
     def get_shares_frame(self, as_of: date) -> dict[str, int]: ...
     def get_sic(self, cik: str) -> tuple[int | None, str | None]: ...
     def get_valuation_base(self, stock: StockRef) -> ValuationBase: ...
+
+
+class KrReferenceProvider(Protocol):
+    """국내 참조 데이터(DART 기업개황): 업종 코드 KSIC."""
+    source: str
+    def get_ksic(self, corp_code: str) -> str | None: ...
 
 
 # ── [S6-B] 상장 목록 ──

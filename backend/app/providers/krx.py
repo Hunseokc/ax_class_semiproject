@@ -9,10 +9,10 @@ import logging
 import os
 import re
 import time
-from datetime import date, timedelta
+from datetime import date
 
 from app.core.config import export_krx_credentials
-from app.providers.base import Bar, Classification, IndexRef, Listing, StockRef, Valuation
+from app.providers.base import Bar, IndexRef, Listing, StockRef, Valuation
 from app.providers.convert import positive_or_none, to_dec, to_int
 from app.providers.http import Throttle, call_with_retry
 
@@ -152,21 +152,6 @@ class KrxProvider:
                 dps=to_dec(r.get("DPS")))                       # 무배당은 0 (PER 등과 달리 유효한 값)
         return out
 
-    # ── [S5-D] 업종 분류 ──
-    def get_sector_classifications(self, as_of: date) -> list[Classification]:
-        """코스피·코스닥 전 종목의 KRX 업종명과 시가총액(as_of 이전 가장 가까운 거래일)."""
-        s = _stock()
-        for back in range(8):
-            d = as_of - timedelta(days=back)
-            out = []
-            for market in ("KOSPI", "KOSDAQ"):
-                df = call_with_retry(lambda: s.get_market_sector_classifications(_ymd(d), market),
-                                     throttle=_throttle, what=f"pykrx sector {market} {d}")
-                out += [Classification(ticker=str(t), industry=str(r.get("업종명")), market_cap=to_dec(r.get("시가총액")))
-                        for t, r in df.iterrows() if r.get("업종명")]
-            if out:
-                return out
-        return []
 
     def get_valuations(self, stock: StockRef, start: date, end: date) -> list[Valuation]:
         s = _stock()

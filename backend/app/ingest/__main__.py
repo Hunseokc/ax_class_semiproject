@@ -222,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if "select" in out:
                 print("선정:", out["select"]["by_group"])
-                print("시가총액 없음(제외):", out["select"]["no_market_cap"] or "-")
+                print("비교군에서 빠짐:", len(out["select"]["dropped"]))
             print({k: v for k, v in out.items() if k in ("stocks", "pruned", "scores")})
     elif args.cmd == "hydrate":
         from app.services.hydration import hydrate

@@ -2,7 +2,7 @@
 
 Stage 5-D: 업종 분류(FakeKrBulk classifications)·미국 기초값(FakeReference).
 Stage 6-B: 상장 목록(FakeListing)·DART 고유번호 일괄 매핑(FakeFinancial.corp_codes).
-이후 단계: 비교군 시가총액(caps·get_market_caps)·배당(dps)은 Stage 6-D.
+비교군 선정 순서는 FakeKrBulk(caps)·stocks.cap_rank, 국내 업종 코드는 FakeKrReference.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from app.providers.base import (Bar, Classification, Disclosure, Financial, FxPoint, IndexRef, Listing, ProviderError, StockRef,
+from app.providers.base import (Bar, Disclosure, Financial, FxPoint, IndexRef, Listing, ProviderError, StockRef,
                                 Valuation, ValuationBase)
 from app.providers.factory import Providers
 
@@ -132,18 +132,15 @@ class FakeListing(CallLog):
 
 
 class FakeKrBulk(CallLog):
-    """국내 날짜별 전 종목 조회. 주말은 휴장(빈 결과). override = {티커: (종가, 등락률%)}로 수정주가 이벤트를 흉내 낸다."""
+    """국내 날짜별 전 종목 조회. 주말은 휴장(빈 결과). override = {티커: (종가, 등락률%)}로 수정주가 이벤트를 흉내 낸다.
+    caps = {티커: 시가총액} — 비교군 선정 순서. 없으면 시가총액 None"""
     source = "PYKRX"
 
-    def __init__(self, classifications: list[Classification] | None = None, tickers: set[str] | None = None):
+    def __init__(self, tickers: set[str] | None = None, caps: dict[str, Decimal] | None = None):
         super().__init__()
-        self.classifications = classifications or []
-        self.tickers = tickers if tickers is not None else {c.ticker for c in self.classifications}
+        self.caps = caps or {}
+        self.tickers = tickers if tickers is not None else set(self.caps)
         self.override: dict[str, tuple[Decimal, Decimal]] = {}
-
-    def get_sector_classifications(self, as_of: date) -> list[Classification]:
-        self.record("sector", as_of)
-        return list(self.classifications)
 
     def get_bars_by_date(self, day: date) -> dict[str, Bar]:
         self.record("bars", day)
@@ -160,7 +157,8 @@ class FakeKrBulk(CallLog):
         if day.weekday() >= 5:
             return {}
         return {t: Valuation(as_of=day, per=Decimal(10), pbr=Decimal(1), eps=Decimal(10), bps=Decimal(100),
-                             shares_outstanding=10**6, dps=Decimal(0)) for t in self.tickers}   # 무배당 = 0
+                             market_cap=self.caps.get(t), shares_outstanding=10**6, dps=Decimal(0))
+                for t in self.tickers}   # 무배당 = 0
 
 
 class FakeUsBatch(CallLog):
@@ -212,6 +210,19 @@ def make_providers(fx: FakeFx | None = None, *, with_fundamentals: bool = False,
                "kr_disclosure": FakeDisclosure("DART"), "us_disclosure": FakeDisclosure("SEC")}
     return Providers(kr_price=price, us_price=price, kr_index=index, us_index=index, fx=fx,
                      kr_valuation=val, us_valuation=val, us_financial_supplement=None, kr_feed=kr_feed, **fin)
+
+
+class FakeKrReference(CallLog):
+    """DART 기업개황의 업종 코드(KSIC). ksic: {corp_code: 코드}."""
+    source = "DART"
+
+    def __init__(self, ksic: dict[str, str] | None = None):
+        super().__init__()
+        self.ksic = ksic or {}
+
+    def get_ksic(self, corp_code: str) -> str | None:
+        self.record("ksic", corp_code)
+        return self.ksic.get(corp_code)
 
 
 # ── 공시 목록 증분(회사 지정 없는 사업보고서 목록) ──

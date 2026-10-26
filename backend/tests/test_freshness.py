@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import text
 
 from app.ingest import jobs
-from app.ingest.sectors import sector_for_krx, sector_for_sic
+from app.ingest.sectors import commodity_code, primary_theme, secondary_themes
 from app.providers.base import ValuationBase
 from app.providers.sec import annual_dps
 from app.services import freshness
@@ -141,13 +141,35 @@ def test_annual_dps_prefers_fy_value_and_sums_four_quarters_otherwise():
     assert annual_dps({}, today) == (None, None)
 
 
-# ------------------------------------------------------------------ 섹터 매핑
-def test_sector_mapping_uses_narrowest_sic_range_and_excludes_finance():
-    assert sector_for_sic(3674) == "반도체·전자" and sector_for_sic(7372) == "IT·인터넷"
-    assert sector_for_sic(3826) == "헬스케어"                     # 3800-3839(산업재)보다 좁은 범위가 이긴다
-    assert sector_for_sic(2844) == "필수소비재" and sector_for_sic(2851) == "소재"
-    assert sector_for_sic(6022) is None and sector_for_sic(None) is None   # 은행
-    assert sector_for_krx("전기·전자") == "반도체·전자" and sector_for_krx("은행") is None
+# ------------------------------------------------------------------ 테마 분류 (config/universe.yaml themes)
+def _theme(country, ticker="X", ksic=None, sic=None):
+    t = primary_theme(country, ticker, ksic, sic)
+    return (t.name, t.sector) if t else None
+
+
+def test_theme_uses_narrowest_sic_range_and_longest_ksic_prefix():
+    assert _theme("US", sic=3674) == ("반도체", "반도체·전자")
+    assert _theme("US", sic=3826)[0] == "의료기기·서비스"             # 3820-3829(기계·로봇)보다 좁은 범위가 이긴다
+    assert _theme("US", sic=3334) == ("비철금속", "소재") and _theme("US", sic=3312)[0] == "철강"   # 알루미늄 ≠ 철강
+    assert _theme("KR", ksic="29271")[0] == "반도체 장비·소재"         # '29'(기계)보다 긴 접두어가 이긴다
+    assert _theme("KR", ksic="28202") == ("2차전지", "에너지·유틸리티")
+    assert _theme("KR", ksic="70113") == ("바이오", "헬스케어")          # 신약 연구개발(KRX 업종은 '일반서비스')
+    assert _theme("KR", ksic="64992") == ("지주회사", "산업재") and _theme("KR", ksic="64121")[0] == "은행·카드"
+    assert _theme("US", sic=6798)[0] == "리츠·부동산" and _theme("US", sic=9999) is None and _theme("KR") is None
+
+
+def test_theme_tickers_override_codes_and_secondary_themes():
+    assert _theme("KR", "005930", ksic="264")[0] == "반도체"            # KSIC는 통신장비지만 직접 지정이 이긴다
+    assert _theme("US", "AMZN", sic=5961)[0] == "빅테크"
+    assert [t.name for t in secondary_themes("AMZN")] == ["유통·커머스", "소프트웨어·IT서비스"]
+    assert _theme("KR", "105560", ksic="64992") == ("은행·카드", "금융")  # 금융지주는 지주회사가 아니라 은행
+
+
+def test_commodity_code_prefers_ticker_then_theme():
+    metals, battery = primary_theme("US", "X", sic=3334), primary_theme("KR", "X", ksic="28202")
+    assert commodity_code(metals, "AA") == "ALUMINUM" and commodity_code(metals, "FCX") == "COPPER"
+    assert battery.commodity_linked and commodity_code(battery, "373220") is None    # 연동이지만 무료 시세 없음(리튬)
+    assert commodity_code(primary_theme("US", "X", sic=3674), "NVDA") is None and commodity_code(None, "X") is None
 
 
 # ------------------------------------------------------------------ 마이그레이션

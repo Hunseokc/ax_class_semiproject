@@ -26,17 +26,17 @@
 |---|---|---|---|---|---|
 | 헬스체크 | GET | `/health` (루트) | 프로세스 생존 확인 — DB에 접근하지 않음 | - | 200 |
 | 헬스체크 | GET | `/health/db` (루트) | DB 연결 확인(`SELECT 1`). 컨테이너 HEALTHCHECK가 사용 | - | 200 · 503 DB_UNAVAILABLE |
-| 시장·갱신 | GET | `/market/indices` | 지수별 최신값·등락·최근 1년 스파크라인·52주 범위(종가 기준, 1년치 있을 때만)·장 상태 `session_status`(거래소 휴장 달력: today·holiday·previous_session) | - | 200 |
+| 시장·갱신 | GET | `/market/indices` | 지수별 최신값·등락·최근 1년 스파크라인·52주 범위(종가 기준, 1년치 있을 때만)·장 상태 `session_status`(거래소 휴장 달력: today·holiday·previous_session). 원자재 선물(WTI·금·구리·알루미늄·열연)도 같은 목록에 `category: "commodity"`·`unit`($/톤 등)으로 들어 있다(지수는 `category: "index"`, `unit: null`) | - | 200 |
 | 시장·갱신 | GET | `/market/fx` | USD/KRW 최신값·전일 대비·최근 1년 DAILY·52주 범위 (TTL 내에는 외부 호출 없음) | - | 200 · 503 FX_UNAVAILABLE |
 | 시장·갱신 | POST | `/market/refresh` | 환율·지수·섹터 등락률(SECTORS_US·SECTORS_KR)·증분 일봉·밸류에이션·점수 갱신 (작업별 TTL 이내면 SKIPPED) | - | 200 (작업별 실패는 본문 `jobs[].status`) |
 | 시장·갱신 | GET | `/market/refresh/status` | 갱신 상태 조회 — 외부 호출 없음 (사이드바 '마지막 갱신 시각' 표시용) | - | 200 |
 | 대시보드 홈 | GET | `/home/ranking` | 시장 주목 종목 TOP N — `volume_surge`: 당일 거래량 ÷ 직전 20거래일 평균(배수), `attractiveness`: 프리셋별 최신 매력도 점수. 대상 = 노출 종목 + 매력도 비교군 + 관심종목(전 종목 스캔 없음), `is_watched`로 ★ 표시 | kind (volume_surge·attractiveness, 필수), country (KR·US, 기본 KR), limit (1~20, 기본 5), preset | 200 · 422 VALIDATION_ERROR, UNKNOWN_PRESET |
 | 대시보드 홈 | GET | `/home/sectors` | 섹터 히트맵 — 저장된 섹터 전일 대비 등락률(%)만 읽음(수집은 갱신 작업). 가장 최근 거래일 기준, 그날 값이 없는 섹터는 `change_pct: null`, 저장값이 없으면 `available: false` | country (KR·US, 기본 KR) | 200 · 422 VALIDATION_ERROR |
 | 대시보드 홈 | GET | `/home/sentiment` | 시장 심리 지수(StockMind 간이 계산, CNN Fear & Greed 아님) — 저장된 KOSPI·S&P 500·VIX 일봉으로 계산·저장, 외부 호출 없음. 점수·라벨·구성요소, 직전 거래일·5거래일 전 값 | country (KR·US, 기본 KR) | 200 · 422 VALIDATION_ERROR |
-| 종목 | GET | `/peer-groups` | 경쟁 그룹(테마) 목록 (리스트 필터용) — 업종 섹터 그룹은 제외 | - | 200 |
-| 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·테마 그룹·업종 섹터 필터, 검색, 프리셋별 매력도). 노출 종목 + 매력도 비교군(146종목, `coverage`로 구분), 상장 목록(listed)은 제외. 화면은 25개씩 페이지 | country, sort, order, group, sector (`config/universe.yaml` 섹터 이름, 그 외 422), q, limit, offset, preset | 200 · 422 VALIDATION_ERROR, VOLUME_SORT_REQUIRES_MARKET, UNKNOWN_PRESET |
+| 종목 | GET | `/peer-groups` | 테마 목록 (리스트 필터용) — `config/universe.yaml themes` 38개. 그룹마다 부모 섹터 `sector`, 구성원 수 `size`(노출 종목 + 비교군). 섹터 순서 → 이름 순 | - | 200 |
+| 종목 | GET | `/stocks` | 주식 리스트 (거래량/시총 순위, 시장·테마 그룹·업종 섹터 필터, 검색, 프리셋별 매력도). 노출 종목 + 매력도 비교군(`coverage`로 구분), 상장 목록(listed)은 제외. 화면은 25개씩 페이지 | country, sort, order, group, sector (`config/universe.yaml` 섹터 이름, 그 외 422), q, limit, offset, preset | 200 · 422 VALIDATION_ERROR, VOLUME_SORT_REQUIRES_MARKET, UNKNOWN_PRESET |
 | 종목 | GET | `/stocks/search` | 상단 검색 자동완성 — 노출 종목·비교군·상장 종목 목록(listed) 전체에서 이름·영문명·티커 부분 일치. 정렬: 티커 완전 일치 → 티커 앞부분 → 이름 앞부분 → 부분 일치(같으면 노출·비교군 먼저, 짧은 이름 먼저). LIKE 특수문자는 글자 그대로, 비활성(상장폐지) 제외 | q (1~50자, 필수), limit (1~20, 기본 8) | 200 · 422 VALIDATION_ERROR |
-| 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도. 비교군·상장 목록 종목이면 상세 데이터 수집을 예약하고 `detail_status`(ready/loading/failed). 상장 목록 종목은 처음 열 때 시세가 없어 `close` 등이 null. `groups`는 테마 경쟁 그룹, `sector`·`industry`는 매력도 비교 업종. **`market_condition`**: 시장·섹터 점수(0~100, 매력도와 별개인 위험 표시) — 0.7 × 시장 심리 지수(최신 저장값) + 0.3 × 섹터 흐름(같은 업종 섹터 표본의 5거래일 수익률 중앙값). 섹터가 없거나 표본이 5개 미만이면 시장만 쓴다. 정의는 09 '시장·섹터 점수', 구현 `app/services/market_condition.py`(외부 호출·DB 쓰기 없음) | preset | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR, UNKNOWN_PRESET · 503 FX_UNAVAILABLE(USD) |
+| 종목 | GET | `/stocks/{market}/{ticker}` | 종목 기본 정보 + 최신 시세·밸류에이션·매력도. 비교군·상장 목록 종목이면 상세 데이터 수집을 예약하고 `detail_status`(ready/loading/failed). 상장 목록 종목은 처음 열 때 시세가 없어 `close` 등이 null. `groups`는 소속 테마(주 테마 먼저, `is_primary`), **`theme`**은 주 테마(이름·부모 섹터·점수 묶음 `family`·원자재 연동 여부, 분류되지 않은 업종이면 null), **`commodity`**는 원자재 연동 테마 종목만 — 연결 원자재와 그 가격의 1년 등락·52주 위치(지수와 같은 저장값, 무료 시세가 없는 원자재면 `code: null`)와 안내 문구. **`market_condition`**: 시장·섹터 점수(0~100, 매력도와 별개인 위험 표시) — 0.7 × 시장 심리 지수(최신 저장값) + 0.3 × 섹터 흐름(같은 업종 섹터 표본의 5거래일 수익률 중앙값). 섹터가 없거나 표본이 5개 미만이면 시장만 쓴다. 정의는 09 '시장·섹터 점수', 구현 `app/services/market_condition.py`(외부 호출·DB 쓰기 없음) | preset | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR, UNKNOWN_PRESET · 503 FX_UNAVAILABLE(USD) |
 | 종목 | GET | `/stocks/{market}/{ticker}/candles` | 기간 일봉 | range | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
 | 종목 | GET | `/stocks/{market}/{ticker}/financials` | FY 재무 추이 | limit | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
 | 종목 | GET | `/stocks/{market}/{ticker}/disclosures` | 최근 공시 | limit | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
@@ -56,7 +56,7 @@
 | 모의 포트폴리오 | DELETE | `/portfolios/{portfolio_id}/items/{item_id}` | 담은 종목 삭제 | - | 204 · 404 PORTFOLIO_NOT_FOUND, ITEM_NOT_FOUND · 422 VALIDATION_ERROR |
 | 모의 포트폴리오 | GET | `/portfolios/{portfolio_id}/summary` | 요약: 사용·잔여·비중·가중 매력도·평가손익(환 효과 분리) | - | 200 · 404 PORTFOLIO_NOT_FOUND · 422 VALIDATION_ERROR · 503 FX_UNAVAILABLE(USD 보유) |
 | 모의 포트폴리오 | POST | `/portfolios/{portfolio_id}/preview/equal-weight` | 관심종목(또는 지정 종목) 균등 배분 미리보기 — **저장하지 않는 계산 전용**. 예산 ÷ 대상 종목 수 = 균등 몫, 1주 원가로 나눠 내림한 정수 수량(담기 금액 모드와 같은 환산)·원화 금액·실제 비중, 남는 금액, 제외 종목과 사유(ALREADY_IN_PORTFOLIO·NO_PRICE·PRICE_ABOVE_SHARE) | body(선택): stocks [{market, ticker}] (생략 시 관심종목 전체), budget_krw (생략 시 잔여 시드) | 200 · 404 PORTFOLIO_NOT_FOUND, STOCK_NOT_FOUND · 409 SEED_EXCEEDED(예산 > 잔여 시드, 잔여 시드 0) · 422 VALIDATION_ERROR, EMPTY_WATCHLIST · 503 FX_UNAVAILABLE(USD) |
-| 분석 | GET | `/stocks/{market}/{ticker}/analysis` | 수치 분석(v_stock_metrics, 배당 `dps`·`dividend_yield` 포함) + 매력도(프리셋별 점수·팩터 기여도·지표 원값/Z·국가 내 순위·백분위·데이터 충족도·레이더용 주 그룹 평균 `peer_average`). 상장 목록 종목은 `reference: true` 참고 점수(`reference_note`, `z_adj` null, 순위는 비교군 N개 + 이 종목) | preset | 200 · 404 STOCK_NOT_FOUND, NO_PRICE · 422 VALIDATION_ERROR, UNKNOWN_PRESET |
+| 분석 | GET | `/stocks/{market}/{ticker}/analysis` | 수치 분석(v_stock_metrics, 배당 `dps`·`dividend_yield` 포함) + 매력도(프리셋별 점수·팩터 기여도·지표 원값/Z·국가 내 순위·백분위·데이터 충족도·레이더용 주 그룹 평균 `peer_average`). 순위는 같은 국가·같은 점수 묶음(`rank.family` — financial이면 금융끼리). 상장 목록 종목은 `reference: true` 참고 점수(`reference_note`, 주 테마가 있으면 `z_adj`도 계산, 순위는 비교군 N개 + 이 종목). 리츠·부동산 테마는 점수 없이 `unscored_reason` | preset | 200 · 404 STOCK_NOT_FOUND, NO_PRICE · 422 VALIDATION_ERROR, UNKNOWN_PRESET |
 | 분석 | GET | `/scoring/presets` | 투자 성향 프리셋(sort_order 순: 위험·성장·균형·가치)과 팩터별 가중치 | - | 200 |
 | 분석 | GET | `/stocks/{market}/{ticker}/peers` | 경쟁 그룹별 비교 표 (그룹 내 RANK·AVG, 구성원 1명 그룹은 비교 대상 없음) | - | 200 · 404 STOCK_NOT_FOUND · 422 VALIDATION_ERROR |
 | 분석 | GET | `/stocks/{market}/{ticker}/peers/chart` | 경쟁 그룹 기준일=100 가격 추이 (합집합 날짜 + 휴장일 null) | range, group_id | 200 · 404 STOCK_NOT_FOUND, NO_PEER_GROUP, GROUP_NOT_FOUND · 422 VALIDATION_ERROR |
@@ -110,6 +110,8 @@
       "name": "KOSPI",
       "country": "KR",
       "currency": "KRW",
+      "category": "index",
+      "unit": null,
       "as_of": "2026-10-08",
       "close": 6625.93,
       "prev_close": 6803.9,
@@ -345,8 +347,15 @@
   "groups": [
     {
       "group_id": 1,
-      "name": "반도체"
-    }
+      "name": "반도체",
+      "is_primary": true
+    },
+    {
+      "group_id": 4,
+      "name": "하드웨어·통신장비",
+      "is_primary": false
+    },
+    "… 외 1개"
   ],
   "is_watched": true,
   "coverage": "featured",
@@ -364,7 +373,27 @@
     "sector_r5": -0.012,
     "index_r5": -0.003682,
     "as_of": "2026-10-22"
-  }
+  },
+  "theme": {
+    "name": "반도체",
+    "sector": "반도체·전자",
+    "family": "general",
+    "commodity_linked": false
+  },
+  "commodity": null
+}
+```
+원자재 연동 테마 종목(예: `NYSE/AA`)의 `commodity`:
+```json
+{
+  "code": "ALUMINUM",
+  "name": "알루미늄",
+  "unit": "$/톤",
+  "as_of": "2026-10-23",
+  "close": 3268.5,
+  "change_1y": 0.214,
+  "position_52w": 0.82,
+  "note": "원자재 가격을 따라 이익이 크게 바뀌는 업종입니다. 원자재 가격이 높을 때는 이익도 높아 주가가 싸 보일 수 있습니다. 매력도의 저평가는 최근 3년 평균 이익으로 계산했습니다."
 }
 ```
 #### `GET /api/v1/stocks/NASDAQ/AAPL/candles?range=1m`
@@ -497,6 +526,7 @@
     "factor_total": 5,
     "rank": {
       "country": "KR",
+      "family": "general",
       "position": 15,
       "total": 70,
       "percentile": 79.7
@@ -1887,7 +1917,7 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 |---|---|---|---|
 | 공통 | 모든 화면 | 사이드바 마지막 갱신·새로고침 | `GET /market/refresh/status`, `POST /market/refresh` |
 | 공통 | 모든 화면 | 상단 검색바(자동완성 → 종목 상세) | `GET /stocks/search?q=&limit=8` |
-| 대시보드 홈 | `/` | 지수·환율 카드(카드 위 선택 상자에서 지수 10개 + 환율 중 선택, 기본 6개) — 스파크라인 기간 1개월·3개월·1년, 52주 위치 바, 장 상태 배지, 한 줄 시장 요약 | `GET /market/indices` |
+| 대시보드 홈 | `/` | 지수·환율 카드(카드 위 선택 상자에서 지수 10개 + 원자재 5개 + 환율 중 선택, 기본 6개) — 스파크라인 기간 1개월·3개월·1년, 52주 위치 바, 장 상태 배지, 한 줄 시장 요약 | `GET /market/indices` |
 | | | USD/KRW 카드 | `GET /market/fx` |
 | | | 투자 성향 펼침 메뉴(상단 검색바 줄) | `GET /scoring/presets` |
 | | | 내 관심종목 — 컴팩트 행(기본, 최대 8)·카드(3열×2줄) 보기, 클릭 → 상세 `?preset=`, 목표가·괴리율·메모 표시, 관심종목 등락 요약 | `GET /watchlist?preset=` |
@@ -1896,9 +1926,9 @@ PRICES의 마지막 실패는 수정(d6097e3) 전 아침 기록(미국 장 전 �
 | | | 시장 심리 지수(국내/미국) | `GET /home/sentiment?country=` |
 | | | 시장 주목 종목 TOP 5 — 거래량 급증·매력도 순위 × 국내/미국 카드 4장 | `GET /home/ranking?kind=&country=&limit=5&preset=` |
 | | | 내 포트폴리오 — 비중 도넛·범례(선택한 포트폴리오는 브라우저에 기억) | `GET /portfolios`, `GET /portfolios/{id}/summary` |
-| 주식 리스트 | `/stocks` | 순위 리스트(노출 + 비교군 146종목, 25개씩 페이지)·탭·정렬·검색·업종 섹터 필터 | `GET /stocks?country=&sort=&order=&group=&sector=&q=&limit=25&offset=&preset=` |
+| 주식 리스트 | `/stocks` | 순위 리스트(노출 + 비교군, 25개씩 페이지)·탭·정렬·검색·업종 섹터 필터 | `GET /stocks?country=&sort=&order=&group=&sector=&q=&limit=25&offset=&preset=` |
 | | | 투자 성향 펼침 메뉴(헤더) | `GET /scoring/presets` |
-| | | 경쟁 그룹 필터 | `GET /peer-groups` |
+| | | 테마 필터 | `GET /peer-groups` |
 | | | ★ 토글 | `POST /watchlist`, `DELETE /watchlist/{market}/{ticker}` |
 | | | 담기 모달 | `GET /portfolios`, `GET /market/fx`(USD), `POST /portfolios/{id}/items` |
 | 종목 상세 | `/stocks/{market}/{ticker}` | 헤더·★·담기 | `GET /stocks/{market}/{ticker}` (+ 위 ★·담기 API) |

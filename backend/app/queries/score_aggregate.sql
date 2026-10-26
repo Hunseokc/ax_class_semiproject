@@ -2,7 +2,8 @@
 -- 파라미터: as_of
 --   팩터 점수 F = 그 팩터의 유효 지표 z_adj 평균 (지표 1개 이상)
 --   종합 = Σ(w × F) / Σ w  (유효 팩터만 — 가중치 재정규화). 유효 팩터 < 3이면 NULL
---   Final = 100 × Φ(Z_c),  Z_c = 종합을 국가·프리셋 안에서 평균·표본표준편차로 다시 표준화한 값
+--   Final = 100 × Φ(Z_c),  Z_c = 종합을 국가·점수 묶음(family)·프리셋 안에서 평균·표본표준편차로 다시 표준화한 값
+--     family = 주 테마의 scoring(financial 금융끼리 / general) — score_zscore.sql과 같은 묶음
 --   Φ(z) = 0.5 × (1 + erf(z / √2))  — PostgreSQL 16 내장 erf 사용. Min-Max는 쓰지 않는다(개발산출물/09 5절)
 WITH f AS (
     SELECT mv.stock_id, mv.factor, AVG(mv.z_adj) AS score
@@ -11,15 +12,16 @@ WITH f AS (
     GROUP BY mv.stock_id, mv.factor
 ),
 st AS (                               -- 지표 행이 있는 종목 = 점수 대상
-    SELECT mv.stock_id, mk.country, COUNT(DISTINCT f.factor) AS coverage
+    SELECT mv.stock_id, mk.country, COALESCE(t.family, 'general') AS family, COUNT(DISTINCT f.factor) AS coverage
     FROM (SELECT DISTINCT stock_id FROM stock_metric_values WHERE as_of = :as_of) mv
     JOIN stocks s   ON s.stock_id = mv.stock_id
     JOIN markets mk ON mk.market_id = s.market_id
+    LEFT JOIN v_stock_theme t ON t.stock_id = mv.stock_id
     LEFT JOIN f     ON f.stock_id = mv.stock_id
-    GROUP BY mv.stock_id, mk.country
+    GROUP BY mv.stock_id, mk.country, COALESCE(t.family, 'general')
 ),
 wide AS (
-    SELECT st.stock_id, st.country, st.coverage, p.preset_id,
+    SELECT st.stock_id, st.country, st.family, st.coverage, p.preset_id,
            MAX(f.score) FILTER (WHERE f.factor = 'value')    AS value_score,
            MAX(f.score) FILTER (WHERE f.factor = 'quality')  AS quality_score,
            MAX(f.score) FILTER (WHERE f.factor = 'growth')   AS growth_score,
@@ -30,19 +32,19 @@ wide AS (
     CROSS JOIN scoring_presets p
     LEFT JOIN f               ON f.stock_id = st.stock_id
     LEFT JOIN scoring_weights w ON w.preset_id = p.preset_id AND w.factor = f.factor
-    GROUP BY st.stock_id, st.country, st.coverage, p.preset_id
+    GROUP BY st.stock_id, st.country, st.family, st.coverage, p.preset_id
 ),
 comp AS (
     SELECT wide.*, CASE WHEN wide.coverage >= 3 THEN wide.weighted END AS composite
     FROM wide
 ),
-zc AS (                               -- 국가·프리셋 안에서 종합 점수를 다시 표준화 (NULL은 통계에서 제외)
+zc AS (                               -- 국가·묶음·프리셋 안에서 종합 점수를 다시 표준화 (NULL은 통계에서 제외)
     SELECT comp.*,
-           AVG(comp.composite)         OVER (PARTITION BY comp.preset_id, comp.country) AS c_mean,
-           STDDEV_SAMP(comp.composite) OVER (PARTITION BY comp.preset_id, comp.country) AS c_sd
+           AVG(comp.composite)         OVER (PARTITION BY comp.preset_id, comp.country, comp.family) AS c_mean,
+           STDDEV_SAMP(comp.composite) OVER (PARTITION BY comp.preset_id, comp.country, comp.family) AS c_sd
     FROM comp
 )
-SELECT zc.stock_id, zc.preset_id, zc.country, zc.coverage AS factor_coverage,
+SELECT zc.stock_id, zc.preset_id, zc.country, zc.family, zc.coverage AS factor_coverage,
        ROUND(zc.value_score, 4)    AS value_score,
        ROUND(zc.quality_score, 4)  AS quality_score,
        ROUND(zc.growth_score, 4)   AS growth_score,

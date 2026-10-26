@@ -1,6 +1,6 @@
 """매력도 비교군: 갱신 범위 분리, 요청 시 상세 수집(유효기간이 지난 것만), 스케줄러 판단, 잠금, 마이그레이션.
 
-선정(시가총액 상위)·평시 데이터·정리는 fake provider에 시가총액(caps)·고유번호 매핑이 들어오면 원본 test_benchmark에서 옮긴다.
+선정: 업종 코드(fake KSIC·SIC) → 주 테마 → 국가·테마별 시가총액(fake caps·cap_rank) 상위.
 """
 from __future__ import annotations
 
@@ -191,23 +191,60 @@ def test_migration_003_is_idempotent(engine):
     assert {"coverage", "detail_synced_at"} <= cols and "BENCHMARK" in check and "HYDRATE" in check
 
 
-# ------------------------------------------------------------------ 업종 섹터 분류 (시장·섹터 점수의 섹터 흐름 표본)
-def test_classify_sectors_maps_krx_industry_and_sic(engine):
-    from dataclasses import replace
+# ------------------------------------------------------------------ 테마 분류 → 비교군 선정 (config/universe.yaml themes)
+def _listed(conn, rows):
+    """상장 목록 종목 추가: (시장 id, 티커, corp_code, cik, cap_rank)."""
+    conn.execute(text("""INSERT INTO stocks (market_id, ticker, name, corp_code, cik, cap_rank, coverage)
+                         VALUES (:m, :t, :t, :corp, :cik, :rank, 'listed')"""),
+                 [{"m": m, "t": t, "corp": corp, "cik": cik, "rank": rank} for m, t, corp, cik, rank in rows])
 
-    from app.providers.base import Classification
-    from tests.fakes import FakeKrBulk, FakeReference
+
+def test_select_benchmark_by_theme_and_market_cap(engine):
+    from dataclasses import replace
+    from decimal import Decimal
+
+    from app.ingest.sectors import sync_themes
+    from tests.fakes import FakeKrBulk, FakeKrReference, FakeReference
     with engine.begin() as conn:
-        conn.execute(text("UPDATE stocks SET cik = '0000320193' WHERE stock_id = 3"))
-        conn.execute(text("UPDATE stocks SET cik = '0001045810', industry_checked_at = now() WHERE stock_id = 4"))  # 최근 확인 → 건너뜀
-    ref = FakeReference(sic={"0000320193": 3571})
-    pv = replace(make_providers(), us_reference=ref,
-                 kr_bulk=FakeKrBulk([Classification("005930", "전기·전자", None), Classification("000660", "금융", None)]))
-    notes: list[str] = []
-    benchmark.classify_sectors(engine, pv, date.today(), notes)
+        sync_themes(conn)                                    # master 적재가 하는 일(테마 → peer_groups)
+        _listed(conn, [(1, "100001", "C1", None, None), (1, "100002", "C2", None, None),
+                       (1, "100003", "C3", None, None), (1, "100004", "C4", None, None),
+                       (2, "AAA", None, "11", 2), (2, "BBB", None, "12", 1), (2, "CCC", None, "13", None),
+                       (2, "BBBX", None, "12", 3)])                     # BBB와 같은 회사(CIK) — 다른 주식 종류
+    kref = FakeKrReference({"C1": "2611", "C2": "26112", "C3": "64121", "C4": "68"})   # 반도체·반도체·은행·리츠
+    uref = FakeReference(sic={"11": 3674, "12": 3674, "13": 3674})
+    caps = {"100001": Decimal(10), "100002": Decimal(20), "100003": Decimal(5), "100004": Decimal(50)}
+    pv = replace(make_providers(), kr_reference=kref, us_reference=uref, kr_bulk=FakeKrBulk(caps=caps))
+
+    out = benchmark.select_benchmark(engine, pv, per_sector=3)
     with engine.connect() as conn:
-        rows = {r.stock_id: (r.industry, r.sector, r.sic) for r in conn.execute(text("SELECT stock_id, industry, sector, sic FROM stocks"))}
-    assert rows[1] == ("전기·전자", "반도체·전자", None)
-    assert rows[2] == ("금융", None, None)                               # 매핑 없는 업종(금융)은 섹터 NULL
-    assert rows[3][1:] == ("반도체·전자", 3571) and rows[4][1] is None
-    assert ref.count == 1 and notes == ["업종 섹터: 국내 2 · 미국 SIC 1"]
+        rows = {r.ticker: r for r in conn.execute(text("""
+            SELECT s.ticker, s.coverage, s.sector, s.ksic, s.sic, t.theme FROM stocks s
+            LEFT JOIN v_stock_theme t ON t.stock_id = s.stock_id"""))}
+    # 반도체·KR: 노출 2(삼성전자·SK하이닉스) + 시가총액 상위 1 / 은행·KR 1 / 리츠(점수 없음)는 고르지 않는다
+    assert out["by_group"]["반도체·KR"] == "노출 2 + 비교군 1" and rows["100002"].coverage == "benchmark"
+    assert rows["100001"].coverage == "listed" and rows["100001"].theme == "반도체"     # 테마는 붙지만 비교군 밖
+    assert (rows["100003"].coverage, rows["100003"].sector) == ("benchmark", "금융")
+    assert (rows["100004"].coverage, rows["100004"].theme, rows["100004"].ksic) == ("listed", "리츠·부동산", "68")
+    # 반도체·US: 노출 1(NVDA) + cap_rank 순 2. 순위 밖(CCC)은 SIC를 묻지 않는다
+    assert out["by_group"]["반도체·US"] == "노출 1 + 비교군 2" and {rows["AAA"].coverage, rows["BBB"].coverage} == {"benchmark"}
+    assert rows["BBBX"].coverage == "listed"                              # 회사당 1종목 — 순위가 높은 BBB만
+    assert rows["CCC"].sic is None and rows["CCC"].theme is None and uref.count == 3 and kref.count == 4
+    assert rows["AAPL"].theme == "빅테크" and rows["AAPL"].sector == "IT·인터넷"     # 노출 종목은 직접 지정
+
+    # 다시 고르면: 업종 코드는 다시 묻지 않고(1년 주기), 빠진 비교군은 상장 목록 종목으로 돌아간다
+    out = benchmark.select_benchmark(engine, pv, per_sector=2)
+    with engine.connect() as conn:
+        cov = dict(conn.execute(text("SELECT ticker, coverage FROM stocks WHERE ticker IN ('AAA', 'BBB', '100002')")).all())
+    assert cov == {"AAA": "listed", "BBB": "benchmark", "100002": "listed"} and set(out["dropped"]) == {"AAA", "100002"}
+    assert uref.count == 3 and kref.count == 4
+
+
+def test_migration_012_is_idempotent(engine):
+    for _ in range(2):
+        jobs.migrate(engine, "012_themes")
+    with engine.connect() as conn:
+        cols = {(t, c) for t, c in conn.execute(text("""SELECT table_name, column_name FROM information_schema.columns
+                                                        WHERE table_name IN ('stocks', 'peer_groups', 'indices')"""))}
+    assert {("stocks", "ksic"), ("peer_groups", "sector"), ("peer_groups", "scoring"), ("peer_groups", "commodity_linked"),
+            ("indices", "category"), ("indices", "unit")} <= cols

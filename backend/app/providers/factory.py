@@ -1,6 +1,6 @@
 """시장·설정에 따라 Provider 구현을 고른다. 테스트는 Providers를 직접 만들어 fake를 주입한다.
 
-Stage 6-B: 상장 목록(kr_listing·us_listing). 비교군 시가총액(market_caps)은 Stage 6-D.
+Stage 6-B: 상장 목록(kr_listing·us_listing). 2차: 국내 업종 코드(kr_reference — 테마 분류).
 """
 from __future__ import annotations
 
@@ -36,6 +36,7 @@ class Providers:
     us_listing: base.ListingProvider | None = None
     # ── [S5-D] 미국 참조 데이터 ──
     us_reference: base.ReferenceDataProvider | None = None  # 미국 발행주식수·SIC·기초값(SEC). None이면 yfinance 밸류에이션
+    kr_reference: base.KrReferenceProvider | None = None    # 국내 업종 코드 KSIC(DART 기업개황). None이면 국내 테마는 직접 지정만
     # 국내 사업보고서 목록(회사 지정 없이 날짜로) — 공시 증분(jobs.load_dart_feed). None이면 건너뛴다
     kr_feed: object | None = None                             # DartClient (list_annual_reports)
 
@@ -96,7 +97,7 @@ def default_providers() -> Providers:
         # ── [S6-B] 상장 목록 ──
         kr_listing=kr if s.price_source_kr == "pykrx" else None, us_listing=sec,
         # ── [S5-D] 미국 참조 데이터 ──
-        us_reference=sec,
+        us_reference=sec, kr_reference=dart,
         # ── [S3-B] 재무·공시 ──
         kr_financial=dart, us_financial=sec, us_financial_supplement=yahoo, kr_disclosure=dart, us_disclosure=sec,
         kr_feed=dart,                                     # 재무용과 같은 DartClient(분당 한도 공유)

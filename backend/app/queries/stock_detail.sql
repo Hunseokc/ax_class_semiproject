@@ -3,6 +3,7 @@
 -- fx_rate·close_krw는 USD 종목만 v_fx_latest(DB 최신값)로 채운다. KRW 종목은 fx_rate = NULL, close_krw = close
 -- fx_stale은 라우터가 false로 고정한다(TTL 외부 호출 서비스는 Stage 2에서 교체)
 -- 업종 섹터(stocks.sector)는 시장·섹터 점수 계산용 — 응답에는 market_condition.sector_name으로 나간다
+-- 주 테마(v_stock_theme): theme 응답과 원자재 연동(commodity) 판단에 쓴다. groups는 주 테마가 먼저
 SELECT s.stock_id, s.ticker, s.name, s.name_en, s.corp_code, s.cik, s.coverage, s.detail_synced_at, s.sector,
        m.code AS market, m.country, m.currency,
        lp.trade_date AS as_of, lp.close, lp.prev_close, lp.change, lp.change_rate, lp.volume,
@@ -12,9 +13,11 @@ SELECT s.stock_id, s.ticker, s.name, s.name_en, s.corp_code, s.cik, s.coverage, 
        v.as_of AS valuation_as_of, v.per, v.pbr, v.eps, v.bps, v.market_cap, v.shares_outstanding, v.source AS valuation_source,
        ROUND(v.market_cap * CASE WHEN m.currency = 'USD' THEN fx.usd_krw ELSE 1 END, 0) AS market_cap_krw,
        sc.as_of AS score_as_of, sc.score,
-       (SELECT json_agg(json_build_object('group_id', g.group_id, 'name', g.name) ORDER BY g.name)
+       (SELECT json_agg(json_build_object('group_id', g.group_id, 'name', g.name, 'is_primary', gm.is_primary)
+                        ORDER BY gm.is_primary DESC, g.name)
           FROM peer_group_members gm JOIN peer_groups g ON g.group_id = gm.group_id
          WHERE gm.stock_id = s.stock_id) AS groups,
+       t.theme, t.sector AS theme_sector, t.family AS theme_family, t.commodity_linked,
        EXISTS (SELECT 1 FROM watchlist_items w WHERE w.stock_id = s.stock_id AND w.user_id = :user_id) AS is_watched
 FROM stocks s
 JOIN markets m ON m.market_id = s.market_id
@@ -22,6 +25,7 @@ LEFT JOIN v_latest_price lp ON lp.stock_id = s.stock_id
 LEFT JOIN LATERAL (SELECT * FROM valuation_snapshots vs WHERE vs.stock_id = s.stock_id
                    ORDER BY vs.as_of DESC LIMIT 1) v ON true
 LEFT JOIN v_fx_latest fx ON true
+LEFT JOIN v_stock_theme t ON t.stock_id = s.stock_id
 LEFT JOIN LATERAL (SELECT st.as_of, st.score FROM stock_scores st WHERE st.stock_id = s.stock_id
                      AND st.preset_id = (SELECT preset_id FROM scoring_presets WHERE code = :preset)
                    ORDER BY st.as_of DESC LIMIT 1) sc ON true

@@ -14,8 +14,8 @@ const $ = (sel) => document.querySelector(sel);
 
 // 상태는 URL 쿼리와 동기화 (홈의 '더 보기' 링크가 탭·정렬을 지정해 들어온다)
 const qs = new URLSearchParams(location.search);
-// 업종 섹터 — backend/config/universe.yaml sectors의 name과 같아야 한다(서버는 그 밖의 값을 422로 거절)
-const SECTORS = ["반도체·전자", "IT·인터넷", "헬스케어", "자동차·운송장비", "산업재", "소재", "필수소비재", "경기소비재", "에너지·유틸리티"];
+// 업종 섹터 — backend/config/universe.yaml sectors와 같아야 한다(서버는 그 밖의 값을 422로 거절)
+const SECTORS = ["반도체·전자", "IT·인터넷", "헬스케어", "자동차·운송장비", "산업재", "에너지·유틸리티", "소재", "필수소비재", "경기소비재", "금융"];
 const PAGE_SIZE = 25;
 const state = {
   country: ["KR", "US"].includes(qs.get("country")) ? qs.get("country") : "",

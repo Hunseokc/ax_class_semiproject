@@ -27,6 +27,8 @@ class IndexSpec:
     display_order: int
     pykrx: str | None = None
     yf_symbol: str | None = None
+    category: str = "index"         # index / commodity(원자재 선물 — 대시보드 '원자재' 묶음, 원자재 연동 테마의 가격 위치)
+    unit: str | None = None         # 원자재 가격 단위($/톤 등). 지수는 없음
 
     @property
     def source_symbol(self) -> str:
@@ -43,21 +45,15 @@ class StockSpec:
 
 
 @dataclass(frozen=True)
-class PeerGroupSpec:
-    name: str
-    members: tuple[str, ...]        # 티커 목록 (노출 종목 사이에 티커가 겹치지 않는다)
-
-
-@dataclass(frozen=True)
 class Universe:
     markets: tuple[MarketSpec, ...]
     indices: tuple[IndexSpec, ...]
     stocks: tuple[StockSpec, ...]
-    peer_groups: tuple[PeerGroupSpec, ...]
     fx_yf_symbol: str
     benchmark: dict                 # [S4-D] 비교군 설정 (per_sector·price_days·fin_years·reselect_days …)
-    benchmark_candidates: dict      # [S4-D] 경쟁 그룹 → 국가 → 후보 [{market, ticker, name}]
-    sectors: list                   # [S5-D] 점수 비교 표본의 섹터 [{name, krx, sic}] (app/ingest/sectors.py)
+    sectors: list                   # 업종 섹터 이름 (stocks.sector — 주 테마의 sector)
+    themes: list                    # 테마 [{name, sector, ksic, sic, tickers, scoring, commodity …}] (app/ingest/sectors.py)
+    secondary_themes: dict          # 티커 → 보조 테마 이름 목록
     ingest: dict                    # 수집 적재 공통 (flush_every)
     background: dict                # 백그라운드 재무 적재 하루 예산 (app/ingest/background.py)
 
@@ -71,12 +67,11 @@ def load_universe() -> Universe:
         markets=tuple(MarketSpec(**m) for m in raw["markets"]),
         indices=tuple(IndexSpec(**i) for i in raw["indices"]),
         stocks=tuple(StockSpec(**s) for s in raw["stocks"]),
-        peer_groups=tuple(PeerGroupSpec(name=g["name"], members=tuple(g["members"]))
-                          for g in raw["peer_groups"]),
         fx_yf_symbol=raw["fx"]["usd_krw"]["yf_symbol"],
         benchmark=raw["benchmark"],
-        benchmark_candidates=raw["benchmark_candidates"],
         sectors=raw["sectors"],
+        themes=raw["themes"],
+        secondary_themes={str(k): v for k, v in (raw.get("secondary_themes") or {}).items()},
         ingest=raw.get("ingest") or {},
         background=raw.get("background") or {},
     )

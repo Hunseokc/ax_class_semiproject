@@ -27,11 +27,12 @@ router = APIRouter(prefix="/stocks", tags=["analysis"])
 stats_router = APIRouter(prefix="/statistics", tags=["statistics"])
 scoring_router = APIRouter(prefix="/scoring", tags=["analysis"])
 
-SCORE_DISCLAIMER = ("매력도는 노출 종목과 매력도 비교군 안에서 같은 시장끼리 비교한 상대적 위치를 나타내는 팩터 점수이며, "
-                    "수익률 예측이나 투자 권유가 아닙니다.")
+SCORE_DISCLAIMER = ("매력도는 노출 종목과 매력도 비교군 안에서 같은 시장끼리(금융은 금융끼리) 비교한 상대적 위치를 나타내는 "
+                    "팩터 점수이며, 수익률 예측이나 투자 권유가 아닙니다.")
 PRESET_NOTE = "공개된 일반적 투자 스타일을 단순화한 가중치이며 특정 인물의 판단이 아닙니다."
-SCORE_METHOD = ("지표별로 같은 시장 안 로버스트 Z(중앙값·MAD)를 구해 ±3으로 자르고, 주 경쟁 그룹 평균을 축소 추정으로 빼 섹터 중립화한 뒤 "
-                "팩터 평균 → 프리셋 가중 평균 → 시장 안에서 다시 표준화해 100·Φ(z)로 0~100 변환합니다.")
+SCORE_METHOD = ("지표별로 같은 시장 안(금융은 금융끼리) 로버스트 Z(중앙값·MAD)를 구해 ±3으로 자르고, 같은 주 테마 평균을 축소 추정으로 빼 "
+                "섹터 중립화한 뒤(다시 ±3) 팩터 평균 → 프리셋 가중 평균 → 같은 범위 안에서 다시 표준화해 100·Φ(z)로 0~100 변환합니다. "
+                "금융 업종은 매출 기준 지표를, 원자재 연동 업종은 한 해 이익 변화를 쓰지 않고 E/P는 3년 평균 순이익으로 계산합니다.")
 ACCOUNTING_NOTE = ("국내 종목 재무는 K-IFRS 연결(DART), 미국 종목은 US-GAAP(SEC)이며 PER·PBR은 국내 KRX 제공값, 미국은 SEC 발행주식수·FY 순이익·자본으로 계산한 값입니다. "
                    "회계기준·산정 방식이 달라 국가 간 수치 비교에는 한계가 있습니다.")
 PEER_METRICS = ["return_1m", "return_3m", "return_1y", "per", "pbr", "roe", "operating_margin", "revenue_yoy",
@@ -69,6 +70,7 @@ class MetricOut(Schema):
 
 class RankOut(Schema):
     country: str
+    family: Literal["general", "financial"] = "general"   # 점수 묶음 — financial이면 금융끼리의 순위
     position: int
     total: int
     percentile: Num
@@ -101,6 +103,7 @@ class ScoreOut(Schema):
     reference: bool = False                      # 상장 목록 종목의 참고 점수(유니버스 밖)
     reference_note: str | None = None
     fin_basis: list[FinBasisOut] = []            # 같은 시장 비교 표본의 재무 기준 연도별 종목 수(연도 내림차순)
+    unscored_reason: str | None = None           # 업종 규칙으로 점수를 내지 않는 종목(리츠)의 사유 — as_of·score 없음
 
 
 class PresetOut(PresetRef):
@@ -204,7 +207,8 @@ def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row)
     metrics = [{"metric": k, "label": d.label, "factor": d.factor, "direction": d.direction,
                 **{c: by_metric[k][c] if k in by_metric else None for c in ("raw_value", "z_raw", "z_adj")}}
                for k, d in METRICS.items()]
-    rank = ({"country": country, "position": row["rank_position"], "total": row["rank_total"],
+    rank = ({"country": country, "family": (row["data_quality"] or {}).get("family", "general"),
+             "position": row["rank_position"], "total": row["rank_total"],
              "percentile": row["percentile"]} if row["rank_position"] is not None else None)
     return {**out, "as_of": row["score_as_of"], "score": row["score"], "composite": row["composite"],
             "factor_coverage": row["factor_coverage"], "rank": rank, "factors": factors, "metrics": metrics,
@@ -214,7 +218,7 @@ def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row)
 
 
 def _peer_average(db: Session, stock_id: int, country: str, preset_id: int, as_of) -> dict | None:
-    """주 그룹(같은 국가) 구성원의 팩터 점수 평균 — 섹터 중립화와 같은 범위. 구성원이 자기 자신뿐이면 None."""
+    """주 테마(같은 국가) 구성원의 팩터 점수 평균 — 섹터 중립화와 같은 범위. 구성원이 자기 자신뿐이면 None."""
     r = db.execute(text("""
         SELECT g.name AS group_name, COUNT(*) AS size,
                AVG(st.value_score) AS value, AVG(st.quality_score) AS quality, AVG(st.growth_score) AS growth,

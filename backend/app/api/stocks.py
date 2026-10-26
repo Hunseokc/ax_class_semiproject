@@ -1,6 +1,7 @@
 """종목 조회 API: 리스트, 상세, 캔들, 재무, 공시, 경쟁 그룹 목록, 상단 검색."""
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import (MarketPath, TickerPath, get_current_user_id, get_db, get_engine_dep, get_hydrator, get_preset,
                           resolve_stock)
 from app.core.errors import NotFound, Unprocessable
-from app.ingest.sectors import sectors
+from app.ingest.sectors import commodity_code, sectors, theme_by_name
 from app.queries import raw, sql
 from app.schemas.api import CandlesOut, DisclosuresOut, FinancialsOut, SearchOut, StockDetailOut, StockListOut
 from app.services.hydration import Hydrator
@@ -39,8 +40,8 @@ def list_stocks(
     if sort == "volume" and country is None:
         raise Unprocessable("시장마다 거래량 단위가 달라 '전체'에서는 거래량 정렬을 할 수 없습니다. 국내/미국 탭을 선택하세요",
                             detail={"allowed_sort_for_all": ["market_cap"]}, code="VOLUME_SORT_REQUIRES_MARKET")
-    if sector is not None and sector not in {s.name for s in sectors()}:
-        raise Unprocessable("알 수 없는 섹터입니다", detail={"allowed": [s.name for s in sectors()]}, code="VALIDATION_ERROR")
+    if sector is not None and sector not in sectors():
+        raise Unprocessable("알 수 없는 섹터입니다", detail={"allowed": list(sectors())}, code="VALIDATION_ERROR")
     # order_col·order_dir은 위 화이트리스트(SORT_COLUMNS, Literal)에서만 나오므로 문자열 치환해도 안전하다
     stmt = text(raw("stock_list").format(order_col=SORT_COLUMNS[sort], order_dir=order.upper()))
     params = {"user_id": user_id, "country": country, "grp": group, "q": q, "sector": sector, "preset": preset["code"],
@@ -85,8 +86,33 @@ def stock_detail(market: MarketPath, ticker: TickerPath, user_id: int = Depends(
     # 시장·섹터 점수 — 매력 점수 아래 위험 표시(매력도와 별개). 섹터는 이 계산에만 쓰고 응답 최상위에는 내지 않는다
     out["market_condition"] = get_condition(engine, stock_id=out["stock_id"], country=out["country"],
                                             sector=out.pop("sector"))
+    theme = {k: out.pop(c) for k, c in (("name", "theme"), ("sector", "theme_sector"), ("family", "theme_family"),
+                                        ("commodity_linked", "commodity_linked"))}
+    out["theme"] = theme if theme["name"] else None
+    out["commodity"] = commodity_info(db, theme["name"], out["ticker"]) if theme["commodity_linked"] else None
     out["fx_stale"] = False          # Stage 1은 DB 값만 읽는다. TTL 외부 호출(FxService)은 Stage 2에서 교체
     return out
+
+
+COMMODITY_NOTE = ("원자재 가격을 따라 이익이 크게 바뀌는 업종입니다. 원자재 가격이 높을 때는 이익도 높아 주가가 싸 보일 수 있습니다. "
+                  "매력도의 저평가는 최근 3년 평균 이익으로 계산했습니다.")
+COMMODITY_NOTE_NO_PRICE = ("원자재 가격을 따라 이익이 크게 바뀌는 업종입니다. 연결 원자재의 무료 시세가 없어 가격 위치는 보여 주지 않습니다. "
+                           "매력도의 저평가는 최근 3년 평균 이익으로 계산했습니다.")
+
+
+def commodity_info(db: Session, theme: str, ticker: str) -> dict:
+    """원자재 연동 테마 종목의 연결 원자재(config themes.commodity·commodity_by_ticker)와 그 가격의 1년 위치.
+    가격은 지수와 같은 저장값(index_daily_prices, category commodity)만 읽는다."""
+    code = commodity_code(theme_by_name().get(theme), ticker)
+    row = next((r for r in db.execute(sql("market_indices")).mappings() if r["code"] == code), None) if code else None
+    if row is None:
+        return {"code": code, "name": None, "unit": None, "as_of": None, "close": None, "change_1y": None,
+                "position_52w": None, "note": COMMODITY_NOTE_NO_PRICE if code is None else COMMODITY_NOTE}
+    first = (row["sparkline"] or [{}])[0].get("close")
+    full = row["position_52w"] is not None                   # 52주 범위는 1년치가 쌓였을 때만 있다
+    return {"code": code, "name": row["name"], "unit": row["unit"], "as_of": row["as_of"], "close": row["close"],
+            "change_1y": round(row["close"] / Decimal(str(first)) - 1, 6) if full and first else None,   # 스파크라인은 JSON 숫자
+            "position_52w": row["position_52w"], "note": COMMODITY_NOTE}
 
 
 @router.get("/{market}/{ticker}/candles", response_model=CandlesOut, summary="기간 일봉")
@@ -117,10 +143,13 @@ def disclosures(market: MarketPath, ticker: TickerPath, limit: int = Query(5, ge
 groups_router = APIRouter(prefix="/peer-groups", tags=["stocks"])
 
 
-@groups_router.get("", summary="경쟁 그룹 목록 (리스트 필터용)")
+@groups_router.get("", summary="테마 목록 (리스트 필터용) — 부모 섹터, 구성원 수(노출 종목 + 비교군)")
 def list_groups(db: Session = Depends(get_db)):
     rows = db.execute(text("""
-        SELECT g.group_id, g.name, COUNT(gm.stock_id) AS size
-        FROM peer_groups g LEFT JOIN peer_group_members gm ON gm.group_id = g.group_id
-        GROUP BY g.group_id, g.name ORDER BY g.name""")).mappings().all()
-    return {"groups": [dict(r) for r in rows]}
+        SELECT g.group_id, g.name, g.sector, COUNT(s.stock_id) AS size
+        FROM peer_groups g
+        LEFT JOIN peer_group_members gm ON gm.group_id = g.group_id
+        LEFT JOIN stocks s ON s.stock_id = gm.stock_id AND s.is_active AND s.coverage IN ('featured', 'benchmark')
+        GROUP BY g.group_id, g.name, g.sector ORDER BY g.name""")).mappings().all()
+    order = {name: i for i, name in enumerate(sectors())}
+    return {"groups": sorted((dict(r) for r in rows), key=lambda g: (order.get(g["sector"], len(order)), g["name"]))}

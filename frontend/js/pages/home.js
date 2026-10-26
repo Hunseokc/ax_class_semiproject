@@ -189,8 +189,10 @@ editBtn.addEventListener("click", () => togglePicker(editBtn.getAttribute("aria-
 const availableMetrics = () => [...(market.indices || []).map((i) => i.code), FX_CODE];
 
 function metricGroups() {
-  const by = (country) => market.indices.filter((i) => i.country === country).map((i) => ({ code: i.code, name: i.name }));
+  const pick = (f) => market.indices.filter(f).map((i) => ({ code: i.code, name: i.name }));
+  const by = (country) => pick((i) => i.category !== "commodity" && i.country === country);
   return [{ label: "국내", items: by("KR") }, { label: "미국", items: by("US") },
+    { label: "원자재", items: pick((i) => i.category === "commodity") },   // 선물 — 원자재 연동 업종 상세에도 쓴다
     { label: "환율", items: [{ code: FX_CODE, name: "USD/KRW" }] }].filter((g) => g.items.length);
 }
 
