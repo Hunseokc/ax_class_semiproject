@@ -62,6 +62,10 @@ def test_hydrate_fetches_only_expired_data(engine, pv):
     assert h.status(sid, "benchmark", synced - timedelta(hours=25)) == "stale"
     assert h.status(1, "featured", None) == "ready"
     # 다시 열면: 재무·공시·밸류에이션은 유효기간 안 → 일봉 증분만(백필 없음)
+    # 최근 7일 일봉을 지워 증분 구간에 확정된 평일이 꼭 들어가게 한다. 그대로 두면 주말·한국 월요일 장 마감 전에는
+    # 받을 구간이 주말뿐이라 코드가 의도대로 호출을 건너뛰어, 마지막 호출이 처음 백필로 남는다
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM daily_prices WHERE stock_id = :s AND trade_date > :d"), {"s": sid, "d": TODAY - timedelta(days=7)})
     counts = (pv.kr_financial.count, pv.kr_disclosure.count, pv.kr_valuation.count)
     out = hydrate(engine, pv, sid)
     assert (pv.kr_financial.count, pv.kr_disclosure.count, pv.kr_valuation.count) == counts
