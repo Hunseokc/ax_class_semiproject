@@ -112,3 +112,28 @@
 | company_tickers.json 티커→CIK | OK | 매핑 9/9: {'NVDA': '0001045810', 'AAPL': '0000320193', 'GOOGL': '0001652044', 'MSFT': '0000789019', 'AMZN': '0001018724', 'META': '0001326801', 'AVGO': '0001730168', 'TSLA': '0001318605', 'AMD': '0000002488'} |
 | submissions (AAPL) | OK | recent 필드=['accessionNumber', 'filingDate', 'reportDate', 'acceptanceDateTime', 'act', 'form', 'fileNumber', 'filmNumber']..., 건수=1000 |
 | companyfacts (AAPL) | OK | Revenues=O, RevenueFromContractWithCustomerExcludingAssessedTax=O, OperatingIncomeLoss=O, NetIncomeLoss=O, Assets=O, StockholdersEquity=O, LongTermDebt=O; NetIncomeLoss 10-K FY end 최근=['2020-09-26', '2021-09-25', '2022-09-24', '2023-09-30', '2024-09-28', '2025-09-27'] |
+
+## 2026-10-26 추가 확인 — 테마 분류·원자재 (2차)
+
+로컬 컨테이너에서 실제로 호출했다(별도 smoke 스크립트 없이 일회성 확인).
+
+### 원자재 선물 (yfinance, 1년)
+
+| 심볼 | 원자재 | 행 수 | 마지막 종가 |
+|---|---|---|---|
+| CL=F | WTI 원유 | 251 | 101.03 |
+| GC=F | 금 | 251 | 4022.4 |
+| HG=F | 구리 | 251 | 6.48 |
+| ALI=F | 알루미늄 | 250 | 3268.5 |
+| HRC=F | 열연강판 | 250 | 1292.0 |
+| NG=F | 천연가스(쓰지 않음) | 251 | 2.99 |
+
+주간 수익률 1년 상관(참고): AA–ALI=F 0.48, CENX–ALI=F 0.47, FCX–HG=F 0.76, NUE–HRC=F 0.17, CLF–HRC=F 0.13, XOM–CL=F 0.54
+
+### 업종 코드
+
+| 항목 | 결과 | 상세 |
+|---|---|---|
+| DART `company.json` `induty_code` (국내 시가총액 상위 300) | OK | 300/300 응답, 2~5자리 혼재(예 264 삼성전자, 28202 LG에너지솔루션, 64992 지주회사, 70113 알테오젠) |
+| SEC `submissions` `sic` (미국 `cap_rank` 상위 300) | OK | 300/300 응답(예 3674 NVDA, 3334 Alcoa, 7372 MSFT) |
+| 첫 전체 적재 | OK | 국내 약 2,500 · 미국 약 1,500, DART 분당 45회 제한으로 약 1시간 |

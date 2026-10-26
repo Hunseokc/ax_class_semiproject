@@ -30,7 +30,7 @@
 ```bash
 cp .env.example .env                                         # 1) 환경 변수
 docker compose up -d --build                                 # 2) DB + API (개발 모드: 소스 수정 시 자동 재시작)
-docker compose run --rm api python -m app.ingest init-db     # 3) 스키마(테이블 25·VIEW 3·인덱스) + 투자 성향 프리셋
+docker compose run --rm api python -m app.ingest init-db     # 3) 스키마(테이블 26·VIEW 4·인덱스) + 투자 성향 프리셋
 docker compose run --rm api python -m app.ingest master --offline   #    시장·종목·지수 마스터 + demo 사용자
 docker compose run --rm api python -m app.ingest import-sample      #    샘플 시세·지수·환율·밸류에이션
 docker compose run --rm api python -m app.ingest seed-demo          # 4) (선택) 데모 관심종목 8건 + 포트폴리오 2개
@@ -96,7 +96,7 @@ curl -s "http://localhost:8000/api/v1/stocks/KOSPI/999999"      # 없는 종목
 
 **자동 확인(테스트)**:
 ```bash
-docker compose run --rm api pytest -q        # 2026-10-22: 507 passed in 57s
+docker compose run --rm api pytest -q        # 2026-10-26: 550 passed in 63s
 ```
 
 ## ⑤ 로그 확인
@@ -150,7 +150,7 @@ financial_statements FY                  20896
 - 데이터를 처음부터 다시 만들 때는 `init-db --reset` → `master --offline` → `import-sample` → `seed-demo` 순서다. `--reset`은 DB를 통째로 비운다.
 
 **배포**: 서비스와 Jobs는 같은 이미지(`asia-northeast3-docker.pkg.dev/stockmind-512107/stockmind/api:<커밋>-<MMDDHHMM>`)를 쓴다.
-- 지금 배포된 이미지: `api:a1e9697-10211445`, 리비전 `stockmind-00011`.
+- 지금 배포된 이미지: 서비스·Jobs 3개 모두 `api:28ad7f6-10261606`(2026-10-26, 2차 로그인·테마 분류).
 - Cloud Build는 쓰지 않는다. 로컬에서 빌드해 올린다.
 
 ```bash
@@ -165,6 +165,14 @@ done
 # 5) 스키마가 바뀌었으면 배포 DB에 migrate 실행(같은 이미지로 일회성 Job 또는 로컬에서 DATABASE_URL을 배포 DB로)
 ```
 
+**2차 적용 기록 (2026-10-26)** — 로그인(#107)·테마 분류(#109)를 처음 배포할 때 한 일. 같은 상황(010 이하 DB)이면 이 순서를 따른다.
+1. 배포 DB에 `migrate 012_themes` → `migrate 011_auth` (**012가 먼저** — 05 8절, troubleshooting 3)
+2. 업종 코드 복사: 로컬 DB의 `stocks.ksic·sic·industry·industry_checked_at`(4,089행)을 CSV로 내보내 배포 DB에 시장+티커로 UPDATE → `benchmark --reselect`의 DART KSIC 수집(약 1시간)을 건너뜀
+3. `master --offline`(테마 38개·주 테마)
+4. 이미지 push → 로그인 비밀값 3개에 런타임 서비스 계정 `secretAccessor` 부여 → `gcloud run deploy stockmind --image … --update-secrets JWT_SECRET=JWT_SECRET:latest,REDIS_URL=REDIS_URL:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest` → Jobs 3개 `--image`
+5. `benchmark --reselect`(배포 DB 대상) — 비교군 636종목·점수. 미국 ADR 20종목은 재무 빈 응답으로 점수 없음(정상 — 09 8절)
+6. 원자재 지수 5종은 다음 `stockmind-refresh`(매시 5분)가 2년치를 받는다
+
 > 이 절차는 2026-10-22 배포 상태(이미지 태그 형식, Cloud Build 미사용, 서비스·Job이 같은 이미지)를 조회해 맞춘 것이다. 레포에는 배포 스크립트가 없으므로, 실제로 쓰던 명령과 다르면 이 절을 고친다.
 
 **배포 뒤 확인**(v1 → v2):
@@ -173,6 +181,7 @@ done
 3. `/api/v1/stocks/KOSPI/005930`이 데이터를 돌려준다.
 4. 대시보드 홈에 지수·관심종목이 보인다.
 5. 다음 정각 5분 뒤 `stockmind-refresh` 실행이 성공한다.
+6. (2차) `/login` 화면이 열리고 `POST /api/v1/auth/refresh`(쿠키 없이)가 401 `REFRESH_INVALID`를 준다. `/api/v1/peer-groups`가 테마 38개를 준다.
 
 - 설정만 바꿀 때는 이미지를 다시 만들 필요가 없다. 예: KRX 장애 시 국내 소스를 KIS로 바꾸기(재배포 1~2분, 되돌릴 때는 `=pykrx`):
   ```bash
