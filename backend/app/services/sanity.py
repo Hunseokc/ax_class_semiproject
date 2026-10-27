@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import math
 import re
 import statistics as st
 from collections import Counter, defaultdict
@@ -22,7 +23,7 @@ from sqlalchemy import Connection, text
 
 from app.core.config import CONFIG_DIR
 from app.queries import sql
-from app.services.scoring import FACTORS, FISCAL_GAP_DAYS, load_config
+from app.services.scoring import FACTORS, FISCAL_GAP_DAYS, METRICS, MIN_FACTORS, REQUIRED_FACTORS, load_config
 
 PRESET_KR = {"aggressive": "위험", "growth": "성장", "balanced": "균형", "value": "가치"}
 FACTOR_ALIAS = {"stability": "safety"}
@@ -69,6 +70,8 @@ class Stock:
     factors: dict = field(default_factory=dict)     # factor → Fs
     dq: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict)         # metric → raw_value
+    z_raw: dict = field(default_factory=dict)       # metric → z_raw(중립화 전)
+    z_adj: dict = field(default_factory=dict)       # metric → z_adj(최종)
     fins: list = field(default_factory=list)        # FY 행(결산일 오름차순)
 
     @property
@@ -129,10 +132,14 @@ class Data:
             for s in lst:                  # 저장된 백분위로 순위(SQL은 반올림 전 종합으로 매긴다 — 종합 4자리 동점을 피함)
                 s.rank[code] = 1 + sum(1 for x in lst if x.pct[code] > s.pct[code])
                 s.n[code] = len(lst)
-        for r in c.execute(text("SELECT stock_id, metric, raw_value FROM stock_metric_values WHERE as_of = :d"),
+        for r in c.execute(text("SELECT stock_id, metric, raw_value, z_raw, z_adj FROM stock_metric_values WHERE as_of = :d"),
                            {"d": self.as_of}):
-            if r.stock_id in self.stocks and r.raw_value is not None:
-                self.stocks[r.stock_id].raw[r.metric] = float(r.raw_value)
+            s = self.stocks.get(r.stock_id)
+            if s is None:
+                continue
+            for name, v in (("raw", r.raw_value), ("z_raw", r.z_raw), ("z_adj", r.z_adj)):
+                if v is not None:
+                    getattr(s, name)[r.metric] = float(v)
         for r in c.execute(text("""SELECT stock_id, period_end, revenue, operating_income, net_income, total_assets, total_debt
                                    FROM financial_statements WHERE period_type = 'FY' ORDER BY stock_id, period_end""")).mappings():
             if r["stock_id"] in self.stocks:
@@ -436,8 +443,73 @@ def independent(d: Data) -> tuple[int, int, dict]:
 
 
 def rule_r10(d: Data):
+    """경계는 측정 잡음(k 3~8에서 이상 12~16, 거짓 음성 25~27)에 맞춘다(D-021)."""
     weird, fn, per = independent(d)
-    return weird <= 14 and fn <= 27, f"이상 종목 {weird}(≤14) · 우량 거짓 음성 {fn}(≤27) · {per}"
+    return weird <= 16 and fn <= 27, f"이상 종목 {weird}(≤16) · 우량 거짓 음성 {fn}(≤27) · {per}"
+
+
+def rule_trap(d: Data):
+    """가치 함정 신호는 중립화하지 않아 최종 값(z_adj)도 0 이하 — 문자 그대로 감점만(D-018)."""
+    vals = [s.z_adj["trap_signal"] for s in d.stocks.values() if "trap_signal" in s.z_adj]
+    pos = [v for v in vals if v > 0]
+    return not pos, f"{len(vals)}종목 중 양수 {len(pos)}" + (f" (최대 +{max(pos):.2f})" if pos else "")
+
+
+def raw_composites(d: Data) -> dict[str, dict[int, float]]:
+    """중립화 전 값(z_raw)으로 같은 모델을 다시 합산한 프리셋별 종합 — score_aggregate.sql과 같은 규칙
+    (지표 가중 평균, 재무 이력 축소, 국가·묶음 안 재표준화, 빠진 팩터 0, 저평가·수익성 필수, 유효 팩터 ≥ 3)."""
+    f0: dict[int, dict[str, float]] = {}
+    for s in d.stocks.values():
+        fs = {}
+        for f in FACTORS:
+            pairs = [(METRICS[m].weight, v) for m, v in s.z_raw.items() if METRICS[m].factor == f]
+            if pairs:
+                fs[f] = sum(w * v for w, v in pairs) / sum(w for w, _ in pairs)
+        n = s.dq.get("fy_history") or 0
+        if "value" in fs and n < 3:
+            fs["value"] *= n / 3
+        if fs:
+            f0[s.stock_id] = fs
+    fz: dict[int, dict[str, float]] = defaultdict(dict)
+    for c in ("US", "KR"):
+        for fam in ("general", "financial"):
+            ids = [sid for sid in f0 if d.stocks[sid].country == c and d.stocks[sid].family == fam]
+            for f in FACTORS:
+                xs = {sid: f0[sid][f] for sid in ids if f in f0[sid]}
+                sd = st.stdev(xs.values()) if len(xs) > 1 else 0.0
+                m = st.fmean(xs.values()) if xs else 0.0
+                for sid, v in xs.items():
+                    fz[sid][f] = (v - m) / sd if sd > 0 else 0.0
+    out: dict[str, dict[int, float]] = {}
+    for p, w in d.weights.items():
+        out[p] = {sid: sum(w[f] * v for f, v in fs.items()) for sid, fs in fz.items()
+                  if all(f in fs for f in REQUIRED_FACTORS) and len(fs) >= MIN_FACTORS}
+    return out
+
+
+def weak_theme_firsts(d: Data, top_n: int = 20, share: float = 0.3) -> tuple[int, dict]:
+    """프리셋 top20(시장 2 × 프리셋 4) 중 '중립화 전 테마 평균 종합이 같은 시장 테마 중 하위 30%인 테마의 1등' 수.
+    테마 = 점수 있는 general 구성원 2개 이상인 주 테마, 1등 = 그 테마 안 프리셋 순위 1위(라운드 2 4-3 정의)."""
+    raw = raw_composites(d)
+    total, per = 0, {}
+    for c in ("US", "KR"):
+        for p in PRESET_KR:
+            members: dict[str, list[Stock]] = defaultdict(list)
+            for s in d.general(c):
+                if s.theme and p in s.rank and s.stock_id in raw[p]:
+                    members[s.theme].append(s)
+            themes = {t: st.fmean(raw[p][s.stock_id] for s in lst) for t, lst in members.items() if len(lst) >= 2}
+            weak = set(sorted(themes, key=themes.get)[:math.ceil(share * len(themes))])
+            firsts = {min(members[t], key=lambda s: s.rank[p]).stock_id for t in weak}
+            hit = [s.ticker for s in d.top(c, p, top_n) if s.stock_id in firsts]
+            per[f"{c}{PRESET_KR[p]}"] = hit
+            total += len(hit)
+    return total, per
+
+
+def rule_weak_theme_first(d: Data):
+    total, per = weak_theme_firsts(d)
+    return True, f"{total}개 (기록만) · " + " ".join(f"{k} {len(v)}{v if v else ''}" for k, v in per.items())
 
 
 def case_home_family_mix(d: Data):
@@ -505,6 +577,8 @@ SPECIAL = {
     "R8-top10-stability": lambda d, c: rule_r8(d),
     "R9-no-score-loss": lambda d, c: rule_r9(d),
     "R10-independent-benchmark": lambda d, c: rule_r10(d),
+    "TRAP-penalty-only": lambda d, c: rule_trap(d),
+    "WEAK-theme-first": lambda d, c: rule_weak_theme_first(d),
 }
 
 

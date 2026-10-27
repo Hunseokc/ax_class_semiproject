@@ -19,8 +19,8 @@ from app.services.fx import FxService
 from app.services.refresh import RefreshService
 from app.ingest.jobs import migrate
 from app.queries import sql
-from app.services.scoring import (FACTORS, METRICS, aggregate, compute_scores, load_config, metric_params, normalize,
-                                  sync_presets, validate_presets)
+from app.services.scoring import (FACTORS, FIXED_METRICS, METRICS, aggregate, compute_scores, load_config, metric_params,
+                                  normalize, sync_presets, validate_presets)
 from tests.conftest import D, scalar
 from tests.fakes import make_providers
 from tests.test_analysis import _path, _replace_prices
@@ -324,7 +324,7 @@ def reference_scores(raw, hist):
             mates = [t for t in raw if g is not None and PRIMARY.get(t) == g and COUNTRY[t] == COUNTRY[s] and metric in z_raw[t]]
             n = len(mates)
             z = z_raw[s][metric]
-            if METRICS[metric].factor == "safety":                    # 안정성은 섹터 중립화하지 않는다
+            if not METRICS[metric].neutralize:                         # 안정성·세후 이익·함정 신호는 중립화하지 않는다
                 z_adj[s][metric] = z
                 continue
             v = z - n / (n + K) * sum(z_raw[t][metric] for t in mates) / n if n > 1 else z
@@ -423,15 +423,21 @@ def test_boundary_cases(engine, universe):
     assert sc[8]["score"] is None and "저평가·수익성" in sc[8]["data_quality"]["score_null_reason"]
 
 
-def test_safety_factor_is_not_sector_neutralized(engine, universe):
-    """안정성 지표는 z_adj = z_raw, 다른 팩터는 주 그룹(n > 1)이면 중립화가 그대로 걸린다."""
+def test_unneutralized_metrics_keep_z_raw(engine, universe):
+    """안정성 2개·세후 보수 이익·가치 함정 신호는 z_adj = z_raw(D-018), 나머지는 주 그룹(n > 1)이면 중립화한다.
+    가치 함정 신호는 중립화하지 않아 최종 값도 0 이하 — 감점만."""
     compute_scores(engine, as_of=D)
     with engine.connect() as conn:
-        safety = conn.execute(text("""SELECT z_raw, z_adj FROM stock_metric_values
-                                      WHERE as_of = :d AND factor = 'safety' AND z_raw IS NOT NULL"""), {"d": D}).all()
+        fixed = conn.execute(text("""SELECT metric, z_raw, z_adj FROM stock_metric_values
+                                     WHERE as_of = :d AND metric IN ('volatility', 'liab_assets', 'conservative_yield', 'trap_signal')
+                                       AND z_raw IS NOT NULL"""), {"d": D}).all()
         roe_raw, roe_adj = read(conn, "z_raw", "return_on_assets"), read(conn, "z_adj", "return_on_assets")
-    assert safety and all(r.z_adj == r.z_raw for r in safety)
+        bp_raw, bp_adj = read(conn, "z_raw", "book_yield"), read(conn, "z_adj", "book_yield")
+    assert {r.metric for r in fixed} == {"volatility", "liab_assets", "conservative_yield", "trap_signal"}
+    assert all(r.z_adj == r.z_raw for r in fixed)
+    assert all(r.z_adj <= 0 for r in fixed if r.metric == "trap_signal")
     assert roe_adj[1] != roe_raw[1] and roe_adj[2] != roe_raw[2]       # 반도체(1, 2) 수익성은 중립화
+    assert any(bp_adj[s] != bp_raw[s] for s in (1, 2, 5, 6))            # 저평가 중 B/P만 중립화(KR 반도체·자동차)
 
 
 def test_incomplete_and_off_cycle_fy_rows_are_skipped(engine, universe):
@@ -640,7 +646,7 @@ def test_neutralized_z_is_clipped_to_3(engine):
         conn.execute(text("""INSERT INTO stock_metric_values (stock_id, as_of, metric, factor, raw_value, z_raw)
                              VALUES (1, :d, 'return_on_assets', 'quality', 0, 3), (2, :d, 'return_on_assets', 'quality', 0, -3),
                                     (5, :d, 'return_on_assets', 'quality', 0, -3)"""), {"d": D})
-        conn.execute(sql("score_neutralize"), {"as_of": D, "k": K})
+        conn.execute(sql("score_neutralize"), {"as_of": D, "k": K, "fixed": FIXED_METRICS})
         adj = read(conn, "z_adj", "return_on_assets")
     assert 3 - 3 / (3 + K) * (-1) > 3 and adj[1] == 3                       # 3.375 → 3
     assert adj[2] == pytest.approx(-3 - 3 / (3 + K) * (-1), abs=1e-4)      # −2.625(범위 안이면 그대로)
@@ -712,6 +718,7 @@ def test_reference_score_neutralizes_with_primary_theme(engine, universe):
     by = {m["metric"]: m for m in out["metrics"]}
     assert float(by["book_yield"]["z_adj"]) == pytest.approx(neutralize(float(by["book_yield"]["z_raw"]), peers, K), abs=2e-4)
     assert by["volatility"]["z_adj"] == by["volatility"]["z_raw"]           # 안정성은 중립화하지 않는다
+    assert by["conservative_yield"]["z_adj"] == by["conservative_yield"]["z_raw"]   # 저평가는 B/P만(D-018)
     assert "주 테마 '반도체' 비교군 2개로 섹터 중립화" in out["reference_note"] and out["rank"]["family"] == "general"
     # 점수 = 유니버스 종합 사이 순위의 백분위, 재무 FY 2개 → 이력 기록
     assert float(out["score"]) == pytest.approx(100 * (out["rank"]["total"] - out["rank"]["position"]) / out["rank"]["total"], abs=0.01)

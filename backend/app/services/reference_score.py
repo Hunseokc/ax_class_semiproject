@@ -6,7 +6,8 @@ listed 종목은 요청할 때마다 계산해 저장하지 않는다.
   2) Z: 같은 as_of·같은 국가·같은 점수 묶음(family) 유니버스 원값의 중앙값·MAD로 로버스트 Z
      (score_zscore.sql과 같은 규칙, 방향 반영, ±3, 감점 전용 지표는 0 이하)
   3) 섹터 중립화: 주 테마가 있으면 같은 국가·같은 주 테마 유니버스 구성원의 z_raw 평균(자기 자신 포함)을
-     축소 추정으로 뺀다(score_neutralize.sql과 같은 규칙, 안정성 제외, ±3). 주 테마가 없으면 z_adj = z
+     축소 추정으로 뺀다(score_neutralize.sql과 같은 규칙, Metric.neutralize = False인 지표 — 안정성·세후 보수 이익·
+     가치 함정 신호 — 는 제외, ±3). 주 테마가 없으면 z_adj = z
   4) 팩터 점수: score_aggregate.sql과 같은 규칙(지표 가중 평균, 재무 3년 미만이면 저평가 축소) →
      유니버스 팩터 점수의 평균·표준편차로 재표준화 → 종합 = Σ 가중치 × 팩터(빠진 팩터 0), 저평가·수익성 필수
   5) 0~100: 유니버스 종합 점수 사이 순위로 같은 시장 백분위 100 × (n − 순위) / n (n = 유니버스 + 이 종목)
@@ -137,7 +138,7 @@ def reference_score(conn: Connection, stock_id: int, country: str, preset: dict)
             v = robust_z(float(r["raw_value"]), universe[m])
             z[m] = max(-3.0, min(0.0 if METRICS[m].penalty_only else 3.0, -v if METRICS[m].direction < 0 else v))
         z_adj[m] = (None if z[m] is None else
-                    z[m] if METRICS[m].factor == "safety" or not theme else neutralize(z[m], group.get(m, []), k))
+                    z[m] if not METRICS[m].neutralize or not theme else neutralize(z[m], group.get(m, []), k))
     raw = {r["metric"]: r["raw_value"] for r in mine}
 
     # 팩터 재표준화: 유니버스(같은 국가·묶음) 팩터 점수의 평균·표본표준편차 — score_aggregate.sql의 fz와 같은 분포
