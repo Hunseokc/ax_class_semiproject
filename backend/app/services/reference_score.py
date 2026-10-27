@@ -184,8 +184,11 @@ def reference_score(conn: Connection, stock_id: int, country: str, preset: dict)
     for f in FACTORS:
         s = factor_score[f]
         ew = weights[f] if use and s is not None else None             # 빠진 팩터는 0(중립)이라 가중치를 다시 나누지 않는다
+        xs, v = dist.get(f, []), raw_factor[f]
+        pct = None if v is None or not xs else 100 * (len(xs) - sum(1 for x in xs if x > v)) / (len(xs) + 1)
         factors[f] = {"score": _q(s), "weight": _q(weights[f], "0.001"), "effective_weight": _q(ew),
-                      "contribution": _q(ew * s) if ew is not None else None, "available": s is not None}
+                      "contribution": _q(ew * s) if ew is not None else None, "available": s is not None,
+                      "percentile": _q(pct, "0.01")}
     dq: dict = {"partition": partition_label(country, family), "family": family, "reference": True,
                 "fy_history": fy_count, "model_version": cfg["model_version"]}
     if missing:

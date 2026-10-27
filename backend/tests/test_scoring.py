@@ -562,6 +562,12 @@ def test_analysis_api_returns_contributions_metrics_and_rank(client, engine, uni
     assert a["rank"]["country"] == "KR" and a["rank"]["total"] == 5 and 1 <= a["rank"]["position"] <= 5
     assert a["score"] == pytest.approx(100 * (5 - a["rank"]["position"]) / 5, abs=0.01)
     assert a["data_quality"]["model_version"] == load_config()["model_version"]
+    # 레이더·요소 카드: 팩터별 같은 시장 백분위, 주 테마(반도체 KR: 1·2) 평균 백분위, 소속 테마 위치(KR 테마 2개 중)
+    assert all(0 <= f["percentile"] < 100 for f in a["factors"].values())
+    assert a["peer_average"]["group_name"] == "반도체" and set(a["peer_average"]["percentiles"]) == set(FACTORS)
+    tp = a["theme_position"]
+    assert tp["group_name"] == "반도체" and tp["themes"] == 2
+    assert {v["total"] for v in tp["factors"].values()} == {2} and all(v["position"] in (1, 2) for v in tp["factors"].values())
     none = client.get(f"{API}/stocks/KOSPI/035720/analysis").json()["attractiveness"]
     assert none["score"] is None and none["rank"] is None and none["preset"]["code"] == "balanced"
     assert all(f["contribution"] is None for f in none["factors"].values())

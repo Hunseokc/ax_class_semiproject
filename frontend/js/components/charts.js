@@ -59,7 +59,7 @@ export const plainAxis = { grid: { display: false }, border: { display: false } 
 export function scoreBadge(score) {
   return score === null || score === undefined
     ? '<span class="score score--none" title="매력도 데이터 부족">–</span>'
-    : `<span class="score" title="매력도 ${score}점 (같은 시장 안 상대적 위치, 투자 권유 아님)">${Math.round(score)}</span>`;
+    : `<span class="score" title="매력도 백분위 ${Math.round(score)} — 같은 시장 상위 ${Math.max(1, Math.ceil(100 - score))}% (투자 권유 아님)">${Math.round(score)}</span>`;
 }
 
 // ---------------------------------------------------------------- 매력도 미니 게이지 (관심종목 카드)

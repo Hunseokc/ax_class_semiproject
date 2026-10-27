@@ -25,7 +25,7 @@ presets:
     weights: {value: 0.05, quality: 0.10, growth: 0.35, safety: 0.10, momentum: 0.40}
   - code: growth
     name: 성장
-    description: 성장성 중심
+    description: 성장성 중심 — 성장 노출일 뿐 기대수익이 아님
     sort_order: 2
     weights: {value: 0.10, quality: 0.20, growth: 0.40, safety: 0.05, momentum: 0.25}
   - code: balanced

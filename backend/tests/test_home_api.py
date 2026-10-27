@@ -76,6 +76,22 @@ def test_attractiveness_reads_latest_stored_score(client, engine):
     assert _ranking(client, "attractiveness", preset="growth")["items"] == []            # 프리셋별 점수
 
 
+def test_attractiveness_ranks_one_scoring_family_at_a_time(client, engine):
+    """금융끼리 매긴 백분위를 일반 기업과 한 줄에 세우지 않는다 — family 탭(D-003)."""
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE peer_groups SET scoring = 'financial' WHERE group_id = 2"))   # 빅테크(AAPL)를 금융 묶음으로
+        conn.execute(text("""
+            INSERT INTO stock_scores (stock_id, as_of, preset_id, score, factor_coverage)
+            SELECT s, :d, (SELECT preset_id FROM scoring_presets WHERE code = 'balanced'), sc, 5
+            FROM (VALUES (3, 96.7), (4, 50.0)) v(s, sc)"""), {"d": D})
+    general = _ranking(client, "attractiveness", "US")
+    assert general["family"] == "general" and [i["ticker"] for i in general["items"]] == ["NVDA"]
+    financial = _ranking(client, "attractiveness", "US", family="financial")
+    assert financial["family"] == "financial" and [i["ticker"] for i in financial["items"]] == ["AAPL"]
+    assert _ranking(client, "volume_surge", "US")["family"] is None
+    assert client.get(f"{API}/home/ranking", params={"kind": "attractiveness", "family": "none"}).status_code == 422
+
+
 def test_ranking_validates_params(client):
     assert client.get(f"{API}/home/ranking", params={"kind": "volume"}).status_code == 422
     assert client.get(f"{API}/home/ranking", params={"kind": "attractiveness", "country": "JP"}).status_code == 422

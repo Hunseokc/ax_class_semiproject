@@ -563,7 +563,7 @@ class HomeRankItem(Schema):
     currency: str
     ticker: str
     name: str
-    value: Num                               # 거래량 급증: 배수(2.4 = 2.4배) / 매력도: 점수(0~100)
+    value: Num                               # 거래량 급증: 배수(2.4 = 2.4배) / 매력도: 같은 시장 백분위(0~100, 80 이상 = 상위 20%)
     as_of: date | None
     is_watched: bool
 
@@ -572,6 +572,7 @@ class HomeRankingOut(Schema):
     kind: Literal["volume_surge", "attractiveness"]
     country: str
     preset: str | None                       # 매력도 순위일 때만
+    family: Literal["general", "financial"] | None = None   # 매력도 순위일 때만 — 점수 묶음이 다른 종목을 한 줄에 세우지 않는다(D-003)
     items: list[HomeRankItem]
 
 

@@ -602,6 +602,7 @@ loadPortfolioWidget();
 
 // ---------------------------------------------------------------- 시장 주목 종목 TOP 5 (GET /home/ranking)
 // 카드 4장 = 순위 기준(거래량 급증·매력도) × 시장(국내·미국). 탭을 오가지 않고 한눈에 비교한다.
+// 매력도 카드는 일반·금융 탭 — 금융은 금융끼리 매긴 백분위라 일반 기업과 한 줄에 세우지 않는다(D-003)
 // 행 = 순위 · 종목명(종목코드·시장 배지, 관심종목이면 ★) · 그 카드의 순위 근거 값 하나. 가격·등락률은 관심종목·리스트에 있으므로 넣지 않는다
 const TOP_KINDS = {
   volume_surge: { eyebrow: "VOLUME SURGE", title: "거래량 급증", empty: "20거래일 거래량이 쌓인 종목이 없습니다" },
@@ -609,13 +610,15 @@ const TOP_KINDS = {
 };
 const TOP_COUNTRIES = { KR: "국내", US: "미국" };
 const TOP_CARDS = ["volume_surge", "attractiveness"].flatMap((kind) => ["KR", "US"].map((country) => ({ kind, country })));
+const TOP_FAMILIES = { general: "일반", financial: "금융" };
+const topFamily = { KR: "general", US: "general" };     // 매력도 카드마다 고른 묶음
 
 function topValue(kind, s) {
   if (kind === "volume_surge") {
     return `<span class="row__value num" title="당일 거래량 ÷ 직전 20거래일 평균 (기준일 ${esc(shortDate(s.as_of))})">${num(s.value, 1)}배</span>`;
   }
   const band = scoreBand(s.value);
-  return `<span class="row__value top-score"${band ? ` title="${esc(band.label)}"` : ""}>${band
+  return `<span class="row__value top-score"${band ? ` title="${esc(band.label)} — 같은 시장 상위 ${Math.max(1, Math.ceil(100 - s.value))}%"` : ""}>${band
     ? `<i style="background:var(--gauge-${band.index})" aria-hidden="true"></i>` : ""}<strong class="num">${Math.round(s.value)}</strong>${band
     ? `<span class="sr-only">${esc(band.label)}</span>` : ""}</span>`;
 }
@@ -634,14 +637,20 @@ function topRow(kind, s) {
 $("#top-list").replaceChildren(...TOP_CARDS.map(({ kind, country }) => h(`<section class="card top-card" aria-labelledby="h-top-${kind}-${country}">
     <p class="top-card__eyebrow">${TOP_KINDS[kind].eyebrow} · ${country}</p>
     <h3 class="top-card__title" id="h-top-${kind}-${country}">${TOP_KINDS[kind].title} <span>${TOP_COUNTRIES[country]}</span></h3>
+    ${kind === "attractiveness" ? `<div class="top-card__tabs" data-family-tabs="${country}"></div>` : ""}
     <div class="top-card__body" data-top="${kind}-${country}"></div>
   </section>`)));
+for (const country of ["KR", "US"]) {
+  $("#top-list").querySelector(`[data-family-tabs="${country}"]`).append(
+    segmented(Object.entries(TOP_FAMILIES).map(([value, label]) => ({ value, label })), topFamily[country],
+      (v) => { topFamily[country] = v; loadTop("attractiveness", country); }, { label: `매력도 순위 묶음 (${TOP_COUNTRIES[country]})` }));
+}
 
-function loadTop(onlyKind) {
-  return Promise.all(TOP_CARDS.filter((c) => !onlyKind || c.kind === onlyKind).map(({ kind, country }) =>
+function loadTop(onlyKind, onlyCountry) {
+  return Promise.all(TOP_CARDS.filter((c) => (!onlyKind || c.kind === onlyKind) && (!onlyCountry || c.country === onlyCountry)).map(({ kind, country }) =>
     load($("#top-list").querySelector(`[data-top="${kind}-${country}"]`), {
       skeleton: skeleton("row", 5),
-      fetch: async () => (await getHomeRanking(kind, country, 5)).items,
+      fetch: async () => (await getHomeRanking(kind, country, 5, topFamily[country])).items,
       render: (items) => {
         const ul = h('<ul class="list"></ul>');
         ul.append(...items.map((s) => topRow(kind, s)));
