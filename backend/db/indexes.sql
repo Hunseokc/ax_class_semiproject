@@ -41,3 +41,4 @@ CREATE INDEX ix_disclosures_stock_filed ON disclosures (stock_id, filed_at DESC)
 
 -- 전체 최신 매력도 계산일(MAX(as_of)) — 화면·목록은 이 날의 점수만 읽는다(migration 013, 점수 이력이 매일 쌓임)
 CREATE INDEX ix_scores_as_of ON stock_scores (as_of);
+CREATE INDEX ix_sanity_runs_as_of ON sanity_runs (as_of, environment);   -- 배포 sanity가 그 계산일에 돌았는지(D-030)

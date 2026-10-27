@@ -8,3 +8,5 @@
 backend/data
 certs
 개발산출물
+# 배포 DB에서도 매력도 sanity를 돌린다(검토_장부 D-030) — 산출물 중 sanity 목록만 이미지에 넣는다
+!개발산출물/매력도_검토/sanity_cases.yaml

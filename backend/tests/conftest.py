@@ -33,7 +33,7 @@ from app.services.auth import RefreshStore
 from app.services.hydration import ON_DEMAND
 from tests.fakes import FakeFx, make_providers
 
-TABLES = ["user_preferences", "ingest_cursor", "sector_performance_daily", "market_sentiment_daily", "portfolio_items", "portfolios", "watchlist_items", "users", "ingestion_logs", "fx_rates", "index_daily_prices", "indices", "valuation_snapshots",
+TABLES = ["sanity_runs", "user_preferences", "ingest_cursor", "sector_performance_daily", "market_sentiment_daily", "portfolio_items", "portfolios", "watchlist_items", "users", "ingestion_logs", "fx_rates", "index_daily_prices", "indices", "valuation_snapshots",
           "daily_prices", "peer_group_members", "peer_groups", "stocks", "markets"]
 
 TODAY = date.today()

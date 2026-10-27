@@ -301,6 +301,25 @@ class StockScore(Base):
     __table_args__ = (CheckConstraint("score BETWEEN 0 AND 100"), CheckConstraint("factor_coverage BETWEEN 0 AND 5"))
 
 
+class SanityRun(Base):
+    """sanity 실행 기록(migration 015, D-030) — 통과·감수한 실패·target 실패·미검증·required 실패."""
+    __tablename__ = "sanity_runs"
+    run_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ran_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    as_of: Mapped[date] = mapped_column(Date)
+    model_version: Mapped[str | None] = mapped_column(String(40))
+    environment: Mapped[str] = mapped_column(String(20))
+    passed: Mapped[int] = mapped_column(Integer)
+    known_fail: Mapped[int] = mapped_column(Integer)
+    target_fail: Mapped[int] = mapped_column(Integer)
+    unverified: Mapped[int] = mapped_column(Integer)
+    required_fail: Mapped[int] = mapped_column(Integer)
+    ok: Mapped[bool] = mapped_column(Boolean)
+    results: Mapped[list] = mapped_column(JSONB)
+    report: Mapped[str] = mapped_column(Text)
+    __table_args__ = (CheckConstraint("environment IN ('dev', 'deploy')"),)
+
+
 # ── [S5-D] 데이터 유효기간·밸류에이션 기초값 ──
 class DataFreshness(Base):
     __tablename__ = "data_freshness"

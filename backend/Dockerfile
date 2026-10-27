@@ -27,6 +27,8 @@ COPY backend/db ./db
 COPY backend/sample_data ./sample_data
 COPY backend/tests ./tests
 COPY frontend ./frontend
+# 매력도 회귀 테스트 목록 — 배포 DB에서 sanity Job(python -m app.ingest sanity --save --env deploy)이 읽는다(D-030)
+COPY ["개발산출물/매력도_검토/sanity_cases.yaml", "./개발산출물/매력도_검토/sanity_cases.yaml"]
 
 USER app
 EXPOSE 8000
