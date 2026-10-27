@@ -175,6 +175,9 @@ secondary_themes:
 # 수집 적재 공통
 ingest:
   flush_every: 20         # 재무·공시 적재를 몇 개 회사마다 한 트랜잭션으로 저장할지 (D3). 상세 수집(회사 1개)은 결과가 같다
+  # 지주사 재편 등으로 SEC CIK가 바뀐 종목 → 이전 CIK. 새 CIK companyfacts에 없는 해를 이전 CIK로 채운다(D-010)
+  sec_predecessor_cik:
+    XOM: "0000034088"     # 2026 ExxonMobil Holdings Corp(0002115436) 재편 — Exxon Mobil Corporation의 FY 재무
 
 # 백그라운드 재무 적재(상장 목록 종목을 우선순위대로 미리 받기, app/ingest/background.py)
 # 단위: ingestion_logs 행 수(회사 1건 = 1행 ≈ DART 호출 2~5번). 상세 화면·07:00 갱신이 쓴 행도 같이 센다

@@ -28,13 +28,42 @@ CONCEPTS: list[tuple[str, tuple[str, ...], bool]] = [
     ("revenue", ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet",
                  "RevenueFromContractWithCustomerIncludingAssessedTax"), True),
     ("operating_income", ("OperatingIncomeLoss",), True),
-    ("net_income", ("NetIncomeLoss",), True),
+    # 지배주주 순이익 우선. 비지배 포함 순이익(ProfitLoss)은 지배주주 값을 신고하지 않는 해만(OSK·AEIS — D-010)
+    ("net_income", ("NetIncomeLoss", "NetIncomeLossAvailableToCommonStockholdersBasic", "ProfitLoss"), True),
     ("total_assets", ("Assets",), False),
     ("total_equity", ("StockholdersEquity",
                       "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"), False),
     ("total_debt", ("Liabilities",), False),
 ]
+# 기본 개념이 없을 때 계산으로 채우는 데 쓰는 보조 개념 (derive_missing, D-010 — CLX·EMN·GTX는 영업이익 태그가 없다)
+AUX_CONCEPTS: list[tuple[str, tuple[str, ...], bool]] = [
+    ("pretax", ("IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+                "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"), True),
+    ("interest", ("InterestExpense", "InterestExpenseNonoperating", "InterestExpenseDebt", "InterestAndDebtExpense"), True),
+    ("liabilities_and_equity", ("LiabilitiesAndStockholdersEquity",), False),
+    ("equity_with_nci", ("StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",), False),
+]
 ANNUAL_FORMS = {"10-K", "10-K/A"}
+
+
+def derive_missing(vals: dict, aux: dict, notes: list[str]) -> None:
+    """기본 개념이 비었을 때만 채운다(제자리 수정).
+    영업이익 ≈ 세전이익 + 이자비용(EBIT 근사 — 영업외 손익이 섞인다), 부채 = 부채와자본총계 − 자본(비지배 포함)."""
+    if vals.get("operating_income") is None and aux.get("pretax") is not None:
+        interest = aux.get("interest")
+        vals["operating_income"] = aux["pretax"] + (interest or 0)
+        notes.append("operating_income←세전이익+이자비용" if interest is not None else "operating_income←세전이익")
+    equity = aux.get("equity_with_nci") if aux.get("equity_with_nci") is not None else vals.get("total_equity")
+    if vals.get("total_debt") is None and aux.get("liabilities_and_equity") is not None and equity is not None:
+        vals["total_debt"] = aux["liabilities_and_equity"] - equity
+        notes.append("total_debt←부채와자본총계−자본")
+
+
+def predecessor_cik(ticker: str) -> str | None:
+    """지주사 재편 등으로 CIK가 바뀐 종목의 이전 CIK(config/universe.yaml ingest.sec_predecessor_cik). 새 CIK에 없는 해를 채운다."""
+    from app.ingest.universe import load_universe     # 순환 import 방지
+    v = (load_universe().ingest.get("sec_predecessor_cik") or {}).get(ticker)
+    return str(v).zfill(10) if v else None
 
 # 상장 보통주 목록 필터 (company_tickers_exchange.json)
 EXCHANGES = {"Nasdaq": "NASDAQ", "NYSE": "NYSE"}               # OTC·CBOE 등은 제외
@@ -119,8 +148,18 @@ class SecClient:
         hit = self._facts_cache.get(cik)
         if hit is None:
             hit = self._json(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json")
-            self._facts_cache = {cik: hit}
+            if len(self._facts_cache) >= 2:                  # 지금 CIK + 이전 CIK까지만 들고 있는다
+                self._facts_cache = {}
+            self._facts_cache[cik] = hit
         return hit
+
+    def _gaaps(self, stock: StockRef) -> list[dict]:
+        """us-gaap 사실 묶음(우선순위 순). 이전 CIK가 설정돼 있으면 뒤에 붙여 새 CIK에 없는 해만 채운다(XOM — D-010)."""
+        out = [self._facts(stock.cik).get("facts", {}).get("us-gaap", {})]
+        old = predecessor_cik(stock.ticker)
+        if old and old != stock.cik:
+            out.append(self._facts(old).get("facts", {}).get("us-gaap", {}))
+        return out
 
     # ── [S5-D] 시장 전체 발행주식수·업종·기초값 ──
     def _frame(self, concept: str, period: str) -> list[dict]:
@@ -185,15 +224,26 @@ class SecClient:
             if rows:
                 best = max(rows, key=lambda e: (e["end"], e.get("filed", "")))
                 shares, shares_as_of = int(best["val"]), date.fromisoformat(best["end"])
-        dps, dps_end = annual_dps(facts.get("us-gaap", {}))
+        dps, dps_end = None, None
+        for gaap in self._gaaps(stock):                     # 새 CIK에 배당이 없으면 이전 CIK
+            dps, dps_end = annual_dps(gaap)
+            if dps is not None:
+                break
         return ValuationBase(shares_outstanding=shares if shares and shares > 0 else None, shares_as_of=shares_as_of,
                              dps=dps if dps is None or dps >= 0 else None, dps_period_end=dps_end)
 
     def get_annual_financials(self, stock: StockRef, years: int) -> list[Financial]:
-        facts = self._facts(stock.cik)
-        gaap = facts.get("facts", {}).get("us-gaap", {})
+        gaaps = self._gaaps(stock)
 
         def series(concept: str, duration: bool) -> dict[date, tuple[Decimal, str]]:
+            """결산일 → (값, 제출일). 이전 CIK(gaaps[1:])는 앞 묶음에 없는 결산일만 채운다."""
+            out: dict[date, tuple[Decimal, str]] = {}
+            for gaap in gaaps:
+                for end, v in _series(gaap, concept, duration).items():
+                    out.setdefault(end, v)
+            return out
+
+        def _series(gaap: dict, concept: str, duration: bool) -> dict[date, tuple[Decimal, str]]:
             """결산일 → (값, 제출일). 같은 결산일은 가장 최근 제출값(재작성 반영)."""
             out: dict[date, tuple[Decimal, str]] = {}
             for e in gaap.get(concept, {}).get("units", {}).get("USD", []):
@@ -214,7 +264,7 @@ class SecClient:
             return out
 
         merged: dict[str, dict[date, tuple[Decimal, str]]] = {}
-        for col, concepts, duration in CONCEPTS:
+        for col, concepts, duration in CONCEPTS + AUX_CONCEPTS:
             merged[col] = {}
             for c in concepts:                      # 우선순위 높은 개념이 먼저 채움
                 for end, val in series(c, duration).items():
@@ -229,6 +279,8 @@ class SecClient:
                 vals[col] = hit[0] if hit else None
                 if hit and hit[1] != concepts[0]:
                     notes.append(f"{col}←{hit[1]}")
+            derive_missing(vals, {col: merged[col][end][0] if end in merged[col] else None
+                                  for col, _, _ in AUX_CONCEPTS}, notes)
             out.append(Financial(period_end=end, period_type="FY", data_source="SEC",
                                  accounting_std="US-GAAP", notes=notes, **vals))
         return out

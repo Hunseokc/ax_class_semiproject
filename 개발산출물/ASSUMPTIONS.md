@@ -67,6 +67,7 @@
 | A-38 | KRX가 제공하는 EPS의 산정 기준(연결/별도, 기준 연도)은 DART 연결 지배주주 순이익/상장주식수와 다르다(삼성전자 KRX EPS 6,605 vs DART 2025 기준 약 7,571). KRX 원본 값을 그대로 저장하며, ROE 등 재무 지표는 DART 재무로 따로 계산한다 | 미확인 | 적재 결과 비교 |
 | A-39 | 미국 밸류에이션 `as_of`는 적재 시각이 아니라 해당 종목의 최신 거래일(현지) | 결정 | 시세와 기준일 일치 |
 | A-40 | SEC FY 선택: form 10-K/10-K/A, 기간형 항목은 기간 350~380일(52/53주 회계연도 허용), 같은 결산일은 가장 최근 제출값(재작성 반영). 개념 우선순위 매출 `RevenueFromContractWithCustomerExcludingAssessedTax` → `Revenues` → …, 자본 `StockholdersEquity` → 비지배지분 포함 자본. 빈 값은 같은 결산기(±7일)의 yfinance 값으로 보완 | 결정 | GOOGL·NVDA는 `Revenues`, AVGO는 비지배 포함 자본, AMZN·AMD 부채총계는 yfinance로 보완됨 |
+| A-40b | SEC 태그 보완: 순이익 `NetIncomeLoss` → `NetIncomeLossAvailableToCommonStockholdersBasic` → `ProfitLoss`, 영업이익 태그가 없으면 세전이익 + 이자비용(EBIT 근사), 부채 태그가 없으면 부채와자본총계 − 자본(비지배 포함), CIK가 바뀐 종목은 이전 CIK로 빈 해 보완 | 결정 | 2026-10-27 D-010. CLX·EMN·GTX·EXP·OSK·AEIS·XOM 재수집으로 3개 FY 확인(개발 DB) |
 | A-41 | 보완 후에도 남은 NULL 3건: AVGO FY2021 순이익, AMZN·AMD FY2021 부채총계 (yfinance는 최근 4개 연도만 제공). 값을 추정하지 않고 NULL 유지 | 확인 | 적재 결과 |
 | A-42 | 이상 행 격리: 행을 버리지 않고 `backend/data/quarantine/{job}_{날짜}.csv`에 원본 행·사유를 남기고, 해당 작업의 `ingestion_logs.error`에 "격리 N행 {사유: 건수} → 파일" 요약을 기록한다(status는 SUCCESS). 2026-10-06 전체 적재에서 격리 0행 | 결정 | 명세 "이상 행 격리(사유 로그)" |
 | A-43 | `ingestion_logs.error`는 실패 사유 외에 성공 작업의 추적 메모(대체 계정 사용, 수집 구간 등)도 담는다 | 결정 | 별도 컬럼 추가 없이 추적성 확보 |
