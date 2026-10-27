@@ -38,6 +38,7 @@ rules:
   - {id: TRAP-penalty-only, check: 함정 신호 z_adj ≤ 0, status: required}
   - {id: WEAK-theme-first, check: 약한 테마 1등 수, status: target}
   - {id: THEME-position-raw, check: 테마 위치 = 중립화 전 테마 평균 순위, status: required}
+  - {id: CLIP-order, check: 원값 상위 7% 안 순서, status: target}
 """, encoding="utf-8")
     with engine.connect() as conn:
         report, ok = run(conn, cases)
@@ -47,3 +48,4 @@ rules:
     assert "| TRAP-penalty-only | required | 통과 |" in report and "양수 0" in report     # 중립화하지 않아 감점만(D-018)
     assert "| WEAK-theme-first | target | 통과 |" in report and "(기록만)" in report
     assert "| THEME-position-raw | required | 통과 |" in report and "차이 0" in report    # 화면 테마 위치 = 중립화 전(D-020)
+    assert "| CLIP-order | target |" in report                       # 픽스처는 지표당 3~4종목이라 상위 7%가 3개 미만 → 지표 없음

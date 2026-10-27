@@ -325,7 +325,7 @@ CREATE TABLE stock_metric_values (
   metric    VARCHAR(24)  NOT NULL,                                -- earnings_yield, book_yield, roe …
   factor    VARCHAR(12)  NOT NULL CHECK (factor IN ('value','quality','growth','safety','momentum')),
   raw_value NUMERIC,                                              -- 계산 불가면 NULL
-  z_raw     NUMERIC(8,4),                                         -- 국가 내 로버스트 Z(방향 반영, ±3 클리핑)
+  z_raw     NUMERIC(8,4),                                         -- 국가·묶음 내 순위 정규 점수 RN(방향 반영, 모델 v2.2)
   z_adj     NUMERIC(8,4),                                         -- 주 그룹 축소 추정으로 섹터 중립화한 Z
   PRIMARY KEY (stock_id, as_of, metric)
 );

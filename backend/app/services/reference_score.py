@@ -3,8 +3,8 @@
 유니버스(노출 종목 + 비교군)의 점수는 그대로 두어 재현성을 지키고(클릭한 종목에 따라 점수가 바뀌지 않음),
 listed 종목은 요청할 때마다 계산해 저장하지 않는다.
   1) 지표 원값: score_metrics.sql을 그 종목만으로 실행(묶음 규칙 — 금융 — 도 같다)
-  2) Z: 같은 as_of·같은 국가·같은 점수 묶음(family) 유니버스 원값의 중앙값·MAD로 로버스트 Z
-     (score_zscore.sql과 같은 규칙, 방향 반영, ±3, 감점 전용 지표는 0 이하)
+  2) Z: 같은 as_of·같은 국가·같은 점수 묶음(family) 유니버스 원값 + 이 종목 안 순위로 순위 정규 점수(RN)
+     (score_rank_normal.sql과 같은 규칙 — 같은 값은 평균 순위, 방향 반영, 감점 전용 지표는 0 이하)
   3) 섹터 중립화: 주 테마가 있으면 같은 국가·같은 주 테마 유니버스 구성원의 z_raw 평균(자기 자신 포함)을
      축소 추정으로 뺀다(score_neutralize.sql과 같은 규칙, Metric.neutralize = False인 지표 — 안정성·세후 보수 이익·
      가치 함정 신호 — 는 제외, ±3). 주 테마가 없으면 z_adj = z
@@ -26,10 +26,8 @@ from app.ingest.sectors import theme_by_name
 from app.queries import sql
 from app.services.data_quality import fiscal_year_mix
 from app.services.scoring import (FACTORS, METRICS, MIN_FACTORS, REQUIRED_FACTORS, load_config, metric_params, null_reason,
-                                  partition_label, score_badges)
+                                  partition_label, rank_normal, score_badges)
 
-MAD_SCALE = 1.4826
-MIN_ROBUST_N = 5
 UNSCORED_DEFAULT = "업종 특성상 이익·매출 기준인 매력도 점수를 내지 않습니다."
 FAMILY_WORD = {"general": "", "financial": " 금융"}
 
@@ -56,17 +54,12 @@ def _q(x: float | None, places: str = "0.0001") -> Decimal | None:
     return None if x is None else Decimal(str(x)).quantize(Decimal(places))
 
 
-def robust_z(x: float, values: list[float]) -> float:
-    """score_zscore.sql과 같은 규칙: 표본 5개 이상이고 MAD > 0이면 로버스트 Z, 아니면 평균·표본표준편차 Z, 그것도 안 되면 0."""
-    n = len(values)
-    if n == 0:
-        return 0.0
-    m = statistics.median(values)
-    mad = statistics.median(abs(v - m) for v in values)
-    if n >= MIN_ROBUST_N and mad > 0:
-        return (x - m) / (MAD_SCALE * mad)
-    sd = statistics.stdev(values) if n > 1 else 0.0
-    return (x - statistics.fmean(values)) / sd if sd > 0 else 0.0
+def rank_p(x: float, values: list[float]) -> float:
+    """score_rank_normal.sql과 같은 규칙: 유니버스 값 + 이 종목(n개) 안 오름차순 평균 순위 r → (r − 0.5) / n.
+    자기와 같은 값이 유니버스에 e개면 자리 less+1 ~ less+e+1의 평균 = less + 1 + e / 2."""
+    less = sum(1 for v in values if v < x)
+    equal = sum(1 for v in values if v == x)
+    return (less + 1 + equal / 2 - 0.5) / (len(values) + 1)
 
 
 def factor_scores(z_adj: dict[str, float | None], fy_count: int | None) -> dict[str, float | None]:
@@ -135,8 +128,7 @@ def reference_score(conn: Connection, stock_id: int, country: str, preset: dict)
             z[m] = None
             missing[m] = "같은 시장 비교군에 이 지표 값이 없음"
         else:
-            v = robust_z(float(r["raw_value"]), universe[m])
-            z[m] = max(-3.0, min(0.0 if METRICS[m].penalty_only else 3.0, -v if METRICS[m].direction < 0 else v))
+            z[m] = rank_normal(rank_p(float(r["raw_value"]), universe[m]), m)
         z_adj[m] = (None if z[m] is None else
                     z[m] if not METRICS[m].neutralize or not theme else neutralize(z[m], group.get(m, []), k))
     raw = {r["metric"]: r["raw_value"] for r in mine}

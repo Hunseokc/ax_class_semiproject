@@ -358,3 +358,10 @@ rules:
     independent: false
     issue: R2-3, D-020
     why: 미국 바이오 성장성 화면 26위 vs 중립화 전 17위
+
+  - id: CLIP-order
+    check: 지표마다 같은 시장·묶음 원값 상위 7% 안에서 최종 z 순서와 원값 순서 Spearman ≥ 0.5
+    status: required
+    independent: false
+    issue: R2-1, D-019
+    why: 수정 1 모델 −0.47~0.31 (SNDK +1,093%가 묶음 16위). 회귀 방지용 — RN이 낫다는 근거로 세지 않는다
