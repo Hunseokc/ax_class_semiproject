@@ -150,7 +150,7 @@ financial_statements FY                  20896
 - 데이터를 처음부터 다시 만들 때는 `init-db --reset` → `master --offline` → `import-sample` → `seed-demo` 순서다. `--reset`은 DB를 통째로 비운다.
 
 **배포**: 서비스와 Jobs는 같은 이미지(`asia-northeast3-docker.pkg.dev/stockmind-512107/stockmind/api:<커밋>-<MMDDHHMM>`)를 쓴다.
-- 지금 배포된 이미지: 서비스·Jobs 3개 모두 `api:7c2248d-10271134`(2026-10-27, 매력도 모델 v2 — PR #115).
+- 지금 배포된 이미지: 서비스·Jobs 3개 모두 `api:33419c8-10271544`(2026-10-27, 매력도 모델 v2.2 — 수정 2 PR #117~#119).
 - Cloud Build는 쓰지 않는다. 로컬에서 빌드해 올린다.
 
 ```bash
@@ -181,6 +181,13 @@ done
 4. `master --offline` — **테마 설정(scoring none·새 테마)은 이 명령의 sync_themes로만 peer_groups에 들어간다.** `benchmark`만 돌리면 지주회사가 계속 general로 남는다
 5. `benchmark --reselect` — 지주회사·상품 신탁이 표본에서 빠지고 v2 점수 계산
 6. 확인: SK스퀘어·GLD는 점수 없이 테마 사유, HLN은 `score_null_code = no_financials`, MU 가치 17/277·결산 시점 배지, 다우기술 금융 2/30
+
+**4차 적용 기록 (2026-10-27)** — 매력도 모델 v2.2(수정 2: D-018 V1·D-020 테마 위치·D-019 RN). 스키마 변경 없음(migrate 불필요).
+1. 이미지 push → `gcloud run deploy stockmind`(리비전 stockmind-00016-9sp) → Jobs 3개 `--image`
+2. `gcloud run jobs execute stockmind-benchmark --args="python,-m,app.ingest,scores" … --wait` — 배포 DB 점수 v2.2 재계산
+3. 확인(API): 모델 `v2.2-2026-10-27`, MU 가치 12/277(개발 DB와 같음), 한일홀딩스 가치 42/300, 가치 함정 신호 z_adj ≤ 0, NVDA 테마 위치에 주가 흐름(반도체 3/32)
+4. sanity 목록(`개발산출물/`)은 이미지에 없어(.dockerignore) 배포 DB 전체 sanity는 돌리지 않았다
+- Claude Code 자동 모드: 허용 규칙이 Bash(`*gcloud* run deploy stockmind *` 등)이면 Bash 도구로, **파이프 없이** 한 명령씩 실행해야 규칙에 맞는다(`| tail`이 붙으면 명령이 둘로 나뉘어 막힘, PowerShell 도구 호출은 Bash 규칙에 안 맞음).
 
 > 이 절차는 2026-10-22 배포 상태(이미지 태그 형식, Cloud Build 미사용, 서비스·Job이 같은 이미지)를 조회해 맞춘 것이다. 레포에는 배포 스크립트가 없으므로, 실제로 쓰던 명령과 다르면 이 절을 고친다.
 
