@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 data/
 .DS_Store
+*.ps
 
 # 실행 로그
 *.log
