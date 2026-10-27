@@ -1,6 +1,6 @@
 """매력도 다중 팩터 모델 v2 손계산 검증 (개발산출물/09, 검토_장부 D-002·D-003·D-010).
 
-단계별: 로버스트 Z·부호 반전·±3 클리핑·MAD=0 대체·감점 전용 지표 / 축소 계수 n/(n+k) /
+단계별: 순위 정규 점수(RN)·부호 반전·같은 값 평균 순위·감점 전용 지표(D-019) / 축소 계수 n/(n+k)·중립화 안 하는 지표(D-018) /
         팩터 가중 평균·이력 축소·재표준화·빠진 팩터 0·필수 팩터 / 같은 시장 백분위.
 전체: 시세·재무·밸류에이션 픽스처에서 지표 원값 → Z → 점수를 파이썬 참조 구현과 비교, 경계 사례, 프리셋, API.
 """
@@ -46,47 +46,52 @@ def read(conn, col: str, metric: str, as_of=D) -> dict[int, float | None]:
     return {r[0]: (float(r[1]) if r[1] is not None else None) for r in rows}
 
 
-# ------------------------------------------------------------------ 2단계: 로버스트 Z
-def test_robust_z_sign_flip_and_clipping(engine):
-    vals = {1: 0.10, 2: 0.12, 5: 0.08, 6: 0.11, 7: 0.50}       # 중앙값 0.11, |편차| 중앙값(MAD) 0.01
+# ------------------------------------------------------------------ 2단계: 순위 정규 점수(RN, D-019)
+def rn(rank: float, n: int) -> float:
+    return statistics.NormalDist().inv_cdf((rank - 0.5) / n)
+
+
+def test_rank_normal_keeps_order_and_flips_sign(engine):
+    """z = Φ⁻¹((순위 − 0.5) / n) — 극단값도 순위만큼만 벌어져 자르지 않는다. 방향 −는 부호 반대."""
+    vals = {1: 0.10, 2: 0.12, 5: 0.08, 6: 0.11, 7: 0.50}       # 오름차순 순위 5·1·6·2·7
     with engine.begin() as conn:
         add_kr_stocks(conn, [5, 6, 7])
         put_raw(conn, "return_on_assets", vals)                               # 방향 +
         put_raw(conn, "volatility", vals)                        # 방향 −
         normalize(conn, D, K)
         roe, vol = read(conn, "z_raw", "return_on_assets"), read(conn, "z_raw", "volatility")
-    s = 1.4826 * 0.01
-    assert roe[1] == pytest.approx((0.10 - 0.11) / s, abs=1e-4)          # −0.6745
-    assert roe[5] == pytest.approx((0.08 - 0.11) / s, abs=1e-4)          # −2.0235
-    assert roe[6] == 0 and roe[7] == 3                                    # 26.3 → 3으로 클리핑
-    assert vol[1] == pytest.approx(-roe[1], abs=1e-4) and vol[7] == -3   # 부호 반전 후 클리핑
+    for sid, r in {5: 1, 1: 2, 6: 3, 2: 4, 7: 5}.items():
+        assert roe[sid] == pytest.approx(rn(r, 5), abs=1e-4), sid
+        assert vol[sid] == pytest.approx(-rn(r, 5), abs=1e-4), sid
+    assert roe[6] == 0 and roe[7] == pytest.approx(1.2816, abs=1e-4)       # 0.50(다른 값의 4배)도 1.28
 
 
-def test_mad_zero_and_small_sample_fall_back_to_mean_sd(engine):
+def test_rank_normal_ties_and_small_samples(engine):
     with engine.begin() as conn:
         add_kr_stocks(conn, [5, 6, 7])
-        put_raw(conn, "return_on_assets", {1: 1, 2: 1, 5: 1, 6: 1, 7: 5})               # MAD = 0 → 평균·표준편차
-        put_raw(conn, "book_yield", {3: 1, 4: 3})                          # US 2개(표본 < 5)
-        put_raw(conn, "operating_margin", {1: 2, 2: 2, 5: 2})               # 표준편차 0 → Z = 0
-        put_raw(conn, "momentum", {3: 0.1})                                 # 표본 1개 → Z = 0
+        put_raw(conn, "return_on_assets", {1: 1, 2: 1, 5: 1, 6: 1, 7: 5})               # 같은 값 4개 → 평균 순위 2.5
+        put_raw(conn, "book_yield", {3: 1, 4: 3})                          # US 2개
+        put_raw(conn, "operating_margin", {1: 2, 2: 2, 5: 2})               # 모두 같은 값 → 0
+        put_raw(conn, "momentum", {3: 0.1})                                 # 표본 1개 → 0
         normalize(conn, D, K)
         roe, by = read(conn, "z_raw", "return_on_assets"), read(conn, "z_raw", "book_yield")
         opm, mom = read(conn, "z_raw", "operating_margin"), read(conn, "z_raw", "momentum")
-    sd = statistics.stdev([1, 1, 1, 1, 5])
-    assert roe[7] == pytest.approx((5 - 1.8) / sd, abs=1e-4) and roe[1] == pytest.approx((1 - 1.8) / sd, abs=1e-4)
-    assert by[4] == pytest.approx(1 / math.sqrt(2), abs=1e-4) and by[3] == pytest.approx(-1 / math.sqrt(2), abs=1e-4)
+    assert all(roe[s] == pytest.approx(rn(2.5, 5), abs=1e-4) for s in (1, 2, 5, 6)) and roe[7] == pytest.approx(rn(5, 5), abs=1e-4)
+    assert by[4] == pytest.approx(rn(2, 2), abs=1e-4) and by[3] == pytest.approx(rn(1, 2), abs=1e-4)
     assert set(opm.values()) == {0} and mom[3] == 0
+    from app.services.reference_score import rank_p                       # 상장 종목 참고 점수도 같은 평균 순위
+    assert rank_p(1, [1, 1, 1, 5]) == pytest.approx((2.5 - 0.5) / 5) and rank_p(5, [1, 1, 1, 1]) == pytest.approx(0.9)
 
 
 def test_penalty_only_metric_is_clipped_at_zero(engine):
-    """가치 함정 신호는 나쁠 때만 깎는다: Z를 [−3, 0]으로 자른다."""
+    """가치 함정 신호는 나쁠 때만 깎는다: RN z를 0 이하로 자른다."""
     with engine.begin() as conn:
         add_kr_stocks(conn, [5, 6, 7])
-        put_raw(conn, "trap_signal", {1: 0.2, 2: 0.6, 5: 0.8, 6: 1.0, 7: 0.4})   # 중앙값 0.6, MAD 0.2
+        put_raw(conn, "trap_signal", {1: 0.2, 2: 0.6, 5: 0.8, 6: 1.0, 7: 0.4})   # 오름차순 1·7·2·5·6
         normalize(conn, D, K)
         z = read(conn, "z_raw", "trap_signal")
-    assert z[1] == pytest.approx((0.2 - 0.6) / (1.4826 * 0.2), abs=1e-4) and z[7] < 0
-    assert z[2] == 0 and z[5] == 0 and z[6] == 0                           # 중앙값 이상은 0(가점 없음)
+    assert z[1] == pytest.approx(rn(1, 5), abs=1e-4) and z[7] == pytest.approx(rn(2, 5), abs=1e-4)
+    assert z[2] == 0 and z[5] == 0 and z[6] == 0                           # 중앙 이상은 0(가점 없음)
 
 
 def test_countries_are_normalized_separately(engine):
@@ -300,21 +305,17 @@ def reference_raw(closes) -> tuple[dict[int, dict[str, float | None]], dict[int,
 
 
 def reference_scores(raw, hist):
-    def zs(vals):
+    def zs(vals):                                                       # 순위 정규 점수(같은 값은 평균 순위)
         xs = list(vals.values())
-        m = statistics.median(xs)
-        mad = statistics.median([abs(x - m) for x in xs])
-        if len(xs) >= 5 and mad > 0:
-            return {k: (x - m) / (1.4826 * mad) for k, x in vals.items()}
-        sd = statistics.stdev(xs) if len(xs) > 1 else 0
-        return {k: (x - statistics.mean(xs)) / sd if sd > 0 else 0.0 for k, x in vals.items()}
+        n = len(xs)
+        return {k: rn(sum(1 for y in xs if y < x) + (sum(1 for y in xs if y == x) + 1) / 2, n) for k, x in vals.items()}
 
     z_raw = {s: {} for s in raw}
     for metric, d in METRICS.items():
         for c in ("KR", "US"):
             vals = {s: raw[s][metric] for s in raw if COUNTRY[s] == c and raw[s][metric] is not None}
             for s, z in (zs(vals) if vals else {}).items():
-                z_raw[s][metric] = round(max(-3, min(0 if d.penalty_only else 3, z * d.direction)), 4)
+                z_raw[s][metric] = round(min(0, z * d.direction) if d.penalty_only else z * d.direction, 4)
     z_adj = {s: {} for s in raw}
     for metric in METRICS:
         for s in raw:
@@ -687,8 +688,8 @@ def test_financial_theme_drops_revenue_metrics_and_scores_separately(engine, uni
     # 금융은 순이익 기준: 총자산 이익률 = 순이익 / 자산
     assert float(mv[(6, "return_on_assets")].raw_value) == pytest.approx(30 / 95)
     assert mv[(1, "operating_margin")].raw_value is not None and st[1]["data_quality"]["partition"] == "KR"
-    # 금융 2종목끼리 표준화: B/P는 표본 2개 → 평균·표준편차 Z = ±1/√2, 백분위는 50(1위)·0(2위)
-    assert {round(float(mv[(s, "book_yield")].z_raw), 4) for s in (5, 6)} == {0.7071, -0.7071}
+    # 금융 2종목끼리 표준화: B/P는 표본 2개 → RN Φ⁻¹(0.25)·Φ⁻¹(0.75) = ∓0.6745, 백분위는 50(1위)·0(2위)
+    assert {round(float(mv[(s, "book_yield")].z_raw), 4) for s in (5, 6)} == {0.6745, -0.6745}
     assert {float(st[s]["score"]) for s in (5, 6) if st[s]["score"] is not None} <= {50.0, 0.0}
 
 

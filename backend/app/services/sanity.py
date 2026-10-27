@@ -540,6 +540,47 @@ def rule_theme_position_raw(d: Data):
     return not diff and checked > 0, f"테마·팩터 {checked}칸 중 차이 {len(diff)} {diff[:6]}"
 
 
+def _ranks(xs: list[float]) -> list[float]:
+    """오름차순 평균 순위(같은 값은 평균)."""
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    out = [0.0] * len(xs)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and xs[order[j + 1]] == xs[order[i]]:
+            j += 1
+        for k in range(i, j + 1):
+            out[order[k]] = (i + j) / 2 + 1
+        i = j + 1
+    return out
+
+
+def spearman(a: list[float], b: list[float]) -> float | None:
+    """순위 상관(같은 값은 평균 순위). 한쪽이 모두 같으면 None."""
+    ra, rb = _ranks(a), _ranks(b)
+    if len(set(ra)) < 2 or len(set(rb)) < 2:
+        return None
+    return st.correlation(ra, rb)
+
+
+def rule_clip_order(d: Data, share: float = 0.07):
+    """지표마다 같은 시장·general 묶음에서 원값(방향 반영) 상위 7% 안의 최종 z(z_adj) 순서가 원값 순서와 Spearman ≥ 0.5인가(D-019).
+    로버스트 Z를 ±3으로 자른 뒤 중립화하면 잘린 묶음 안 순서가 테마 약함 순서가 됐다(라운드 2 R2-1). 상위 값이 모두 같은 지표는 뺀다."""
+    out, worst = [], None
+    for c in ("US", "KR"):
+        for m, md in METRICS.items():
+            lst = [s for s in d.general(c) if m in s.raw and m in s.z_adj]
+            lst.sort(key=lambda s: -md.direction * s.raw[m])
+            top = lst[:math.ceil(share * len(lst))]
+            r = spearman([md.direction * s.raw[m] for s in top], [s.z_adj[m] for s in top]) if len(top) >= 3 else None
+            if r is None:
+                continue
+            out.append((f"{c} {m}", r))
+            worst = r if worst is None else min(worst, r)
+    bad = [f"{k} {r:.2f}" for k, r in out if r < 0.5]
+    return worst is not None and not bad, (f"{len(out)}개 지표 최저 {worst:.2f}" if worst is not None else "지표 없음") +         (f" · 0.5 미만 {bad}" if bad else "")
+
+
 def rule_weak_theme_first(d: Data):
     total, per = weak_theme_firsts(d)
     return True, f"{total}개 (기록만) · " + " ".join(f"{k} {len(v)}{v if v else ''}" for k, v in per.items())
@@ -615,6 +656,7 @@ SPECIAL = {
     "TRAP-penalty-only": lambda d, c: rule_trap(d),
     "WEAK-theme-first": lambda d, c: rule_weak_theme_first(d),
     "THEME-position-raw": lambda d, c: rule_theme_position_raw(d),
+    "CLIP-order": lambda d, c: rule_clip_order(d),
 }
 
 

@@ -2,7 +2,7 @@
 
 계산은 SQL 3단계(app/queries/score_*.sql), 같은 as_of는 한 트랜잭션에서 DELETE 후 INSERT로 재생성한다.
   1) 지표 원값 → stock_metric_values.raw_value (+ 종목별 이어지는 FY 수)
-  2) 국가·점수 묶음(family) 내 로버스트 Z(z_raw) → 주 테마 축소 추정 섹터 중립화(z_adj, 저평가는 B/P만·안정성 제외)
+  2) 국가·점수 묶음(family) 내 순위 정규 점수 RN(z_raw) → 주 테마 축소 추정 섹터 중립화(z_adj, 저평가는 B/P만·안정성 제외)
      — 프리셋과 무관, as_of당 1회
   3) 프리셋별 팩터 점수(이력 축소·재표준화)·종합·같은 시장 백분위(국가·묶음 안) → stock_scores
 점수 묶음(family): 주 테마의 scoring — general / financial(금융끼리). none(리츠·지주회사·상품 신탁)은 점수를 내지 않는다
@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from functools import lru_cache
+from statistics import NormalDist
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -42,7 +43,7 @@ class Metric:
     direction: int                    # +1: 클수록 좋음, −1: 작을수록 좋음
     null_reason: str
     weight: int = 1                   # 팩터 안 가중치(안정성 = 변동성 2 · 부채/자산 1)
-    penalty_only: bool = False        # Z를 0 이하로 자른다(나쁠 때만 깎고 좋을 때는 0)
+    penalty_only: bool = False        # z를 0 이하로 자른다(나쁠 때만 깎고 좋을 때는 0)
     neutralize: bool = True           # 주 테마 섹터 중립화 여부(False면 z_adj = z_raw — 09 4절, D-018)
 
 
@@ -59,8 +60,6 @@ METRICS: dict[str, Metric] = {
     "liab_assets":        Metric("safety", "부채/자산", -1, "재무(부채·자산) 없음", neutralize=False),
     "momentum":           Metric("momentum", "12-1개월 수익률", 1, "일봉 127개 미만"),
 }
-NEGATIVE_METRICS = [k for k, m in METRICS.items() if m.direction < 0]
-PENALTY_ONLY_METRICS = [k for k, m in METRICS.items() if m.penalty_only]
 FIXED_METRICS = [k for k, m in METRICS.items() if not m.neutralize]
 
 
@@ -179,9 +178,23 @@ def insert_metric_values(conn: Connection, as_of: date, cfg: dict | None = None,
     return notes, excluded, history
 
 
+def rank_normal(p: float, metric: str) -> float:
+    """순위 정규 점수 z = Φ⁻¹(p), p = (순위 − 0.5) / n. 방향 −는 부호 반대, 감점 전용 지표는 0 이하(D-019)."""
+    m = METRICS[metric]
+    z = NormalDist().inv_cdf(p) * m.direction
+    return min(0.0, z) if m.penalty_only else z
+
+
 def normalize(conn: Connection, as_of: date, k: float) -> None:
-    """2단계. z_raw(국가·묶음 내 로버스트 Z) → z_adj(주 테마 섹터 중립화, FIXED_METRICS는 그대로)."""
-    conn.execute(sql("score_zscore"), {"as_of": as_of, "negatives": NEGATIVE_METRICS, "penalty_only": PENALTY_ONLY_METRICS})
+    """2단계. z_raw(국가·묶음 내 순위 정규 점수 RN) → z_adj(주 테마 섹터 중립화, FIXED_METRICS는 그대로)."""
+    rows = conn.execute(sql("score_rank_normal"), {"as_of": as_of}).all()
+    if rows:
+        conn.execute(text("""
+            UPDATE stock_metric_values t SET z_raw = x.z
+            FROM unnest(CAST(:ids AS int[]), CAST(:metrics AS text[]), CAST(:zs AS double precision[])) AS x(stock_id, metric, z)
+            WHERE t.as_of = :as_of AND t.stock_id = x.stock_id AND t.metric = x.metric"""),
+            {"as_of": as_of, "ids": [r.stock_id for r in rows], "metrics": [r.metric for r in rows],
+             "zs": [rank_normal(float(r.p), r.metric) for r in rows]})
     conn.execute(sql("score_neutralize"), {"as_of": as_of, "k": k, "fixed": FIXED_METRICS})
 
 

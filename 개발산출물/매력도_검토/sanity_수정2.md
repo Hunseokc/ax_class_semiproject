@@ -108,3 +108,67 @@ required(known_fail 포함) 통과 **35/35**
 | TRAP-penalty-only | required | 통과 | 559종목 중 양수 0 |
 | WEAK-theme-first | target | 통과 | 20개 (기록만) · US위험 1['IRDM'] US성장 2['CRS', 'IRDM'] US균형 3['VZ', 'FTNT', 'IPAR'] US가치 5['T', 'OSK', 'FSLR', 'EXEL', 'DIS'] KR위험 3['007340', '322000', '181710'] KR성장 2['007340', '112610'] KR균형 2['007340', '326030'] KR가치 2['007340', '002380'] |
 | THEME-position-raw | required | 통과 | 테마·팩터 349칸 중 차이 0 [] |
+
+## PR C — 순위 정규 점수 RN(D-019)
+
+**D-019 유지 조건 — 모두 지킴, RN 유지**
+
+| 조건 | 기준 | 결과 |
+|---|---|---|
+| required 전부 통과(MU-value 포함) | 전부 | 36/36, MU 가치 12/277 |
+| R10(D-021 경계) | 이상 ≤ 16 · 거짓 음성 ≤ 27 | 14 · 27 |
+| 이상 + 거짓 음성 | ≤ PR A 측정치 38 + 3 = 41 | 41 (경계) |
+
+> 라운드 2의 'RN + V1' 측정(이상 14 · 거짓 음성 27, MU 가치 12위, R4 국내 3)과 같아, 라운드 2가 측정하지 않은 방식으로 바뀐 것이 아니다 — D-023 연속 라운드 계산은 초기화하지 않는다. 같은 값은 평균 순위로 처리했다.
+> CLIP-order는 회귀 방지용(independent: false)이다. v2.1 방식으로 다시 재면 미국 주가 흐름 −0.47로 실패한다.
+
+### sanity 결과 — 점수 계산일 2026-10-27 · 모델 v2.2-2026-10-27
+
+required(known_fail 포함) 통과 **36/36**
+
+| id | status | 결과 | 실제 값 |
+|---|---|---|---|
+| SIRI-growth | required | 통과 | SIRI: 균형 153/277 가치 158/277 성장 185/277 |
+| RIVN-growth | required | 통과 | RIVN: 균형 255/277 가치 266/277 성장 180/277 |
+| INTC-growth | required | 통과 | INTC: 균형 264/277 가치 262/277 성장 256/277 |
+| LOTTE-HOLDINGS-growth | required | 통과 | 004990: 점수 없음 |
+| ASIANA-growth | required | 통과 | 020560: 균형 286/298 가치 285/298 성장 289/298 |
+| SARAMIN-balanced | required | 통과 | 143240: 균형 69/298 가치 67/298 성장 177/298 |
+| KCC-oneoff-cut | required | 통과 | 순이익/영업이익 3.6배 → e = 0.78 × 영업이익, 지표 0.0903 (기대 0.0903) |
+| MICHANG-oneoff-cut | required | 통과 | 순이익/영업이익 2.0배 → e = 0.78 × 영업이익, 지표 0.1339 (기대 0.1339) |
+| KCC-MICHANG-badge | required | 통과 | 002380 있음 · 003650 있음 |
+| WDC-value | required | 통과 | WDC: 균형 47/277 가치 128/277 성장 13/277 |
+| HANIL-HOLDINGS-value | required | 통과 | 003300: 균형 63/298 가치 41/298 성장 162/298 |
+| HANIL-HOLDINGS-value-strict | required | 통과 | 003300: 균형 63/298 가치 41/298 성장 162/298 |
+| HOME-family-mix | required | 통과 | family 섞임 없음 |
+| SCREEN-no-phi-number | required | 통과 | 화면 코드 확인 |
+| SCREEN-theme-position | required | 통과 | 화면 코드 확인 |
+| SCREEN-theme-position-momentum | required | 통과 | 화면 코드 확인 |
+| GLD-IAU-not-scored | required | 통과 | GLD: 점수 없음 · IAU: 점수 없음 |
+| DAOU-family | required | 통과 | 023590: 균형 5/31 가치 3/31 성장 12/31 |
+| SKSQUARE-not-scored | required | 통과 | 402340: 점수 없음 |
+| SEC-tags-scored | required | 통과 | XOM: 균형 60/277 가치 50/277 성장 136/277 · CLX: 균형 224/277 가치 200/277 성장 212/277 · EMN: 균형 136/277 가치 74/277 성장 190/277 · EXP: 균형 152/277 가치 83/277 성장 210/277 · GTX: 균형 237/277 가치 256/277 성장 203/277 · OSK: 균형 54/277 가치 18/277 성장 90/277 · AEIS: 균형 220/277 가치 212/277 성장 198/277 |
+| DAEHAN-SHIPBUILDING-value | required | 통과 | 439260: 균형 84/298 가치 42/298 성장 133/298 |
+| CJ-LOGISTICS-history | required | 통과 | 이어지는 FY [2025, 2024, 2023] |
+| MU-value | required | 통과 | MU: 균형 1/277 가치 12/277 성장 1/277 |
+| SIRI-value | required | 통과 | SIRI: 균형 153/277 가치 158/277 성장 185/277 |
+| KGSTEEL-value | target | 실패 | 016380: 균형 47/298 가치 6/298 성장 158/298 |
+| T-value | known_fail | 실패(감수 D-001) | T: 균형 26/277 가치 1/277 성장 96/277 |
+| DNAUTO-weak-theme-first | target | 실패 | 007340: 균형 1/298 가치 3/298 성장 5/298 |
+| MSI-balanced | target | 실패 | MSI: 균형 213/277 가치 183/277 성장 221/277 |
+| ADP-balanced | target | 실패 | ADP: 균형 170/277 가치 134/277 성장 188/277 |
+| BUYBACK-vs-DISTRESSED | required | 통과 | MCK -0.3889 · PM -0.2606 vs 잠식+적자 중앙값 -2.2466 (n=1) |
+| R1-oneoff-top10 | required | 통과 | 잘리지 않은 일회성 0개 [] |
+| R2-turnaround-growth | required | 통과 | US 0 [] / KR 0 [] |
+| R3-value-trap | required | 통과 | US 0 [] / KR 1 ['016380'] |
+| R4-cycle-value | target | 통과 | US 1 ['MLI'] / KR 3 ['007340', '016380', '003650'] |
+| R5-fiscal-gap-badge | required | 통과 | 대상 9종목 · 배지 없음 0 [] |
+| R6-score-honesty | required | 통과 | 식 불일치 0 · 종합 순서 뒤집힘 0 · 구간 라벨 불일치 0 |
+| R7-badge-inflation | target | 통과 | US 5.9% / KR 17.0% (원자재 배지 제외) |
+| R8-top10-stability | target | 실패 | US위험 7 US성장 8 US균형 7 US가치 7 KR위험 6 KR성장 7 KR균형 6 KR가치 5 |
+| R9-no-score-loss | required | 통과 | 이전 2026-10-26: 재무 칸 누락으로 잃음 0 [] · 재무 없음(표기 안 함, D-014) 13 ['NGG', 'MUFG', 'ENB', 'CP', 'DEO', 'HLN', 'RYAAY', 'BNTX', 'TM', 'SMFG', 'DRD', 'MESO', 'IPX'] · 점수 없음 테마 12 |
+| R10-independent-benchmark | required | 통과 | 이상 종목 14(≤16) · 우량 거짓 음성 27(≤27) · {'US위험': 1, 'US성장': 1, 'US균형': 1, 'US가치': 0, 'KR위험': 4, 'KR성장': 3, 'KR균형': 2, 'KR가치': 2} |
+| TRAP-penalty-only | required | 통과 | 559종목 중 양수 0 |
+| WEAK-theme-first | target | 통과 | 24개 (기록만) · US위험 2['IRDM', 'LTH'] US성장 2['CRS', 'IRDM'] US균형 4['IPAR', 'VZ', 'NEU', 'CRS'] US가치 5['T', 'FSLR', 'DIS', 'OSK', 'EXEL'] KR위험 3['007340', '457190', '024840'] KR성장 3['007340', '112610', '457190'] KR균형 3['007340', '068270', '011200'] KR가치 2['007340', '068270'] |
+| THEME-position-raw | required | 통과 | 테마·팩터 349칸 중 차이 0 [] |
+| CLIP-order | required | 통과 | 18개 지표 최저 0.56 |
