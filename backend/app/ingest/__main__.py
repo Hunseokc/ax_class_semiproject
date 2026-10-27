@@ -120,6 +120,10 @@ def main(argv: list[str] | None = None) -> int:
     # ── [S4-C] 매력도 ──
     for name in ("scores", "explain"):
         sub.add_parser(name)
+    p = sub.add_parser("sanity", help="매력도 회귀 테스트(개발산출물/매력도_검토/sanity_cases.yaml) — required 실패가 있으면 종료 코드 1")
+    p.add_argument("--cases", type=Path, help="sanity_cases.yaml 경로(기본: 개발산출물/매력도_검토)")
+    p.add_argument("--as-of", type=date.fromisoformat, help="점수 계산일(기본: 최신)")
+    p.add_argument("--out", type=Path, help="결과 마크다운을 이 파일에도 쓴다")
     # ── [S4-D] 비교군 ──
     sub.add_parser("benchmark").add_argument("--reselect", action="store_true", help="시가총액 순위로 지금 다시 고른다")
     sub.add_parser("hydrate").add_argument("tickers", nargs="+")
@@ -208,6 +212,15 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "scores":
         from app.services.scoring import compute_scores
         print("stock_scores rows:", compute_scores(engine))
+    elif args.cmd == "sanity":
+        from app.services.sanity import run as run_sanity
+        with engine.connect() as conn:
+            report, ok = run_sanity(conn, args.cases, args.as_of)
+        print(report)
+        if args.out:
+            args.out.write_text(report + "\n", encoding="utf-8")
+        if not ok:
+            raise SystemExit(1)
     elif args.cmd == "explain":
         from app.ingest import explain
         print(explain.run(engine))
