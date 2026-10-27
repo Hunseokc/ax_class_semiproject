@@ -2,7 +2,8 @@
 
 계산은 SQL 3단계(app/queries/score_*.sql), 같은 as_of는 한 트랜잭션에서 DELETE 후 INSERT로 재생성한다.
   1) 지표 원값 → stock_metric_values.raw_value (+ 종목별 이어지는 FY 수)
-  2) 국가·점수 묶음(family) 내 로버스트 Z(z_raw) → 주 테마 축소 추정 섹터 중립화(z_adj)   — 프리셋과 무관, as_of당 1회
+  2) 국가·점수 묶음(family) 내 로버스트 Z(z_raw) → 주 테마 축소 추정 섹터 중립화(z_adj, 저평가는 B/P만·안정성 제외)
+     — 프리셋과 무관, as_of당 1회
   3) 프리셋별 팩터 점수(이력 축소·재표준화)·종합·같은 시장 백분위(국가·묶음 안) → stock_scores
 점수 묶음(family): 주 테마의 scoring — general / financial(금융끼리). none(리츠·지주회사·상품 신탁)은 점수를 내지 않는다
 정의·근거는 개발산출물/09_매력도_점수_정의서.md (모델 v2 — 검토_장부 D-002·D-003·D-010).
@@ -41,23 +42,25 @@ class Metric:
     null_reason: str
     weight: int = 1                   # 팩터 안 가중치(안정성 = 변동성 2 · 부채/자산 1)
     penalty_only: bool = False        # Z를 0 이하로 자른다(나쁠 때만 깎고 좋을 때는 0)
+    neutralize: bool = True           # 주 테마 섹터 중립화 여부(False면 z_adj = z_raw — 09 4절, D-018)
 
 
 METRICS: dict[str, Metric] = {
-    "conservative_yield": Metric("value", "세후 보수 이익/시총", 1, "재무(이익) 또는 시가총액 없음"),
+    "conservative_yield": Metric("value", "세후 보수 이익/시총", 1, "재무(이익) 또는 시가총액 없음", neutralize=False),
     "book_yield":         Metric("value", "B/P", 1, "BPS 또는 종가 없음"),
     "trap_signal":        Metric("value", "가치 함정 신호(감점만)", 1, "2년 전 FY 없음 또는 계산할 수 있는 신호 3개 미만",
-                                 penalty_only=True),
+                                 penalty_only=True, neutralize=False),
     "return_on_assets":   Metric("quality", "총자산 이익률", 1, "재무(이익·자산) 없음"),
     "operating_margin":   Metric("quality", "영업이익률", 1, "재무 없음 또는 매출 0"),
     "revenue_cagr2":      Metric("growth", "2년 매출 연평균 성장률", 1, "2년 전 FY 없음 또는 2년 전 매출 ≤ 0"),
     "profit_growth2":     Metric("growth", "2년 이익 변화/2년 전 총자산", 1, "2년 전 FY 없음"),
-    "volatility":         Metric("safety", "변동성(1년)", -1, "일봉 253개 미만", weight=2),
-    "liab_assets":        Metric("safety", "부채/자산", -1, "재무(부채·자산) 없음"),
+    "volatility":         Metric("safety", "변동성(1년)", -1, "일봉 253개 미만", weight=2, neutralize=False),
+    "liab_assets":        Metric("safety", "부채/자산", -1, "재무(부채·자산) 없음", neutralize=False),
     "momentum":           Metric("momentum", "12-1개월 수익률", 1, "일봉 127개 미만"),
 }
 NEGATIVE_METRICS = [k for k, m in METRICS.items() if m.direction < 0]
 PENALTY_ONLY_METRICS = [k for k, m in METRICS.items() if m.penalty_only]
+FIXED_METRICS = [k for k, m in METRICS.items() if not m.neutralize]
 
 
 # ------------------------------------------------------------------ 설정·프리셋
@@ -176,9 +179,9 @@ def insert_metric_values(conn: Connection, as_of: date, cfg: dict | None = None,
 
 
 def normalize(conn: Connection, as_of: date, k: float) -> None:
-    """2단계. z_raw(국가·묶음 내 로버스트 Z) → z_adj(주 테마 섹터 중립화)."""
+    """2단계. z_raw(국가·묶음 내 로버스트 Z) → z_adj(주 테마 섹터 중립화, FIXED_METRICS는 그대로)."""
     conn.execute(sql("score_zscore"), {"as_of": as_of, "negatives": NEGATIVE_METRICS, "penalty_only": PENALTY_ONLY_METRICS})
-    conn.execute(sql("score_neutralize"), {"as_of": as_of, "k": k})
+    conn.execute(sql("score_neutralize"), {"as_of": as_of, "k": k, "fixed": FIXED_METRICS})
 
 
 def aggregate_params(as_of: date, history: dict[int, int] | None = None) -> dict:

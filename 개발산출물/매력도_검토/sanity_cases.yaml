@@ -114,10 +114,9 @@ cases:
     ticker: "003300"
     market: KR
     check: value_rank > 20
-    status: known_fail
-    decision: D-001
-    issue: R1-1
-    why: 비지배 몫을 가르려면 비지배지분 순이익 수집 필요
+    status: required
+    issue: R1-1, U-1
+    why: V1(B/P만 중립화)로 이익 쪽 중립화가 빠져 해소. 라운드 2 측정 가치 41/298
 
   # ── P3 홈 순위 묶음 혼합 ──
   - id: HOME-family-mix
@@ -229,6 +228,15 @@ cases:
     issue: P8
     why: EV 분모가 없어서 부채 많은 통신주가 싸 보임
 
+  # ── U-1 테마 중립화 — 약한 테마 1등 ──
+  - id: DNAUTO-weak-theme-first
+    ticker: "007340"   # DN오토모티브
+    market: KR
+    check: value_rank > 5
+    status: target
+    issue: U-1, U-2
+    why: 2차전지 테마(적자·매출 감소) 안 1등이라 중립화로 지표가 부풀려짐. 수정 1 국내 가치 1위, V1 측정 7위
+
   # ── 반대 방향 (우량한데 점수가 낮은 종목) ──
   - id: MSI-balanced
     ticker: MSI
@@ -317,8 +325,22 @@ rules:
     why: 재무 원천이 없는 해외 상장 종목은 "재무 정보가 없어 표기할 수 없습니다"로 막는 것이 설계(D-014)
 
   - id: R10-independent-benchmark
-    check: 11번 5절 독립 기준 이상 종목 수 ≤ 14, 우량 거짓 음성 ≤ 27
+    check: 11번 5절 독립 기준 이상 종목 수 ≤ 16, 우량 거짓 음성 ≤ 27
     status: required
     independent: true
-    issue: D-002
-    why: R11 측정치보다 나빠지면 안 됨
+    issue: D-002, R2-2
+    why: k 3~8 측정 잡음(이상 12~16, 거짓 음성 25~27) 반영 — D-021
+
+  - id: TRAP-penalty-only
+    check: 가치 함정 신호의 최종 값(z_adj) ≤ 0 인 종목 100%
+    status: required
+    independent: false
+    issue: U-1, D-018
+    why: 중립화하지 않아 문자 그대로 감점만. 수정 1 모델은 559종목 중 313종목이 양수
+
+  - id: WEAK-theme-first
+    check: 프리셋 top20(시장 2 × 프리셋 4) 중 '중립화 전 테마 평균 종합 하위 30% 테마의 1등' 수 — 기록만
+    status: target
+    independent: false
+    issue: U-1, D-022
+    why: 정답 값이 없어 추세만 본다. 수정 1 모델 24, V1 측정 20
