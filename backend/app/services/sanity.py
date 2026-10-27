@@ -601,6 +601,14 @@ def case_theme(d: Data, c: dict):
     return (None if missing and not wrong else not wrong), note
 
 
+def case_theme_unjudged(d: Data, c: dict):
+    """D-024 기준으로 판정하지 못한 종목 — 업종 코드 그대로인 지금 주 테마를 보이고 미검증(None)으로 센다."""
+    rows = dict(d.conn.execute(text("""
+        SELECT s.ticker, t.theme FROM stocks s LEFT JOIN v_stock_theme t ON t.stock_id = s.stock_id
+        WHERE s.ticker = ANY(:t)"""), {"t": [str(x) for x in c["ticker"]]}).all())
+    return None, "판정 못함 " + " · ".join(f"{t} {rows.get(str(t), 'DB에 없음')}" for t in c["ticker"])
+
+
 def rule_top20_theme_reviewed(d: Data):
     """프리셋 top20(시장 2 × 프리셋 4) 중 업종 코드로만 분류된(themes.tickers에 직접 지정되지 않은) 종목 — 기록만(D-024).
     새로 상위에 오른 종목의 주 테마를 라운드마다 사람이 사업보고서로 확인하게 하려는 목록이다."""
@@ -688,6 +696,7 @@ SPECIAL = {
     "CLIP-order": lambda d, c: rule_clip_order(d),
     "THEME-main-business-KR": case_theme,
     "THEME-main-business-US": case_theme,
+    "THEME-main-business-unjudged": case_theme_unjudged,
     "TOP20-theme-reviewed": lambda d, c: rule_top20_theme_reviewed(d),
 }
 
