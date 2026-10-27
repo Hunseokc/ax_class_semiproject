@@ -1,12 +1,14 @@
-"""매력도 다중 팩터 모델 손계산 검증 (개발산출물/09).
+"""매력도 다중 팩터 모델 v2 손계산 검증 (개발산출물/09, 검토_장부 D-002·D-003·D-010).
 
-단계별: 로버스트 Z·부호 반전·±3 클리핑·MAD=0 대체 / 축소 계수 n/(n+k) / 팩터 평균·재정규화·유효 팩터 3개 미만 NULL / Φ 변환.
+단계별: 로버스트 Z·부호 반전·±3 클리핑·MAD=0 대체·감점 전용 지표 / 축소 계수 n/(n+k) /
+        팩터 가중 평균·이력 축소·재표준화·빠진 팩터 0·필수 팩터 / 같은 시장 백분위.
 전체: 시세·재무·밸류에이션 픽스처에서 지표 원값 → Z → 점수를 파이썬 참조 구현과 비교, 경계 사례, 프리셋, API.
 """
 from __future__ import annotations
 
 import math
 import statistics
+from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal as Dec
 
@@ -17,18 +19,14 @@ from app.services.fx import FxService
 from app.services.refresh import RefreshService
 from app.ingest.jobs import migrate
 from app.queries import sql
-from app.services.scoring import (FACTORS, METRICS, aggregate, compute_scores, load_config, normalize, sync_presets,
-                                  validate_presets)
+from app.services.scoring import (FACTORS, METRICS, aggregate, compute_scores, load_config, metric_params, normalize,
+                                  sync_presets, validate_presets)
 from tests.conftest import D, scalar
 from tests.fakes import make_providers
 from tests.test_analysis import _path, _replace_prices
 
 API = "/api/v1"
 K = 5
-
-
-def phi(z: float) -> float:
-    return 0.5 * (1 + math.erf(z / math.sqrt(2)))
 
 
 def add_kr_stocks(conn, ids):
@@ -53,10 +51,10 @@ def test_robust_z_sign_flip_and_clipping(engine):
     vals = {1: 0.10, 2: 0.12, 5: 0.08, 6: 0.11, 7: 0.50}       # 중앙값 0.11, |편차| 중앙값(MAD) 0.01
     with engine.begin() as conn:
         add_kr_stocks(conn, [5, 6, 7])
-        put_raw(conn, "roe", vals)                               # 방향 +
+        put_raw(conn, "return_on_assets", vals)                               # 방향 +
         put_raw(conn, "volatility", vals)                        # 방향 −
         normalize(conn, D, K)
-        roe, vol = read(conn, "z_raw", "roe"), read(conn, "z_raw", "volatility")
+        roe, vol = read(conn, "z_raw", "return_on_assets"), read(conn, "z_raw", "volatility")
     s = 1.4826 * 0.01
     assert roe[1] == pytest.approx((0.10 - 0.11) / s, abs=1e-4)          # −0.6745
     assert roe[5] == pytest.approx((0.08 - 0.11) / s, abs=1e-4)          # −2.0235
@@ -67,12 +65,12 @@ def test_robust_z_sign_flip_and_clipping(engine):
 def test_mad_zero_and_small_sample_fall_back_to_mean_sd(engine):
     with engine.begin() as conn:
         add_kr_stocks(conn, [5, 6, 7])
-        put_raw(conn, "roe", {1: 1, 2: 1, 5: 1, 6: 1, 7: 5})               # MAD = 0 → 평균·표준편차
+        put_raw(conn, "return_on_assets", {1: 1, 2: 1, 5: 1, 6: 1, 7: 5})               # MAD = 0 → 평균·표준편차
         put_raw(conn, "book_yield", {3: 1, 4: 3})                          # US 2개(표본 < 5)
         put_raw(conn, "operating_margin", {1: 2, 2: 2, 5: 2})               # 표준편차 0 → Z = 0
         put_raw(conn, "momentum", {3: 0.1})                                 # 표본 1개 → Z = 0
         normalize(conn, D, K)
-        roe, by = read(conn, "z_raw", "roe"), read(conn, "z_raw", "book_yield")
+        roe, by = read(conn, "z_raw", "return_on_assets"), read(conn, "z_raw", "book_yield")
         opm, mom = read(conn, "z_raw", "operating_margin"), read(conn, "z_raw", "momentum")
     sd = statistics.stdev([1, 1, 1, 1, 5])
     assert roe[7] == pytest.approx((5 - 1.8) / sd, abs=1e-4) and roe[1] == pytest.approx((1 - 1.8) / sd, abs=1e-4)
@@ -80,11 +78,22 @@ def test_mad_zero_and_small_sample_fall_back_to_mean_sd(engine):
     assert set(opm.values()) == {0} and mom[3] == 0
 
 
+def test_penalty_only_metric_is_clipped_at_zero(engine):
+    """가치 함정 신호는 나쁠 때만 깎는다: Z를 [−3, 0]으로 자른다."""
+    with engine.begin() as conn:
+        add_kr_stocks(conn, [5, 6, 7])
+        put_raw(conn, "trap_signal", {1: 0.2, 2: 0.6, 5: 0.8, 6: 1.0, 7: 0.4})   # 중앙값 0.6, MAD 0.2
+        normalize(conn, D, K)
+        z = read(conn, "z_raw", "trap_signal")
+    assert z[1] == pytest.approx((0.2 - 0.6) / (1.4826 * 0.2), abs=1e-4) and z[7] < 0
+    assert z[2] == 0 and z[5] == 0 and z[6] == 0                           # 중앙값 이상은 0(가점 없음)
+
+
 def test_countries_are_normalized_separately(engine):
     with engine.begin() as conn:
-        put_raw(conn, "roe", {1: 0.1, 2: 0.3, 3: 10, 4: 30})              # US 값이 커도 KR과 섞이지 않는다
+        put_raw(conn, "return_on_assets", {1: 0.1, 2: 0.3, 3: 10, 4: 30})              # US 값이 커도 KR과 섞이지 않는다
         normalize(conn, D, K)
-        z = read(conn, "z_raw", "roe")
+        z = read(conn, "z_raw", "return_on_assets")
     assert z[1] == pytest.approx(z[3], abs=1e-4) and z[2] == pytest.approx(z[4], abs=1e-4)
 
 
@@ -96,9 +105,9 @@ def test_shrinkage_uses_primary_group_mean_including_self(engine):
         conn.execute(text("INSERT INTO peer_groups (group_id, name) VALUES (3, '자동차'), (4, '단독')"))
         conn.execute(text("INSERT INTO peer_group_members VALUES (3, 5, true), (3, 6, true), (3, 7, true), "
                           "(4, 9, true), (1, 8, false)"))
-        put_raw(conn, "roe", vals)
+        put_raw(conn, "return_on_assets", vals)
         normalize(conn, D, K)
-        z, adj = read(conn, "z_raw", "roe"), read(conn, "z_adj", "roe")
+        z, adj = read(conn, "z_raw", "return_on_assets"), read(conn, "z_adj", "return_on_assets")
     group_mean = (z[5] + z[6] + z[7]) / 3                               # 자기 자신 포함
     for s in (5, 6, 7):
         assert adj[s] == pytest.approx(z[s] - 3 / (3 + K) * group_mean, abs=2e-4)
@@ -111,9 +120,9 @@ def test_shrinkage_does_not_mix_countries(engine):
     with engine.begin() as conn:
         add_kr_stocks(conn, [5, 6, 7])
         conn.execute(text("INSERT INTO peer_group_members VALUES (1, 5, true), (1, 6, true), (1, 7, true)"))
-        put_raw(conn, "roe", {1: 0.10, 2: 0.12, 5: 0.08, 6: 0.11, 7: 0.50, 3: 0.1, 4: 0.9})   # 반도체: KR 1·2·5·6·7, US 4
+        put_raw(conn, "return_on_assets", {1: 0.10, 2: 0.12, 5: 0.08, 6: 0.11, 7: 0.50, 3: 0.1, 4: 0.9})   # 반도체: KR 1·2·5·6·7, US 4
         normalize(conn, D, K)
-        z, adj = read(conn, "z_raw", "roe"), read(conn, "z_adj", "roe")
+        z, adj = read(conn, "z_raw", "return_on_assets"), read(conn, "z_adj", "return_on_assets")
     kr = [1, 2, 5, 6, 7]
     kr_mean = sum(z[s] for s in kr) / len(kr)
     for s in kr:
@@ -121,7 +130,7 @@ def test_shrinkage_does_not_mix_countries(engine):
     assert adj[4] == z[4]                                                # US 반도체는 4 혼자 → n = 1
 
 
-# ------------------------------------------------------------------ 3단계: 합산·Φ 변환
+# ------------------------------------------------------------------ 3단계: 합산·백분위
 def put_z(conn, sid: int, z_by_metric: dict[str, float], as_of=D):
     conn.execute(text("""INSERT INTO stock_metric_values (stock_id, as_of, metric, factor, raw_value, z_raw, z_adj)
                          VALUES (:s, :d, :m, :f, 0, :z, :z)"""),
@@ -137,37 +146,68 @@ def scores_by(conn, preset="balanced", as_of=D) -> dict[int, dict]:
 ALL_METRICS = list(METRICS)
 
 
-def test_phi_transform_z0_is_50_and_z1_is_8413(engine):
+def _std(xs: list[float]) -> list[float]:
+    m, sd = statistics.mean(xs), statistics.stdev(xs)
+    return [(x - m) / sd for x in xs]
+
+
+def test_percentile_score_matches_rank_and_20_percent_bands(engine):
+    """점수 = 100 × (n − 순위) / n → 80 이상이 정확히 상위 20%(D-003). 모든 지표 z = c면 종합 순서도 c 순서."""
+    ids = list(range(5, 15))
     with engine.begin() as conn:
-        add_kr_stocks(conn, [5, 6, 7])
-        for sid, c in {5: -1.0, 6: 0.0, 7: 1.0}.items():                 # 모든 지표 z = c → 종합 = c
-            put_z(conn, sid, {m: c for m in ALL_METRICS})
+        add_kr_stocks(conn, ids)
+        for i, sid in enumerate(ids):
+            put_z(conn, sid, {m: -1 + 0.2 * i for m in ALL_METRICS})
         aggregate(conn, D)
         sc = scores_by(conn)
-    # 종합 −1, 0, 1 → 국가 내 평균 0, 표본표준편차 1 → Z_c = −1, 0, 1
-    assert float(sc[6]["score"]) == 50.0
-    assert float(sc[7]["score"]) == pytest.approx(100 * phi(1), abs=0.01) == pytest.approx(84.13, abs=0.01)
-    assert float(sc[5]["score"]) == pytest.approx(100 * phi(-1), abs=0.01)
+    kr = sorted((s for s in sc if s in ids), key=lambda s: -float(sc[s]["composite"]))
+    n = len(kr)
+    for pos, sid in enumerate(kr, 1):
+        assert float(sc[sid]["score"]) == pytest.approx(100 * (n - pos) / n, abs=0.01)
+    assert [s for s in kr if float(sc[s]["score"]) >= 80] == kr[:2]           # 10개 중 상위 2개 = 20%
 
 
-def test_factor_average_reweighting_and_minimum_coverage(engine):
+def test_factor_weighting_restandardization_missing_zero_and_required(engine):
     with engine.begin() as conn:
-        add_kr_stocks(conn, [5, 6, 7])
-        put_z(conn, 5, {"earnings_yield": 1.0, "book_yield": 2.0, "roe": 0.5, "revenue_yoy": -1.0})   # 3개 팩터
-        put_z(conn, 6, {"earnings_yield": 0.2, "roe": -0.4})                                           # 2개 팩터
+        add_kr_stocks(conn, [5, 6, 7, 8])
+        put_z(conn, 5, {"conservative_yield": 1.0, "book_yield": 2.0, "return_on_assets": 0.5, "revenue_cagr2": -1.0,
+                        "volatility": 1.0, "liab_assets": -2.0})                       # 안정성 = (2 × 1 + 1 × −2) / 3 = 0
+        put_z(conn, 6, {"conservative_yield": 0.2, "return_on_assets": -0.4, "momentum": 1.0})   # 3개 팩터
         put_z(conn, 7, {m: 0.3 for m in ALL_METRICS})
+        put_z(conn, 8, {"book_yield": 1.0, "volatility": 0.5, "liab_assets": 0.5, "momentum": 0.2})   # 수익성 없음
         aggregate(conn, D)
         growth, balanced = scores_by(conn, "growth"), scores_by(conn, "balanced")
-    s5 = growth[5]
-    assert float(s5["value_score"]) == 1.5                              # 지표 2개 평균
-    assert s5["factor_coverage"] == 3 and s5["safety_score"] is None
-    # 성장형 가중치 value 0.10 · quality 0.20 · growth 0.40 → 유효 팩터만 재정규화
-    assert float(s5["composite"]) == pytest.approx((0.10 * 1.5 + 0.20 * 0.5 + 0.40 * -1.0) / 0.70, abs=1e-4)
-    assert float(balanced[5]["composite"]) == pytest.approx((1.5 + 0.5 - 1.0) / 3, abs=1e-4)
-    s6 = balanced[6]                                                     # 유효 팩터 2개 → 점수 NULL
-    assert s6["factor_coverage"] == 2 and s6["composite"] is None and s6["score"] is None
-    assert "2/5" in s6["data_quality"]["score_null_reason"]
-    assert set(s6["data_quality"]["unavailable_factors"]) == {"growth", "safety", "momentum"}
+    # 재표준화 전 팩터 점수(KR — 픽스처 1·2는 지표 없음): value 5 = 1.5, 6 = 0.2, 7 = 0.3, 8 = 1.0
+    raw_value = {5: 1.5, 6: 0.2, 7: 0.3, 8: 1.0}
+    zs = dict(zip(raw_value, _std(list(raw_value.values()))))
+    assert float(growth[5]["value_score"]) == pytest.approx(zs[5], abs=1e-4)
+    raw_safety = {5: 0.0, 7: 0.3, 8: 0.5}                                        # 변동성 2 : 부채/자산 1
+    ss = dict(zip(raw_safety, _std(list(raw_safety.values()))))
+    assert float(growth[5]["safety_score"]) == pytest.approx(ss[5], abs=1e-4)
+    # 빠진 팩터는 0 — 가중치를 다시 나누지 않는다: 종합 = Σ w × 재표준화 팩터
+    s6 = balanced[6]
+    assert s6["factor_coverage"] == 3 and s6["growth_score"] is None and s6["safety_score"] is None
+    expect = 0.2 * float(s6["value_score"]) + 0.2 * float(s6["quality_score"]) + 0.2 * float(s6["momentum_score"])
+    assert float(s6["composite"]) == pytest.approx(expect, abs=2e-4)
+    # 수익성(필수)이 없으면 팩터 3개여도 점수 없음
+    s8 = balanced[8]
+    assert s8["factor_coverage"] == 3 and s8["composite"] is None and s8["score"] is None
+    assert "저평가·수익성" in s8["data_quality"]["score_null_reason"]
+    assert set(s8["data_quality"]["unavailable_factors"]) == {"quality", "growth"}
+
+
+def test_short_financial_history_shrinks_value_factor(engine):
+    """재무 FY가 3개 미만이면 저평가 팩터를 FY 수 / 3만큼 줄인 뒤 재표준화한다(D-010)."""
+    with engine.begin() as conn:
+        add_kr_stocks(conn, [5, 6, 7])
+        for sid in (5, 6, 7):
+            put_z(conn, sid, {"conservative_yield": 1.5, "return_on_assets": 0.1 * sid, "momentum": 0.0})
+        aggregate(conn, D, history={5: 3, 6: 1, 7: 0})
+        sc = scores_by(conn)
+    zs = dict(zip((5, 6, 7), _std([1.5, 0.5, 0.0])))
+    for sid in (5, 6, 7):
+        assert float(sc[sid]["value_score"]) == pytest.approx(zs[sid], abs=1e-4)
+    assert sc[6]["data_quality"]["fy_history"] == 1
 
 
 # ------------------------------------------------------------------ 전체 파이프라인 손계산
@@ -177,16 +217,19 @@ PRICES = {1: (300, 0, .1), 2: (300, 1, -.05), 5: (130, 2, .02), 6: (130, .7, .08
 VALUATION = {  # eps, bps, shares, market_cap
     1: (8, 80, 1000, None), 2: (-2, 50, 1000, None), 5: (None, 40, 1000, None), 6: (5, 120, 1000, None),
     7: (3, 30, None, 100_000), 8: (4, 60, 1000, None), 3: (6, 4, 1000, None), 4: (2, 10, 1000, None)}
-FIN = {        # (결산일, 매출, 영업이익, 순이익, 자본, 부채) 직전 FY → 최신 FY
-    1: [("2023-12-31", 100, 10, 8, 100, 50), ("2024-12-31", 120, 15, 12, 110, 44)],
-    2: [("2023-12-31", 200, 40, 30, 150, 60), ("2024-12-31", 210, 30, -20, 160, 80)],
-    5: [("2023-12-31", 0, -5, -10, 50, 20), ("2024-12-31", 50, -2, -15, 40, 30)],     # 직전 매출 0, 적자(EPS 미제공)
-    6: [("2023-12-31", 80, 8, 6, -10, 90), ("2024-12-31", 90, 9, 7, -5, 100)],        # 자본 ≤ 0
-    7: [("2024-12-31", 60, 6, 4, 40, 20)],                                            # 직전 FY 없음
-    3: [("2023-09-30", 300, 90, 80, 60, 120), ("2024-09-30", 330, 99, 90, 70, 140)],
-    4: [("2024-01-31", 50, 20, 15, 40, 10), ("2025-01-31", 120, 70, 60, 80, 20)]}
+FIN = {        # (결산일, 매출, 영업이익, 순이익, 자본, 부채, 자산) 오래된 FY → 최신 FY
+    1: [("2022-12-31", 90, 9, 4, 100, 50, 150), ("2023-12-31", 100, 10, 8, 110, 50, 160),
+        ("2024-12-31", 120, 15, 12, 126, 44, 170)],                                  # 3개 FY — 3년 평균이 더 작다
+    2: [("2023-12-31", 200, 40, 30, 150, 60, 210), ("2024-12-31", 210, 30, -20, 160, 80, 240)],
+    5: [("2023-12-31", 0, -5, -10, 50, 20, 70), ("2024-12-31", 50, -2, -15, 40, 30, 70)],   # 적자, 직전 매출 0
+    6: [("2022-12-31", 70, -3, -4, -10, 85, 75), ("2023-12-31", 80, 8, 6, -10, 90, 80),
+        ("2024-12-31", 90, 9, 30, -5, 100, 95)],                                     # 2년 전 적자 · 최신 해 일회성(순이익 > 영업이익)
+    7: [("2024-12-31", 60, 6, 4, 40, 20, 60)],                                        # FY 1개 — 저평가 1/3로 축소
+    3: [("2023-09-30", 300, 90, 80, 60, 120, 200), ("2024-09-30", 330, 99, 90, 70, 140, 220)],
+    4: [("2024-01-31", 50, 20, 15, 40, 10, 60), ("2025-01-31", 120, 70, 60, 80, 20, 110)]}
 PRIMARY = {1: 1, 2: 1, 4: 1, 3: 2, 5: 3, 6: 3}
 COUNTRY = {1: "KR", 2: "KR", 5: "KR", 6: "KR", 7: "KR", 8: "KR", 3: "US", 4: "US"}
+AFTER_TAX = 0.78
 
 
 @pytest.fixture
@@ -202,52 +245,60 @@ def universe(engine):
                              VALUES (:s, :d, :eps, :bps, :sh, :mc, 'PYKRX')"""),
                      [{"s": s, "d": D, "eps": e, "bps": b, "sh": sh, "mc": mc} for s, (e, b, sh, mc) in VALUATION.items()])
         conn.execute(text("""INSERT INTO financial_statements (stock_id, period_end, period_type, revenue, operating_income,
-                             net_income, total_equity, total_debt, data_source) VALUES (:s, :p, 'FY', :r, :o, :n, :e, :d, 'DART')"""),
-                     [{"s": s, "p": p, "r": r, "o": o, "n": n, "e": e, "d": d} for s, fy in FIN.items() for p, r, o, n, e, d in fy])
+                             net_income, total_equity, total_debt, total_assets, data_source)
+                             VALUES (:s, :p, 'FY', :r, :o, :n, :e, :d, :a, 'DART')"""),
+                     [{"s": s, "p": p, "r": r, "o": o, "n": n, "e": e, "d": d, "a": a}
+                      for s, fy in FIN.items() for p, r, o, n, e, d, a in fy])
     for s, (n, phase, slope) in PRICES.items():
         closes[s] = [float(c) for c in _path(n, phase, slope)]
         _replace_prices(engine, s, _path(n, phase, slope), D)
     return closes
 
 
-def _mdd(closes) -> float:
-    # 누적 최고가 대비 낙폭의 최솟값(views.sql mdd와 같은 정의)
-    peak, worst = closes[0], 0.0
-    for c in closes:
-        peak = max(peak, c)
-        worst = min(worst, c / peak - 1)
-    return worst
+def _earn(ni, oi):
+    """해마다 저평가 이익 e = min(순이익, 0.78 × 영업이익)."""
+    return min(ni, AFTER_TAX * oi)
 
 
-def reference_raw(closes) -> dict[int, dict[str, float | None]]:
-    out = {}
+def _mcap(s, close):
+    eps, bps, shares, mc = VALUATION[s]
+    return mc if mc is not None else shares * close
+
+
+def reference_raw(closes) -> tuple[dict[int, dict[str, float | None]], dict[int, int]]:
+    out, hist = {}, {}
     for s, cl in closes.items():
         close = cl[-1]
-        eps, bps, shares, mc = VALUATION[s]
-        shares = shares if shares is not None else mc / close
         fy = FIN.get(s, [])
-        cur = fy[-1] if fy else None
-        prev = fy[-2] if len(fy) > 1 else None
-        if eps is None and cur:
-            eps = cur[3] / shares
-        r: dict[str, float | None] = {
-            "earnings_yield": eps / close if eps is not None else None,
-            "book_yield": bps / close,
-            "roe": cur[3] / cur[4] if cur and cur[4] > 0 else None,
-            "operating_margin": cur[2] / cur[1] if cur and cur[1] else None,
-            "revenue_yoy": cur[1] / prev[1] - 1 if prev and prev[1] > 0 else None,
-            "eps_change_yield": (cur[3] - prev[3]) / shares / close if prev else None,
-            "max_drawdown": _mdd(cl[-252:]) if len(cl) >= 252 else None,
-            "volatility": (statistics.stdev([cl[-253:][i] / cl[-253:][i - 1] - 1 for i in range(1, 253)]) * math.sqrt(252)
-                           if len(cl) >= 253 else None),
-            "debt_ratio": cur[5] / cur[4] if cur and cur[4] > 0 else None,
-            "momentum": (cl[-22] / cl[-253] - 1 if len(cl) >= 253 else cl[-22] / cl[-127] - 1 if len(cl) >= 127 else None),
-        }
+        hist[s] = len(fy)                                    # 픽스처 FY는 모두 1년 간격으로 이어진다
+        t = fy[-1] if fy else None
+        t2 = fy[-3] if len(fy) >= 3 else None
+        r: dict[str, float | None] = {m: None for m in METRICS}
+        if t:
+            _, rev, oi, ni, _, debt, ta = t
+            es = [_earn(f[3], f[2]) for f in fy[-3:]]
+            e = min(es[-1], sum(es) / 3) if len(es) == 3 else es[-1]
+            r["conservative_yield"] = e / _mcap(s, close)
+            r["return_on_assets"] = oi / ta
+            r["operating_margin"] = oi / rev if rev else None
+            r["liab_assets"] = debt / ta
+        r["book_yield"] = VALUATION[s][1] / close
+        if t and t2:
+            _, rev2, oi2, _, _, debt2, ta2 = t2
+            r["revenue_cagr2"] = (math.sqrt(rev / rev2) - 1 if rev > 0 else -1.0) if rev2 > 0 else None
+            r["profit_growth2"] = (oi - oi2) / ta2 if oi2 > 0 else None
+            sig = [oi > 0, rev > rev2, debt / ta < debt2 / ta2]
+            if oi2 > 0:
+                sig += [oi > oi2, oi / rev > oi2 / rev2]
+            r["trap_signal"] = sum(sig) / len(sig)
+        r["volatility"] = (statistics.stdev([cl[-253:][i] / cl[-253:][i - 1] - 1 for i in range(1, 253)]) * math.sqrt(252)
+                           if len(cl) >= 253 else None)
+        r["momentum"] = (cl[-22] / cl[-253] - 1 if len(cl) >= 253 else cl[-22] / cl[-127] - 1 if len(cl) >= 127 else None)
         out[s] = r
-    return out
+    return out, hist
 
 
-def reference_scores(raw):
+def reference_scores(raw, hist):
     def zs(vals):
         xs = list(vals.values())
         m = statistics.median(xs)
@@ -262,10 +313,7 @@ def reference_scores(raw):
         for c in ("KR", "US"):
             vals = {s: raw[s][metric] for s in raw if COUNTRY[s] == c and raw[s][metric] is not None}
             for s, z in (zs(vals) if vals else {}).items():
-                z_raw[s][metric] = round(max(-3, min(3, z * d.direction)), 4)
-        for s in raw:                                                   # 자본 ≤ 0 부채비율
-            if metric == "debt_ratio" and FIN.get(s) and FIN[s][-1][4] <= 0:
-                z_raw[s][metric] = -3.0
+                z_raw[s][metric] = round(max(-3, min(0 if d.penalty_only else 3, z * d.direction)), 4)
     z_adj = {s: {} for s in raw}
     for metric in METRICS:
         for s in raw:
@@ -278,28 +326,48 @@ def reference_scores(raw):
             if METRICS[metric].factor == "safety":                    # 안정성은 섹터 중립화하지 않는다
                 z_adj[s][metric] = z
                 continue
-            z_adj[s][metric] = round(z - n / (n + K) * sum(z_raw[t][metric] for t in mates) / n if n > 1 else z, 4)
-    fac = {s: {f: statistics.mean(v for m, v in z_adj[s].items() if METRICS[m].factor == f)
-               for f in FACTORS if any(METRICS[m].factor == f for m in z_adj[s])} for s in raw}
+            v = z - n / (n + K) * sum(z_raw[t][metric] for t in mates) / n if n > 1 else z
+            z_adj[s][metric] = round(max(-3, min(3, v)), 4)
+    fac = {}
+    for s in raw:
+        f_s = {}
+        for f in FACTORS:
+            pairs = [(METRICS[m].weight, v) for m, v in z_adj[s].items() if METRICS[m].factor == f]
+            if pairs:
+                f_s[f] = sum(w * v for w, v in pairs) / sum(w for w, _ in pairs)
+        if "value" in f_s and hist[s] < 3:
+            f_s["value"] *= hist[s] / 3
+        fac[s] = f_s
+    fz = {s: {} for s in raw}                                           # 국가 안 재표준화
+    for c in ("KR", "US"):
+        for f in FACTORS:
+            xs = {s: fac[s][f] for s in raw if COUNTRY[s] == c and f in fac[s]}
+            if not xs:
+                continue
+            m, sd = statistics.mean(xs.values()), statistics.stdev(xs.values()) if len(xs) > 1 else 0
+            for s, v in xs.items():
+                fz[s][f] = (v - m) / sd if sd > 0 else 0.0
     out = {}
     for p in load_config()["presets"]:
         w = p["weights"]
-        comp = {s: (sum(w[f] * v for f, v in fac[s].items()) / sum(w[f] for f in fac[s]) if len(fac[s]) >= 3 else None)
-                for s in raw}
+        comp = {s: (sum(w[f] * v for f, v in fz[s].items())
+                    if {"value", "quality"} <= set(fz[s]) and len(fz[s]) >= 3 else None) for s in raw}
         res = {}
         for c in ("KR", "US"):
             cs = {s: v for s, v in comp.items() if COUNTRY[s] == c and v is not None}
-            mean, sd = statistics.mean(cs.values()), statistics.stdev(cs.values()) if len(cs) > 1 else 0
-            res.update({s: 100 * phi((v - mean) / sd if sd > 0 else 0) for s, v in cs.items()})
+            n = len(cs)
+            for s, v in cs.items():
+                pos = 1 + sum(1 for x in cs.values() if x > v)
+                res[s] = 50.0 if n == 1 else 100 * (n - pos) / n
         out[p["code"]] = {"composite": comp, "score": res}
-    return z_raw, z_adj, fac, out
+    return z_raw, z_adj, fz, out
 
 
 def test_full_pipeline_matches_reference_implementation(engine, universe):
     n = compute_scores(engine, as_of=D)
     assert n == 8 * 4                                                    # 종목 × 프리셋
-    raw_ref = reference_raw(universe)
-    z_raw_ref, z_adj_ref, fac_ref, scores_ref = reference_scores(raw_ref)
+    raw_ref, hist = reference_raw(universe)
+    z_raw_ref, z_adj_ref, fac_ref, scores_ref = reference_scores(raw_ref, hist)
     with engine.connect() as conn:
         mv = conn.execute(text("SELECT * FROM stock_metric_values WHERE as_of = :d"), {"d": D}).mappings().all()
         assert len(mv) == 8 * len(METRICS)
@@ -325,30 +393,33 @@ def test_full_pipeline_matches_reference_implementation(engine, universe):
                     assert got[s]["score"] is None, (code, s)
                 else:
                     assert float(got[s]["composite"]) == pytest.approx(ref["composite"][s], abs=5e-4), (code, s)
-                    assert float(got[s]["score"]) == pytest.approx(ref["score"][s], abs=0.05), (code, s)
+                    assert float(got[s]["score"]) == pytest.approx(ref["score"][s], abs=0.01), (code, s)
 
 
 def test_boundary_cases(engine, universe):
     compute_scores(engine, as_of=D)
     with engine.connect() as conn:
-        ep = read(conn, "z_raw", "earnings_yield")
-        debt, roe = read(conn, "z_raw", "debt_ratio"), read(conn, "raw_value", "roe")
+        cy, la = read(conn, "raw_value", "conservative_yield"), read(conn, "raw_value", "liab_assets")
+        pg = read(conn, "raw_value", "profit_growth2")
         sc = scores_by(conn)
-    positive_eps = [s for s in (1, 6, 7, 8)]
-    # 적자(EPS < 0 제공 / EPS 미제공 + 순이익 < 0 → 대체 계산)는 E/P 하위
-    assert max(ep[2], ep[5]) < min(ep[s] for s in positive_eps)
-    assert any("EPS 미제공" in n for n in sc[5]["data_quality"]["notes"])
-    # 자본 ≤ 0: ROE NULL, 부채비율 Z = −3 고정
-    assert roe[6] is None and debt[6] == -3
-    assert any("부채비율 Z = −3 고정" in n for n in sc[6]["data_quality"]["notes"])
-    assert sc[6]["data_quality"]["missing_metrics"]["roe"] == METRICS["roe"].null_reason
-    # 직전 매출 ≤ 0 → 매출 YoY NULL
-    assert "revenue_yoy" in sc[5]["data_quality"]["missing_metrics"]
+    # 일회성 해(현대차 순이익 30 > 영업이익 9)는 0.78 × 영업이익으로 자르고, 3년 평균이 더 작으면 3년 평균
+    e = [_earn(-4, -3), _earn(6, 8), _earn(30, 9)]                       # −4, 6, 7.02
+    assert e[-1] == pytest.approx(0.78 * 9)
+    assert cy[6] == pytest.approx(sum(e) / 3 / _mcap(6, universe[6][-1]), rel=1e-5)
+    assert any("3년 평균" in n for n in sc[6]["data_quality"]["notes"])
+    # 2년 전 적자(현대차 2022 영업손실) → 이익 변화는 비우고 사유
+    assert pg[6] is None and "흑자 전환" in sc[6]["data_quality"]["missing_metrics"]["profit_growth2"]
+    # 자본 ≤ 0이어도 부채/자산은 원값 그대로(부채비율처럼 Z −3 고정 없음)
+    assert la[6] == pytest.approx(100 / 95) and not any("고정" in n for n in sc[6]["data_quality"].get("notes", []))
+    # 재무 FY 1개(기아) → 저평가 이력 축소 메모, 2년 지표 없음
+    assert sc[7]["data_quality"]["fy_history"] == 1
+    assert any("재무 이력 1년" in n for n in sc[7]["data_quality"]["notes"])
+    assert "revenue_cagr2" in sc[7]["data_quality"]["missing_metrics"]
     # 일봉 253개 미만 → 6-1개월, 127개 미만 → 모멘텀 없음
     assert any("6-1개월" in n for n in sc[5]["data_quality"]["notes"])
-    assert "momentum" in sc[7]["data_quality"]["missing_metrics"] and "notes" not in sc[1]["data_quality"]
-    # 유효 팩터 1개(value)뿐인 카카오(8) → 점수 NULL
-    assert sc[8]["factor_coverage"] == 1 and sc[8]["score"] is None
+    assert "momentum" in sc[7]["data_quality"]["missing_metrics"]
+    # 재무 없는 카카오(8) → 수익성 없음 → 점수 없음
+    assert sc[8]["score"] is None and "저평가·수익성" in sc[8]["data_quality"]["score_null_reason"]
 
 
 def test_safety_factor_is_not_sector_neutralized(engine, universe):
@@ -357,19 +428,22 @@ def test_safety_factor_is_not_sector_neutralized(engine, universe):
     with engine.connect() as conn:
         safety = conn.execute(text("""SELECT z_raw, z_adj FROM stock_metric_values
                                       WHERE as_of = :d AND factor = 'safety' AND z_raw IS NOT NULL"""), {"d": D}).all()
-        roe_raw, roe_adj = read(conn, "z_raw", "roe"), read(conn, "z_adj", "roe")
+        roe_raw, roe_adj = read(conn, "z_raw", "return_on_assets"), read(conn, "z_adj", "return_on_assets")
     assert safety and all(r.z_adj == r.z_raw for r in safety)
     assert roe_adj[1] != roe_raw[1] and roe_adj[2] != roe_raw[2]       # 반도체(1, 2) 수익성은 중립화
 
 
-def test_max_drawdown_null_reason_is_short_history(engine, universe):
-    """일봉 252개 미만(종목 7: 100개)이면 낙폭이 없고 사유가 '일봉 252개 미만'. 일봉 300개인 종목 1은 값이 있다."""
-    compute_scores(engine, as_of=D)
-    with engine.connect() as conn:
-        mdd = read(conn, "raw_value", "max_drawdown")
-        sc = scores_by(conn)
-    assert sc[7]["data_quality"]["missing_metrics"]["max_drawdown"] == "일봉 252개 미만"
-    assert mdd[7] is None and mdd[1] is not None and mdd[1] <= 0
+def test_incomplete_and_off_cycle_fy_rows_are_skipped(engine, universe):
+    """자산이 빈 최신 FY(일부 칸만 들어온 행)는 건너뛰고, 결산월 변경으로 끼어든 FY는 2년 비교에서 건너뛴다."""
+    with engine.begin() as conn:
+        conn.execute(text("""INSERT INTO financial_statements (stock_id, period_end, period_type, net_income, data_source)
+                             VALUES (1, '2025-12-31', 'FY', 99, 'YFINANCE')"""))
+        conn.execute(text("""INSERT INTO financial_statements (stock_id, period_end, period_type, revenue, operating_income,
+                             net_income, total_assets, total_debt, data_source) VALUES (1, '2024-03-31', 'FY', 1, 1, 1, 1, 1, 'DART')"""))
+        rows = {r["metric"]: r for r in conn.execute(sql("score_metrics"), metric_params(stock_id=1)).mappings()}
+    assert rows["return_on_assets"]["fy_count"] == 3                       # 2024-12-31 기준 그대로
+    assert float(rows["return_on_assets"]["raw_value"]) == pytest.approx(15 / 170)
+    assert float(rows["revenue_cagr2"]["raw_value"]) == pytest.approx(math.sqrt(120 / 90) - 1)
 
 
 def test_listed_stocks_are_excluded_from_universe(engine, universe):
@@ -385,29 +459,28 @@ def test_listed_stocks_are_excluded_from_universe(engine, universe):
 
 def test_score_metrics_with_stock_id_returns_only_that_stock(engine, universe):
     with engine.connect() as conn:
-        rows = conn.execute(sql("score_metrics"), {"stock_id": 1}).mappings().all()
+        rows = conn.execute(sql("score_metrics"), metric_params(stock_id=1)).mappings().all()
     assert {r["stock_id"] for r in rows} == {1} and len(rows) == len(METRICS)
 
 
-def test_adding_a_stock_does_not_rescale_like_min_max(engine, universe):
-    compute_scores(engine, as_of=D)
-    with engine.connect() as conn:
-        before = {s: float(r["score"]) for s, r in scores_by(conn).items() if r["score"] is not None and COUNTRY[s] == "KR"}
+def test_better_new_stock_takes_first_without_reaching_100(engine, universe):
+    """백분위는 Min-Max처럼 최고 100·최저 0으로 늘이지 않는다: 1위도 100 × (n − 1) / n."""
     with engine.begin() as conn:                                         # 모든 지표가 극단적으로 좋은 종목 추가
         conn.execute(text("INSERT INTO stocks (stock_id, market_id, ticker, name) VALUES (9, 1, '999999', '극단')"))
         conn.execute(text("""INSERT INTO valuation_snapshots (stock_id, as_of, eps, bps, shares_outstanding, source)
                              VALUES (9, :d, 500, 5000, 1000, 'PYKRX')"""), {"d": D})
         conn.execute(text("""INSERT INTO financial_statements (stock_id, period_end, period_type, revenue, operating_income,
-                             net_income, total_equity, total_debt, data_source) VALUES
-                             (9, '2023-12-31', 'FY', 100, 50, 40, 100, 1, 'DART'), (9, '2024-12-31', 'FY', 400, 300, 250, 300, 1, 'DART')"""))
+                             net_income, total_equity, total_debt, total_assets, data_source) VALUES
+                             (9, '2022-12-31', 'FY', 100, 50, 40, 100, 1, 101, 'DART'),
+                             (9, '2023-12-31', 'FY', 200, 120, 90, 200, 1, 201, 'DART'),
+                             (9, '2024-12-31', 'FY', 400, 300, 250, 300, 1, 301, 'DART')"""))
     _replace_prices(engine, 9, _path(300, 0, .5), D)
     compute_scores(engine, as_of=D)
     with engine.connect() as conn:
-        after = {s: float(r["score"]) for s, r in scores_by(conn).items() if r["score"] is not None}
-    for scores in (before, after):                                        # Min-Max라면 최고 100·최저 0으로 고정
-        assert 0 < min(scores.values()) and max(scores.values()) < 100
-    top = max(before, key=before.get)
-    assert after[top] < 100 and after[9] < 100
+        kr = {s: r for s, r in scores_by(conn).items() if r["score"] is not None and COUNTRY.get(s, "KR") == "KR"}
+    n = len(kr)
+    assert max(kr, key=lambda s: float(kr[s]["composite"])) == 9
+    assert float(kr[9]["score"]) == pytest.approx(100 * (n - 1) / n, abs=0.01) and min(float(r["score"]) for r in kr.values()) == 0
 
 
 # ------------------------------------------------------------------ 프리셋
@@ -479,14 +552,16 @@ def test_analysis_api_returns_contributions_metrics_and_rank(client, engine, uni
     compute_scores(engine, as_of=D)
     a = client.get(f"{API}/stocks/KOSPI/005930/analysis?preset=growth").json()["attractiveness"]
     assert a["preset"]["code"] == "growth" and a["factor_total"] == 5
-    assert a["factor_coverage"] == 5 and 0 < a["score"] < 100
+    assert a["factor_coverage"] == 5 and 0 <= a["score"] < 100
     assert sum(f["contribution"] for f in a["factors"].values()) == pytest.approx(a["composite"], abs=1e-3)
     assert a["factors"]["growth"]["weight"] == 0.4 and a["factors"]["growth"]["effective_weight"] == 0.4
-    assert [m["metric"] for m in a["metrics"]] == list(METRICS) and a["metrics"][0]["label"] == "이익수익률 E/P"
+    assert [m["metric"] for m in a["metrics"]] == list(METRICS) and a["metrics"][0]["label"] == "세후 보수 이익/시총"
     vol = next(m for m in a["metrics"] if m["metric"] == "volatility")
     assert vol["direction"] == -1 and vol["raw_value"] is not None and vol["z_adj"] is not None
-    # 국가 내 순위: KR에서 점수가 있는 종목(1, 2, 5, 6, 7) 중 — 7은 일봉 100개라 낙폭·변동성은 없지만 부채비율로 안정성이 있다
+    # 국가 내 순위: KR에서 점수가 있는 종목(1, 2, 5, 6, 7) 중 — 8은 재무가 없어 수익성(필수)이 없다
     assert a["rank"]["country"] == "KR" and a["rank"]["total"] == 5 and 1 <= a["rank"]["position"] <= 5
+    assert a["score"] == pytest.approx(100 * (5 - a["rank"]["position"]) / 5, abs=0.01)
+    assert a["data_quality"]["model_version"] == load_config()["model_version"]
     none = client.get(f"{API}/stocks/KOSPI/035720/analysis").json()["attractiveness"]
     assert none["score"] is None and none["rank"] is None and none["preset"]["code"] == "balanced"
     assert all(f["contribution"] is None for f in none["factors"].values())
@@ -556,10 +631,10 @@ def test_neutralized_z_is_clipped_to_3(engine):
         add_kr_stocks(conn, [5])
         conn.execute(text("INSERT INTO peer_group_members VALUES (1, 5, true)"))       # 반도체(KR): 1, 2, 5
         conn.execute(text("""INSERT INTO stock_metric_values (stock_id, as_of, metric, factor, raw_value, z_raw)
-                             VALUES (1, :d, 'roe', 'quality', 0, 3), (2, :d, 'roe', 'quality', 0, -3),
-                                    (5, :d, 'roe', 'quality', 0, -3)"""), {"d": D})
+                             VALUES (1, :d, 'return_on_assets', 'quality', 0, 3), (2, :d, 'return_on_assets', 'quality', 0, -3),
+                                    (5, :d, 'return_on_assets', 'quality', 0, -3)"""), {"d": D})
         conn.execute(sql("score_neutralize"), {"as_of": D, "k": K})
-        adj = read(conn, "z_adj", "roe")
+        adj = read(conn, "z_adj", "return_on_assets")
     assert 3 - 3 / (3 + K) * (-1) > 3 and adj[1] == 3                       # 3.375 → 3
     assert adj[2] == pytest.approx(-3 - 3 / (3 + K) * (-1), abs=1e-4)      # −2.625(범위 안이면 그대로)
 
@@ -572,29 +647,29 @@ def test_financial_theme_drops_revenue_metrics_and_scores_separately(engine, uni
             text("SELECT * FROM stock_metric_values WHERE as_of = :d"), {"d": D})}
         st = scores_by(conn)
     for s in (5, 6):
-        assert mv[(s, "operating_margin")].raw_value is None and mv[(s, "revenue_yoy")].raw_value is None
+        for m in ("operating_margin", "revenue_cagr2", "liab_assets", "trap_signal"):
+            assert mv[(s, m)].raw_value is None, (s, m)
         dq = st[s]["data_quality"]
         assert dq["partition"] == "KR·금융" and dq["family"] == "financial"
         assert dq["missing_metrics"]["operating_margin"] == "금융 업종 — 매출 기준 지표는 쓰지 않음"
+    # 금융은 순이익 기준: 총자산 이익률 = 순이익 / 자산
+    assert float(mv[(6, "return_on_assets")].raw_value) == pytest.approx(30 / 95)
     assert mv[(1, "operating_margin")].raw_value is not None and st[1]["data_quality"]["partition"] == "KR"
-    # 금융 2종목끼리 표준화: B/P는 표본 2개 → 평균·표준편차 Z = ±1/√2, 0~100도 둘이 대칭
+    # 금융 2종목끼리 표준화: B/P는 표본 2개 → 평균·표준편차 Z = ±1/√2, 백분위는 50(1위)·0(2위)
     assert {round(float(mv[(s, "book_yield")].z_raw), 4) for s in (5, 6)} == {0.7071, -0.7071}
-    assert float(st[5]["score"]) + float(st[6]["score"]) == pytest.approx(100, abs=0.02)
+    assert {float(st[s]["score"]) for s in (5, 6) if st[s]["score"] is not None} <= {50.0, 0.0}
 
 
-def test_commodity_theme_uses_three_year_average_earnings(engine, universe, client):
-    with engine.begin() as conn:                                            # 삼성전자에 FY 하나 더 → 순이익 4, 8, 12
-        conn.execute(text("""INSERT INTO financial_statements (stock_id, period_end, period_type, revenue, operating_income,
-                             net_income, total_equity, total_debt, data_source) VALUES (1, '2022-12-31', 'FY', 90, 9, 4, 90, 50, 'DART')"""))
-    _theme_rule(engine, 1, commodity_linked=True)                           # 반도체(1, 2, 4)를 원자재 연동으로
+def test_three_year_conservative_earnings_apply_to_every_theme(engine, universe):
+    """업황 정점 방지(최신 이익 > 3년 평균이면 3년 평균)는 원자재 테마만이 아니라 모든 종목에 건다(D-002)."""
     with engine.connect() as conn:
-        rows = {(r["stock_id"], r["metric"]): r for r in conn.execute(sql("score_metrics"), {"stock_id": None}).mappings()}
+        rows = {(r["stock_id"], r["metric"]): r for r in conn.execute(sql("score_metrics"), metric_params()).mappings()}
     close = universe[1][-1]
-    assert float(rows[(1, "earnings_yield")]["raw_value"]) == pytest.approx(8 / 1000 / close, rel=1e-4)   # 공급사 EPS(8) 대신 평균
-    assert rows[(1, "earnings_yield")]["note"] == "원자재 연동 업종 → 최근 3개 FY 평균 순이익 / 주식수"
-    assert rows[(2, "earnings_yield")]["note"] == "원자재 연동 업종이지만 FY 재무 3개 미만 → 최신 FY 기준"
-    assert rows[(1, "eps_change_yield")]["raw_value"] is None and "원자재" in rows[(1, "eps_change_yield")]["null_note"]
-    assert rows[(5, "eps_change_yield")]["raw_value"] is not None                # 연동이 아닌 테마는 그대로
+    e = [_earn(4, 9), _earn(8, 10), _earn(12, 15)]                       # 4, 7.8, 11.7 → 3년 평균 7.83
+    assert float(rows[(1, "conservative_yield")]["raw_value"]) == pytest.approx(sum(e) / 3 / (1000 * close), rel=1e-4)
+    assert "3년 평균" in rows[(1, "conservative_yield")]["note"]
+    assert "재무 이력 2년" in rows[(2, "conservative_yield")]["note"]          # FY 2개 → 최신 FY 이익
+    assert float(rows[(2, "conservative_yield")]["raw_value"]) == pytest.approx(-20 / (1000 * universe[2][-1]), rel=1e-4)
 
 
 def test_reit_theme_is_not_scored_and_reference_explains(client, engine, universe):
@@ -617,6 +692,10 @@ def test_reference_score_neutralizes_with_primary_theme(engine, universe):
         conn.execute(text("INSERT INTO peer_group_members VALUES (1, 9, true)"))
         conn.execute(text("""INSERT INTO valuation_snapshots (stock_id, as_of, eps, bps, shares_outstanding, source)
                              VALUES (9, :d, 5, 50, 1000, 'PYKRX')"""), {"d": D})
+        conn.execute(text("""INSERT INTO financial_statements (stock_id, period_end, period_type, revenue, operating_income,
+                             net_income, total_equity, total_debt, total_assets, data_source) VALUES
+                             (9, '2023-12-31', 'FY', 100, 10, 8, 60, 40, 100, 'DART'),
+                             (9, '2024-12-31', 'FY', 110, 12, 9, 64, 40, 104, 'DART')"""))
     _replace_prices(engine, 9, _path(300, 0, .5), D)
     with engine.connect() as conn:
         preset = conn.execute(text("SELECT preset_id, code, name, description FROM scoring_presets WHERE code = 'balanced'")).mappings().one()
@@ -627,3 +706,8 @@ def test_reference_score_neutralizes_with_primary_theme(engine, universe):
     assert float(by["book_yield"]["z_adj"]) == pytest.approx(neutralize(float(by["book_yield"]["z_raw"]), peers, K), abs=2e-4)
     assert by["volatility"]["z_adj"] == by["volatility"]["z_raw"]           # 안정성은 중립화하지 않는다
     assert "주 테마 '반도체' 비교군 2개로 섹터 중립화" in out["reference_note"] and out["rank"]["family"] == "general"
+    # 점수 = 유니버스 종합 사이 순위의 백분위, 재무 FY 2개 → 이력 기록
+    assert float(out["score"]) == pytest.approx(100 * (out["rank"]["total"] - out["rank"]["position"]) / out["rank"]["total"], abs=0.01)
+    assert out["data_quality"]["fy_history"] == 2
+    assert sum(float(f["contribution"]) for f in out["factors"].values() if f["contribution"] is not None) == \
+        pytest.approx(float(out["composite"]), abs=1e-3)

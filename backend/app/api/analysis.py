@@ -31,8 +31,9 @@ SCORE_DISCLAIMER = ("매력도는 노출 종목과 매력도 비교군 안에서
                     "팩터 점수이며, 수익률 예측이나 투자 권유가 아닙니다.")
 PRESET_NOTE = "공개된 일반적 투자 스타일을 단순화한 가중치이며 특정 인물의 판단이 아닙니다."
 SCORE_METHOD = ("지표별로 같은 시장 안(금융은 금융끼리) 로버스트 Z(중앙값·MAD)를 구해 ±3으로 자르고, 같은 주 테마 평균을 축소 추정으로 빼 "
-                "섹터 중립화한 뒤(다시 ±3) 팩터 평균 → 프리셋 가중 평균 → 같은 범위 안에서 다시 표준화해 100·Φ(z)로 0~100 변환합니다. "
-                "금융 업종은 매출 기준 지표를, 원자재 연동 업종은 한 해 이익 변화를 쓰지 않고 E/P는 3년 평균 순이익으로 계산합니다.")
+                "섹터 중립화한 뒤(다시 ±3) 팩터 점수로 모으고, 팩터마다 같은 범위 안에서 다시 표준화해 프리셋 가중치로 더합니다(빠진 팩터는 0). "
+                "점수는 같은 시장 안 백분위(80 이상 = 상위 20%)입니다. 저평가 이익은 해마다 min(순이익, 0.78 × 영업이익)으로 일회성 이익을 자르고, "
+                "최신 이익이 3년 평균보다 크면 3년 평균을 씁니다. 금융 업종은 순이익 기준이고 매출·부채 지표를 쓰지 않습니다.")
 ACCOUNTING_NOTE = ("국내 종목 재무는 K-IFRS 연결(DART), 미국 종목은 US-GAAP(SEC)이며 PER·PBR은 국내 KRX 제공값, 미국은 SEC 발행주식수·FY 순이익·자본으로 계산한 값입니다. "
                    "회계기준·산정 방식이 달라 국가 간 수치 비교에는 한계가 있습니다.")
 PEER_METRICS = ["return_1m", "return_3m", "return_1y", "per", "pbr", "roe", "operating_margin", "revenue_yoy",
@@ -198,13 +199,12 @@ def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row)
     weights = dict(db.execute(text("SELECT factor, weight FROM scoring_weights WHERE preset_id = :p"),
                               {"p": preset["preset_id"]}).all())
     scores = {f: row[f"{f}_score"] for f in FACTORS}
-    valid_w = sum((weights[f] for f in FACTORS if scores[f] is not None), Decimal(0))
-    use = row["composite"] is not None and valid_w > 0
+    use = row["composite"] is not None
     factors = {}
-    for f in FACTORS:
-        ew = (weights[f] / valid_w).quantize(Decimal("0.0001")) if use and scores[f] is not None else None
+    for f in FACTORS:                       # 빠진 팩터는 0(중립)이라 가중치를 다시 나누지 않는다 — 기여도 합 = 종합
+        ew = weights[f] if use and scores[f] is not None else None
         factors[f] = {"score": scores[f], "weight": weights[f], "effective_weight": ew,
-                      "contribution": (weights[f] / valid_w * scores[f]).quantize(Decimal("0.0001")) if ew is not None else None,
+                      "contribution": (weights[f] * scores[f]).quantize(Decimal("0.0001")) if ew is not None else None,
                       "available": scores[f] is not None}
     mv = db.execute(text("SELECT metric, raw_value, z_raw, z_adj FROM stock_metric_values WHERE stock_id = :s AND as_of = :d"),
                     {"s": stock_id, "d": row["score_as_of"]}).mappings().all()

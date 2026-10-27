@@ -1,11 +1,11 @@
 -- 매력도 2단계-1: 지표별 국가(country)·점수 묶음(family) 내 로버스트 Z → stock_metric_values.z_raw
--- 파라미터: as_of, negatives(방향이 −인 지표 목록)
+-- 파라미터: as_of, negatives(방향이 −인 지표 목록), penalty_only(감점 전용 지표 — Z를 0 이하로 자른다: 가치 함정 신호)
 --   family = 주 테마의 scoring(v_stock_theme): financial(금융끼리) / general(그 밖, 주 테마가 없어도 general)
 --     금융은 PER·PBR이 구조적으로 낮아 일반 기업과 섞으면 저평가가 늘 상위가 된다 (개발산출물/09 3절)
 --   Z = (x − 중앙값) / (1.4826 × MAD),  MAD = median(|x − 중앙값|)
 --   유효 표본 < 5 또는 MAD = 0 → 평균·표본표준편차 Z, 표준편차도 0(또는 표본 1개)이면 Z = 0
---   방향 −는 부호를 뒤집고, 모든 Z를 [−3, 3]으로 자른다
---   z_raw가 이미 채워진 행(z_fixed — 자본 ≤ 0인 부채비율 −3)은 통계에서 빼고 건드리지 않는다
+--   방향 −는 부호를 뒤집고, 모든 Z를 [−3, 3]으로 자른다. 감점 전용 지표는 [−3, 0]
+--   z_raw가 이미 채워진 행은 통계에서 빼고 건드리지 않는다(지금 모델 v2에는 고정 Z가 없다)
 WITH v AS (
     SELECT mv.stock_id, mv.metric, mv.raw_value, mk.country, COALESCE(t.family, 'general') AS family
     FROM stock_metric_values mv
@@ -39,6 +39,7 @@ z AS (
     JOIN mad ON mad.country = v.country AND mad.family = v.family AND mad.metric = v.metric
 )
 UPDATE stock_metric_values t
-SET z_raw = LEAST(3, GREATEST(-3, CASE WHEN t.metric = ANY(CAST(:negatives AS text[])) THEN -z.z ELSE z.z END))
+SET z_raw = LEAST(CASE WHEN t.metric = ANY(CAST(:penalty_only AS text[])) THEN 0 ELSE 3 END,
+                  GREATEST(-3, CASE WHEN t.metric = ANY(CAST(:negatives AS text[])) THEN -z.z ELSE z.z END))
 FROM z
 WHERE t.as_of = :as_of AND t.stock_id = z.stock_id AND t.metric = z.metric
