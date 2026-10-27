@@ -235,7 +235,7 @@ const topPercent = (rank) => Math.max(1, Math.ceil((100 * rank.position) / rank.
 const FACTORS = [
   { key: "value", label: "저평가", desc: "일회성을 뺀 이익·가진 자산에 비해 주가가 싼 편인가 (실적이 나빠지는 중이면 감점)" },
   { key: "quality", label: "수익성", desc: "가진 자산과 매출로 돈을 잘 버는가 (최근 연간 기준)" },
-  { key: "growth", label: "성장성", desc: "최근 2년 매출과 이익이 늘었나 (성장 정도일 뿐 기대수익이 아님)" },
+  { key: "growth", label: "과거 실적 성장", desc: "최근 2년 매출과 이익이 얼마나 늘었나 — 미래 성장 예측이 아닙니다" },
   { key: "safety", label: "안정성", desc: "주가가 덜 출렁이는가, 자산에 비해 빚이 적은가" },
   { key: "momentum", label: "주가 흐름", desc: "최근 1년 주가가 오르는 추세인가 (같은 테마 종목 대비 — 테마 전체의 흐름은 레이더 아래 소속 테마 위치)" },
 ];
@@ -359,8 +359,85 @@ function commodityRow(c) {
     </div>`;
 }
 
+// 금융 묶음 — 종합 매력도·순위·라벨 대신 같은 하위 업종 안 P/B·ROE(3년 평균)·P/E와 'ROE 대비 P/B' 위치(D-028, 참고 정보)
+const median = (xs) => {
+  const v = xs.filter((x) => x !== null && x !== undefined).map(Number).sort((a, b) => a - b);
+  return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null;
+};
+
+function renderFinancialProfile(s, mc, disclaimer) {
+  const fp = s.financial_profile;
+  const t = fp?.target;
+  const box = h('<div class="score-panel__empty fin-profile"></div>');
+  if (!t) {
+    box.append(emptyState({ title: "금융 업종은 종합 매력도를 내지 않습니다", body: esc(s.data_quality?.score_null_reason || "") }));
+    if (mc) box.append(h(conditionRow(mc)));
+    $("#score").replaceChildren(box);
+    return;
+  }
+  const ratio = (v) => (v === null ? DASH : `${num(v, 2)}배`);
+  const roe = (v) => (v === null ? DASH : pct(v, { digits: 1 }));
+  const peers = fp.members.filter((m) => !m.is_target);
+  const basis = fp.method === "regression"
+    ? `P/B·ROE가 있는 ${fp.n}종목의 회귀선(같은 ROE에서 기대되는 P/B) 기준`
+    : `P/B·ROE가 있는 종목이 ${fp.n}개라 중앙값 기준(8개 이상이면 회귀선)`;
+  box.append(h(`<div class="fin-profile__head">
+      <h3 class="score-row__title">금융 업종 비교 <span class="subtle">· ${esc(fp.theme)} ${fp.members.length}종목 · 참고 정보</span></h3>
+      <p>${esc(fp.note)}</p>
+      <p class="fin-profile__pos"><strong>${esc(t.position || "P/B 또는 ROE가 없어 위치를 정하지 못했습니다")}</strong></p>
+      <p class="subtle">${basis} · ${date(s.as_of)} 기준</p></div>`));
+  box.append(h(`<div class="table-wrap"><table class="table table--metrics">
+      <caption class="sr-only">같은 하위 업종 안 P/B·ROE·P/E</caption>
+      <thead><tr><th scope="col">지표</th><th scope="col">이 종목</th><th scope="col">동종사 중앙값</th></tr></thead>
+      <tbody>
+        <tr><td>P/B <span class="subtle">종가 ÷ BPS</span></td><td class="num">${ratio(t.pb)}</td><td class="num">${ratio(median(peers.map((m) => m.pb)))}</td></tr>
+        <tr><td>ROE <span class="subtle">최근 3년 평균</span></td><td class="num">${roe(t.roe3)}</td><td class="num">${roe(median(peers.map((m) => m.roe3)))}</td></tr>
+        <tr><td>P/E <span class="subtle">종가 ÷ EPS</span></td><td class="num">${ratio(t.pe)}</td><td class="num">${ratio(median(peers.map((m) => m.pe)))}</td></tr>
+      </tbody></table></div>`));
+  const canvasBox = h(`<div class="chart-box"><canvas role="img" aria-label="${esc(fp.theme)} ROE 대비 P/B 산점도 — 이 종목 위치"></canvas></div>`);
+  box.append(canvasBox, h(`<div class="legend"><span><i style="background:${color("--lavender")}"></i>이 종목</span>
+      <span><i style="background:${color("--ice")}"></i>동종사</span>
+      <span><i style="background:${color("--text-3")}"></i>${fp.method === "regression" ? "회귀선" : "중앙값"}</span></div>`));
+  if (mc) box.append(h(conditionRow(mc)));
+  box.append(h(`<p class="subtle">${esc(disclaimer || "")} 이 비교는 투자 권유가 아닙니다.</p>`));
+  $("#score").replaceChildren(box);
+  queueMicrotask(() => drawRoePb(canvasBox.querySelector("canvas"), fp));
+}
+
+function drawRoePb(canvas, fp) {
+  const pts = (ms) => ms.filter((m) => m.pb !== null && m.roe3 !== null).map((m) => ({ x: Number(m.roe3) * 100, y: Number(m.pb), name: m.name }));
+  const all = pts(fp.members);
+  const xs = all.map((p) => p.x);
+  const [lo, hi] = [Math.min(...xs), Math.max(...xs)];
+  const datasets = [
+    { label: "동종사", data: pts(fp.members.filter((m) => !m.is_target)), backgroundColor: color("--ice"), pointRadius: 4 },
+    { label: "이 종목", data: pts(fp.members.filter((m) => m.is_target)), backgroundColor: color("--lavender"), pointRadius: 7 },
+  ];
+  const guide = { borderColor: color("--text-3"), borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0, showLine: true, fill: false };
+  if (fp.method === "regression" && all.length) {
+    const y = (x) => Number(fp.intercept) + Number(fp.slope) * (x / 100);
+    datasets.push({ label: "회귀선", data: [{ x: lo, y: y(lo) }, { x: hi, y: y(hi) }], ...guide });
+  } else if (fp.median_pb !== null && all.length) {
+    const ys = all.map((p) => p.y);
+    datasets.push({ label: "P/B 중앙값", data: [{ x: lo, y: Number(fp.median_pb) }, { x: hi, y: Number(fp.median_pb) }], ...guide },
+      { label: "ROE 중앙값", data: [{ x: Number(fp.median_roe) * 100, y: Math.min(...ys) }, { x: Number(fp.median_roe) * 100, y: Math.max(...ys) }], ...guide });
+  }
+  draw(canvas, {
+    type: "scatter", data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { x: { title: { display: true, text: "ROE 3년 평균 (%)" } }, y: { title: { display: true, text: "P/B (배)" } } },
+      plugins: { tooltip: { callbacks: { label: (ctx) => (ctx.raw.name ? `${ctx.raw.name} · ROE ${num(ctx.raw.x, 1)}% · P/B ${num(ctx.raw.y, 2)}` : ctx.dataset.label) } } },
+    },
+  });
+}
+
 function renderScore(a) {
   const s = a.attractiveness;
+  if (s.data_quality?.score_null_code === "financial_profile") {
+    renderFinancialProfile(s, stock?.market_condition, a.disclaimer);
+    return;
+  }
   if (s.unscored_reason) {
     $("#score").replaceChildren(emptyState({ title: "이 업종은 매력도 점수를 내지 않습니다", body: s.unscored_reason }));
     return;

@@ -7,7 +7,9 @@
 --   종합 = Σ(w × Fs), 빠진 팩터는 0(중립). 필수 팩터(저평가·수익성)가 없거나 유효 팩터 < min_factors면 NULL
 --   점수 = 같은 국가·묶음·프리셋 안 백분위 100 × (n − 순위) / n — "상위 p%"(= 100 × 순위 / n)와 정확히 맞물린다(D-003).
 --     80 이상 = 상위 20%. 표본이 1개면 50
---   family = 주 테마의 scoring(financial 금융끼리 / general) — score_zscore.sql과 같은 묶음
+--   family = 주 테마의 scoring(financial 금융끼리 / general) — score_rank_normal.sql과 같은 묶음
+--   금융 묶음은 팩터 점수만 남기고 종합·백분위를 내지 않는다(D-028 — 은행·보험·증권의 회계 구조가 달라 한 줄 순위를 만들지 않음,
+--     화면은 같은 하위 업종 안 P/B·ROE 비교 — services/financial_profile.py)
 WITH mw AS (
     SELECT * FROM unnest(CAST(:w_metrics AS text[]), CAST(:w_values AS numeric[])) AS x(metric, w)
 ),
@@ -60,7 +62,8 @@ wide AS (
     GROUP BY st.stock_id, st.country, st.family, p.preset_id
 ),
 comp AS (
-    SELECT wide.*, CASE WHEN wide.has_required AND wide.coverage >= :min_factors THEN wide.weighted END AS composite
+    SELECT wide.*, CASE WHEN wide.family <> 'financial' AND wide.has_required AND wide.coverage >= :min_factors
+                        THEN wide.weighted END AS composite
     FROM wide
 ),
 ranked AS (                           -- 국가·묶음·프리셋 안 순위 (NULL은 제외)

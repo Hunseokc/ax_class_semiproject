@@ -1,5 +1,5 @@
 // 대시보드 홈: 주요 지수 5개 + USD/KRW 카드 (값·등락·스파크라인) + 내 관심종목 카드
-import { PRESET_EVENT, savePref, getFx, getIndices, getPortfolioSummary, getPortfolios, getPreset, getHomeRanking, getSectors, getSentiment, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S6-A] getHomeRanking·getSectors·getSentiment · 포트폴리오 요약
+import { PRESET_EVENT, savePref, getFx, getIndices, getPortfolioSummary, getPortfolios, getPreset, getFinancialPeers, getHomeRanking, getSectors, getSentiment, getWatchlist } from "../api.js";   // [S4-A] PRESET_EVENT·getPreset  [S6-A] getHomeRanking·getSectors·getSentiment · 포트폴리오 요약 · 금융 탭(D-028)
 import { DASH, changeHtml, changeLabel, date, dateTime, esc, krw, num, pct, price, shortDate, signedKrw, stockUrl, usd } from "../format.js";   // [S5-A] pct
 import { color, destroyCharts, draw, scoreBand, scoreGauge, sparkline } from "../components/charts.js";   // [S4-A] scoreGauge
 import { REFRESHED_EVENT, mountSidebar } from "../components/sidebar.js";   // [S3-A] REFRESHED_EVENT
@@ -602,7 +602,8 @@ loadPortfolioWidget();
 
 // ---------------------------------------------------------------- 시장 주목 종목 TOP 5 (GET /home/ranking)
 // 카드 4장 = 순위 기준(거래량 급증·매력도) × 시장(국내·미국). 탭을 오가지 않고 한눈에 비교한다.
-// 매력도 카드는 일반·금융 탭 — 금융은 금융끼리 매긴 백분위라 일반 기업과 한 줄에 세우지 않는다(D-003)
+// 매력도 카드는 일반·금융 탭 — 금융은 종합 점수·순위가 없고(D-028) 하위 업종마다 P/B·ROE(3년 평균)와 ROE 대비 P/B 위치를
+// 이름순으로 보인다(GET /home/financial-peers, 순위 아님). 일반 기업과 한 줄에 세우지 않는다(D-003)
 // 행 = 순위 · 종목명(종목코드·시장 배지, 관심종목이면 ★) · 그 카드의 순위 근거 값 하나. 가격·등락률은 관심종목·리스트에 있으므로 넣지 않는다
 const TOP_KINDS = {
   volume_surge: { eyebrow: "VOLUME SURGE", title: "거래량 급증", empty: "20거래일 거래량이 쌓인 종목이 없습니다" },
@@ -646,9 +647,37 @@ for (const country of ["KR", "US"]) {
       (v) => { topFamily[country] = v; loadTop("attractiveness", country); }, { label: `매력도 순위 묶음 (${TOP_COUNTRIES[country]})` }));
 }
 
+// 금융 탭 행 — 순위 없이 P/B·ROE와 회귀선(또는 중앙값) 대비 위치 한 단어
+function finRow(m) {
+  const where = m.gap === null ? "" : Number(m.gap) < 0 ? "싸게" : "비싸게";
+  return h(`<li><a class="row" href="${stockUrl(m.market, m.ticker)}" title="${esc(m.position || "")}">
+      <span class="row__main"><span class="row__title">${esc(m.name)}</span>
+        <span class="row__sub">${esc(m.ticker)} · P/B ${m.pb === null ? DASH : num(m.pb, 2)} · ROE ${m.roe3 === null ? DASH : pct(m.roe3, { digits: 1 })}</span></span>
+      <span class="row__value subtle">${where}</span>
+    </a></li>`);
+}
+
+function finGroups(groups) {
+  const box = h('<div class="fin-groups"></div>');
+  for (const g of groups) {
+    const basis = g.method === "regression" ? `${g.n}종목 회귀선 대비` : `${g.n}종목 중앙값 대비`;
+    const ul = h('<ul class="list"></ul>');
+    ul.append(...g.members.map(finRow));
+    box.append(h(`<p class="subtle">${esc(g.theme)} · ${basis} — 같은 ROE의 동종사보다 장부가 대비 싸게/비싸게(참고 정보, 순위 아님)</p>`), ul);
+  }
+  return box;
+}
+
 function loadTop(onlyKind, onlyCountry) {
   return Promise.all(TOP_CARDS.filter((c) => (!onlyKind || c.kind === onlyKind) && (!onlyCountry || c.country === onlyCountry)).map(({ kind, country }) =>
-    load($("#top-list").querySelector(`[data-top="${kind}-${country}"]`), {
+    kind === "attractiveness" && topFamily[country] === "financial"
+      ? load($("#top-list").querySelector(`[data-top="${kind}-${country}"]`), {
+        skeleton: skeleton("row", 5),
+        fetch: async () => (await getFinancialPeers(country)).groups,
+        render: finGroups,
+        empty: emptyState({ title: "비교할 금융 종목이 없습니다", body: "금융 업종은 종합 매력도 순위를 내지 않습니다(같은 업종 안 P/B·ROE 비교만)." }),
+      })
+      : load($("#top-list").querySelector(`[data-top="${kind}-${country}"]`), {
       skeleton: skeleton("row", 5),
       fetch: async () => (await getHomeRanking(kind, country, 5, topFamily[country])).items,
       render: (items) => {

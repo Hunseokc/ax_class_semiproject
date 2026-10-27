@@ -13,7 +13,8 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_id, get_db, get_engine_dep, get_preset
-from app.schemas.api import HomeRankingOut, SectorsOut, SentimentOut
+from app.schemas.api import FinancialPeersOut, HomeRankingOut, SectorsOut, SentimentOut
+from app.services.financial_profile import financial_overview
 from app.services.home_ranking import get_attractiveness_ranking, get_volume_surge_ranking
 from app.services.sectors import read_sectors
 from app.services.sentiment import get_sentiment
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/home", tags=["home"])
             summary="시장 주목 종목 TOP N — 거래량 급증(20거래일 평균 대비 배수) 또는 매력도 순위 (노출 종목 + 관심종목)")
 def ranking(kind: Literal["volume_surge", "attractiveness"] = Query(description="volume_surge·attractiveness"),
             country: Literal["KR", "US"] = "KR",
-            family: Literal["general", "financial"] = Query("general", description="매력도 순위의 점수 묶음 — 금융은 금융끼리(별도 탭)"),
+            family: Literal["general", "financial"] = Query("general", description="매력도 순위의 점수 묶음 — 금융은 종합 점수가 없어 빈 목록(D-028, /home/financial-peers)"),
             limit: int = Query(5, ge=1, le=20),
             user_id: int = Depends(get_current_user_id),
             preset: dict = Depends(get_preset),
@@ -37,6 +38,12 @@ def ranking(kind: Literal["volume_surge", "attractiveness"] = Query(description=
         items = get_attractiveness_ranking(db, country, limit, preset=preset["code"], user_id=user_id, family=family)
     return {"kind": kind, "country": country, "preset": preset["code"] if kind == "attractiveness" else None,
             "family": family if kind == "attractiveness" else None, "items": items}
+
+
+@router.get("/financial-peers", response_model=FinancialPeersOut,
+            summary="금융 탭 — 하위 업종(은행·카드·보험·증권)마다 P/B·ROE(3년 평균)·P/E와 ROE 대비 P/B 위치(순위 없음, D-028)")
+def financial_peers(country: Literal["KR", "US"] = "KR", db: Session = Depends(get_db)):
+    return {"country": country, "groups": financial_overview(db.connection(), country)}
 
 
 # ── [S6-C] 섹터 히트맵·시장 심리 지수 ──

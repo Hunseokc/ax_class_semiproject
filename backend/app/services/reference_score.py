@@ -12,6 +12,7 @@ listed 종목은 요청할 때마다 계산해 저장하지 않는다.
      유니버스 팩터 점수의 평균·표준편차로 재표준화 → 종합 = Σ 가중치 × 팩터(빠진 팩터 0), 저평가·수익성 필수
   5) 0~100: 유니버스 종합 점수 사이 순위로 같은 시장 백분위 100 × (n − 순위) / n (n = 유니버스 + 이 종목)
 점수를 내지 않는 테마(scoring none — 리츠·지주회사·상품 신탁)는 그 테마의 사유(unscored_reason)만 돌려준다.
+금융 묶음은 종합 점수 대신 같은 하위 업종 안 P/B·ROE 비교만 돌려준다(D-028, services/financial_profile.py).
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from sqlalchemy import Connection, text
 from app.ingest.sectors import theme_by_name
 from app.queries import sql
 from app.services.data_quality import fiscal_year_mix
+from app.services.financial_profile import stock_profile
 from app.services.scoring import (BADGE_FACTS, FACTORS, METRICS, MIN_FACTORS, REQUIRED_FACTORS, load_config, metric_params,
                                   null_reason, partition_label, rank_normal, score_badges)
 
@@ -100,6 +102,12 @@ def reference_score(conn: Connection, stock_id: int, country: str, preset: dict)
     as_of = conn.execute(text("SELECT MAX(as_of) FROM stock_scores")).scalar()
     if as_of is None:
         return None
+    if family == "financial":
+        code, reason = null_reason(0, False, family)
+        return {"preset": {k: preset[k] for k in ("code", "name", "description")}, "as_of": as_of, "reference": True,
+                "data_quality": {"partition": partition_label(country, family), "family": family,
+                                 "score_null_code": code, "score_null_reason": reason},
+                "financial_profile": stock_profile(conn, stock_id, country)}
     cfg = load_config()
     mine = conn.execute(sql("score_metrics"), metric_params(cfg, stock_id)).mappings().all()
     if not mine:
