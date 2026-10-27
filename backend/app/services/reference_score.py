@@ -9,7 +9,7 @@ listed 종목은 요청할 때마다 계산해 저장하지 않는다.
      축소 추정으로 뺀다(score_neutralize.sql과 같은 규칙, 안정성 제외, ±3). 주 테마가 없으면 z_adj = z
   4) 팩터 점수·종합: score_aggregate.sql과 같은 규칙(유효 팩터 3개 이상, 가중치 재정규화)
   5) 0~100: 유니버스 종합 점수의 국가·묶음·프리셋 평균·표본표준편차로 표준화 → 100·Φ(z)
-점수를 내지 않는 테마(scoring none — 리츠)는 사유(unscored_reason)만 돌려준다.
+점수를 내지 않는 테마(scoring none — 리츠·지주회사·상품 신탁)는 그 테마의 사유(unscored_reason)만 돌려준다.
 """
 from __future__ import annotations
 
@@ -19,14 +19,14 @@ from decimal import Decimal
 
 from sqlalchemy import Connection, text
 
+from app.ingest.sectors import theme_by_name
 from app.queries import sql
 from app.services.data_quality import fiscal_year_mix
 from app.services.scoring import FACTORS, METRICS, MIN_FACTORS, load_config, partition_label
 
 MAD_SCALE = 1.4826
 MIN_ROBUST_N = 5
-UNSCORED_REASON = ("리츠·부동산은 임대 수익(FFO)과 배당으로 봐야 해서 이익·매출 기준인 매력도 점수를 내지 않습니다. "
-                   "배당수익률과 PBR을 함께 보세요.")
+UNSCORED_DEFAULT = "업종 특성상 이익·매출 기준인 매력도 점수를 내지 않습니다."
 FAMILY_WORD = {"general": "", "financial": " 금융"}
 
 # 같은 국가·같은 묶음 유니버스 종목(대상 제외)의 지표 원값과, 대상과 같은 주 테마인지
@@ -65,6 +65,12 @@ def neutralize(z: float, peers: list[float], k: float) -> float:
     return max(-3.0, min(3.0, z - n / (n + k) * mean))
 
 
+def unscored_reason(theme: str | None) -> str:
+    """scoring none 테마의 사유(config/universe.yaml unscored_reason)."""
+    t = theme_by_name().get(theme) if theme else None
+    return (t.unscored_reason if t else None) or UNSCORED_DEFAULT
+
+
 def reference_score(conn: Connection, stock_id: int, country: str, preset: dict) -> dict | None:
     """ScoreOut과 같은 모양(+ reference). 유니버스 점수가 아직 없거나 그 종목 시세가 없으면 None."""
     theme = conn.execute(text("SELECT group_id, theme, family FROM v_stock_theme WHERE stock_id = :s"),
@@ -72,7 +78,7 @@ def reference_score(conn: Connection, stock_id: int, country: str, preset: dict)
     family = theme["family"] if theme else "general"
     if family == "none":
         return {"preset": {k: preset[k] for k in ("code", "name", "description")}, "reference": True,
-                "unscored_reason": UNSCORED_REASON}
+                "unscored_reason": unscored_reason(theme["theme"])}
     as_of = conn.execute(text("SELECT MAX(as_of) FROM stock_scores")).scalar()
     if as_of is None:
         return None

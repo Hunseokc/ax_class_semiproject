@@ -29,6 +29,7 @@ class Theme:
     scoring: str                         # general / financial / none
     commodity: str | None                # 연결 원자재 indices.code, 연동이지만 시세가 없으면 'none', 연동이 아니면 None
     commodity_by_ticker: dict
+    unscored_reason: str | None = None   # scoring none 테마의 상세 화면 사유
 
     @property
     def commodity_linked(self) -> bool:
@@ -55,11 +56,14 @@ def themes() -> tuple[Theme, ...]:
         th = Theme(name=t["name"], sector=t["sector"], ksic=tuple(str(k) for k in t.get("ksic", [])),
                    sic=tuple(_range(r) for r in t.get("sic", [])), tickers=frozenset(str(x) for x in t.get("tickers", [])),
                    scoring=t.get("scoring", "general"), commodity=t.get("commodity"),
-                   commodity_by_ticker={str(k): v for k, v in (t.get("commodity_by_ticker") or {}).items()})
+                   commodity_by_ticker={str(k): v for k, v in (t.get("commodity_by_ticker") or {}).items()},
+                   unscored_reason=t.get("unscored_reason"))
         if th.sector not in u.sectors:
             raise ValueError(f"universe.yaml themes: {th.name}의 섹터 {th.sector}가 sectors에 없다")
         if th.scoring not in SCORING:
             raise ValueError(f"universe.yaml themes: {th.name}의 scoring {th.scoring} — {SCORING} 중 하나")
+        if th.scoring == "none" and not th.unscored_reason:
+            raise ValueError(f"universe.yaml themes: {th.name}은 점수를 내지 않으니 unscored_reason이 필요하다")
         for x in th.tickers:
             if x in owner:
                 raise ValueError(f"universe.yaml themes: 티커 {x}가 {owner[x]}·{th.name}에 함께 지정됨")

@@ -135,7 +135,7 @@ class GroupRef(Schema):
 class ThemeOut(Schema):
     name: str                                # 주 테마 (config/universe.yaml themes)
     sector: str | None                       # 부모 섹터 (peer_groups.sector)
-    family: Literal["general", "financial", "none"]   # 점수 묶음 — financial 금융끼리, none 점수 없음(리츠)
+    family: Literal["general", "financial", "none"]   # 점수 묶음 — financial 금융끼리, none 점수 없음(리츠·지주회사·상품 신탁)
     commodity_linked: bool                   # 원자재 연동 테마
 
 

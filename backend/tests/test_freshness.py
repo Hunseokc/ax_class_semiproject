@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import text
 
 from app.ingest import jobs
-from app.ingest.sectors import commodity_code, primary_theme, secondary_themes
+from app.ingest.sectors import commodity_code, primary_theme, secondary_themes, theme_by_name
 from app.providers.base import ValuationBase
 from app.providers.sec import annual_dps
 from app.services import freshness
@@ -163,6 +163,16 @@ def test_theme_tickers_override_codes_and_secondary_themes():
     assert _theme("US", "AMZN", sic=5961)[0] == "빅테크"
     assert [t.name for t in secondary_themes("AMZN")] == ["유통·커머스", "소프트웨어·IT서비스"]
     assert _theme("KR", "105560", ksic="64992") == ("은행·카드", "금융")  # 금융지주는 지주회사가 아니라 은행
+
+
+def test_unscored_themes_trusts_holdings_and_financial_consolidation():
+    """D-004: 순수 지주·상품 신탁은 점수 없음(사유 포함), 다우기술(키움증권 연결)은 금융 묶음."""
+    assert _theme("US", "GLD", sic=6221)[0] == "상품 신탁" and _theme("US", "AGQ", sic=6221)[0] == "상품 신탁"
+    assert _theme("US", "X", sic=6211)[0] == "증권·자산운용"           # 6221만 신탁, 나머지 6200대는 증권
+    assert _theme("KR", "023590", ksic="582") == ("증권·자산운용", "금융")
+    for name in ("지주회사", "상품 신탁", "리츠·부동산"):
+        t = theme_by_name()[name]
+        assert t.scoring == "none" and t.unscored_reason
 
 
 def test_commodity_code_prefers_ticker_then_theme():

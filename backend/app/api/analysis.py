@@ -20,7 +20,7 @@ from app.queries import sql
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN, Num, Schema
 from app.core.config import get_settings
 from app.services.data_quality import data_quality, fiscal_year_mix
-from app.services.reference_score import reference_score
+from app.services.reference_score import reference_score, unscored_reason
 from app.services.scoring import FACTORS, METRICS, default_preset
 
 router = APIRouter(prefix="/stocks", tags=["analysis"])
@@ -103,7 +103,7 @@ class ScoreOut(Schema):
     reference: bool = False                      # 상장 목록 종목의 참고 점수(유니버스 밖)
     reference_note: str | None = None
     fin_basis: list[FinBasisOut] = []            # 같은 시장 비교 표본의 재무 기준 연도별 종목 수(연도 내림차순)
-    unscored_reason: str | None = None           # 업종 규칙으로 점수를 내지 않는 종목(리츠)의 사유 — as_of·score 없음
+    unscored_reason: str | None = None           # 업종 규칙으로 점수를 내지 않는 종목(리츠·지주회사·상품 신탁)의 사유 — as_of·score 없음
 
 
 class PresetOut(PresetRef):
@@ -189,6 +189,11 @@ class PeersChartOut(Schema):
 def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row) -> dict:
     out = {"preset": {k: preset[k] for k in ("code", "name", "description")}}
     if row["score_as_of"] is None:
+        # 비교 표본에 남아 있지만 점수를 내지 않는 테마(다음 비교군 재선정 전까지 — 지주회사·상품 신탁 등)
+        theme = db.execute(text("SELECT theme, family FROM v_stock_theme WHERE stock_id = :s"),
+                           {"s": stock_id}).mappings().first()
+        if theme and theme["family"] == "none":
+            out["unscored_reason"] = unscored_reason(theme["theme"])
         return out
     weights = dict(db.execute(text("SELECT factor, weight FROM scoring_weights WHERE preset_id = :p"),
                               {"p": preset["preset_id"]}).all())

@@ -598,9 +598,11 @@ def test_commodity_theme_uses_three_year_average_earnings(engine, universe, clie
 
 
 def test_reit_theme_is_not_scored_and_reference_explains(client, engine, universe):
-    _theme_rule(engine, 3, scoring="none")                                  # 자동차(5, 6)를 점수 없음(리츠)으로
+    _theme_rule(engine, 3, scoring="none", name="리츠·부동산")               # 자동차(5, 6)를 점수 없음(리츠)으로
     compute_scores(engine, as_of=D)
     assert scalar(engine, "SELECT count(*) FROM stock_metric_values WHERE stock_id IN (5, 6)") == 0
+    b = client.get(f"{API}/stocks/KOSPI/005380/analysis").json()["attractiveness"]   # 비교 표본에 남은 점수 없음 종목도 사유
+    assert b["score"] is None and "리츠" in b["unscored_reason"]
     with engine.begin() as conn:                                            # 상장 목록 리츠 종목 → 사유만
         conn.execute(text("UPDATE stocks SET coverage = 'listed' WHERE stock_id = 5"))
     a = client.get(f"{API}/stocks/KOSPI/035420/analysis").json()["attractiveness"]
