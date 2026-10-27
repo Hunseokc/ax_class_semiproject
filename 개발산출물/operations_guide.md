@@ -186,8 +186,21 @@ done
 1. 이미지 push → `gcloud run deploy stockmind`(리비전 stockmind-00016-9sp) → Jobs 3개 `--image`
 2. `gcloud run jobs execute stockmind-benchmark --args="python,-m,app.ingest,scores" … --wait` — 배포 DB 점수 v2.2 재계산
 3. 확인(API): 모델 `v2.2-2026-10-27`, MU 가치 12/277(개발 DB와 같음), 한일홀딩스 가치 42/300, 가치 함정 신호 z_adj ≤ 0, NVDA 테마 위치에 주가 흐름(반도체 3/32)
-4. sanity 목록(`개발산출물/`)은 이미지에 없어(.dockerignore) 배포 DB 전체 sanity는 돌리지 않았다
+4. sanity 목록(`개발산출물/`)은 이미지에 없어(.dockerignore) 배포 DB 전체 sanity는 돌리지 않았다 — 5차부터 이미지에 넣는다
 - Claude Code 자동 모드: 허용 규칙이 Bash(`*gcloud* run deploy stockmind *` 등)이면 Bash 도구로, **파이프 없이** 한 명령씩 실행해야 규칙에 맞는다(`| tail`이 붙으면 명령이 둘로 나뉘어 막힘, PowerShell 도구 호출은 Bash 규칙에 안 맞음).
+
+**5차 적용 절차 (수정 3 — 매력도 v2.3~v2.5, 검토 장부 D-024~D-030)** — PR #122~#125를 차례로 머지한 main으로 한 번에 배포한다. 스키마 변경 2개(014·015).
+1. 이미지 push → `gcloud run deploy stockmind --image $IMG …` → Jobs 3개 `--image`(명령은 하나씩)
+2. `gcloud run jobs execute stockmind-benchmark --args="python,-m,app.ingest,migrate,014_fin_currency" … --wait`, 같은 방식으로 `migrate,015_sanity_runs`
+3. `master,--offline` — 주 테마 직접 지정(D-024)·지주회사 테마 3종목(D-025)이 peer_groups·주 테마에 들어간다
+4. `financials,--years,3,--tickers,241560` — 두산밥캣 USD 재무를 원화로 다시 받기(D-026)
+5. `scores` — 모델 v2.5 재계산
+6. **sanity Job 만들기**(한 번): 같은 이미지로
+   `gcloud run jobs create stockmind-sanity --image $IMG --region asia-northeast3 --project stockmind-512107 --args="python,-m,app.ingest,sanity,--save,--env,deploy" --set-secrets DATABASE_URL=DATABASE_URL:latest --max-retries 0`
+   — required 실패가 있으면 종료 코드 1이라 실행이 '실패'로 남는다(재시도하지 않음). 결과 표는 배포 DB `sanity_runs`, 전체 보고는 Job 로그.
+7. `gcloud run jobs execute stockmind-sanity --region asia-northeast3 --project stockmind-512107 --wait` → 배포 DB에서 `DEPLOY-sanity-ran`이 통과로 남는다. 매일 07:00 `stockmind-benchmark`(점수 재계산) 뒤에 돌도록 Cloud Scheduler `stockmind-sanity`를 07:40으로 만든다(`gcloud scheduler jobs create http …` — 기존 Job 스케줄러와 같은 방식).
+8. 확인: `/api/v1/stocks/KOSPI/001450/analysis`의 `attractiveness.financial_profile`(금융 업종 비교), 홈 금융 탭, 모델 `v2.5-2026-10-27`, `SELECT environment, as_of, passed, known_fail, target_fail, unverified, required_fail FROM sanity_runs ORDER BY run_id DESC LIMIT 1`.
+- 다음 `benchmark --reselect`(30일 주기) 때 지주회사 테마로 옮긴 3종목(한국앤컴퍼니·한화·다우기술)이 비교 표본에서 빠진다.
 
 > 이 절차는 2026-10-22 배포 상태(이미지 태그 형식, Cloud Build 미사용, 서비스·Job이 같은 이미지)를 조회해 맞춘 것이다. 레포에는 배포 스크립트가 없으므로, 실제로 쓰던 명령과 다르면 이 절을 고친다.
 

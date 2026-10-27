@@ -124,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--cases", type=Path, help="sanity_cases.yaml 경로(기본: 개발산출물/매력도_검토)")
     p.add_argument("--as-of", type=date.fromisoformat, help="점수 계산일(기본: 최신)")
     p.add_argument("--out", type=Path, help="결과 마크다운을 이 파일에도 쓴다")
+    p.add_argument("--save", action="store_true", help="결과를 sanity_runs 표에 남긴다(D-030)")
+    p.add_argument("--env", choices=("dev", "deploy"), default="dev", help="--save 기록의 환경(배포 Job은 deploy)")
     # ── [S4-D] 비교군 ──
     sub.add_parser("benchmark").add_argument("--reselect", action="store_true", help="시가총액 순위로 지금 다시 고른다")
     sub.add_parser("hydrate").add_argument("tickers", nargs="+")
@@ -214,8 +216,8 @@ def main(argv: list[str] | None = None) -> int:
         print("stock_scores rows:", compute_scores(engine))
     elif args.cmd == "sanity":
         from app.services.sanity import run as run_sanity
-        with engine.connect() as conn:
-            report, ok = run_sanity(conn, args.cases, args.as_of)
+        with engine.begin() as conn:                      # --save면 같은 트랜잭션에서 sanity_runs에 남긴다
+            report, ok = run_sanity(conn, args.cases, args.as_of, save=args.save, env=args.env)
         print(report)
         if args.out:
             args.out.write_text(report + "\n", encoding="utf-8")

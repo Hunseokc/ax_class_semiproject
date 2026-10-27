@@ -349,6 +349,24 @@ CREATE TABLE stock_scores (
   PRIMARY KEY (stock_id, as_of, preset_id)
 );
 
+-- sanity 실행 기록 (migration 015, 검토_장부 D-030): python -m app.ingest sanity --save — 배포 DB에서도 결과를 남긴다
+--   통과 / 감수한 실패(known_fail·결정 번호) / target 실패 / 미검증 네 칸과 required 실패를 따로 센다
+CREATE TABLE sanity_runs (
+  run_id        SERIAL       PRIMARY KEY,
+  ran_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  as_of         DATE         NOT NULL,                  -- 판정한 점수 계산일
+  model_version VARCHAR(40),
+  environment   VARCHAR(20)  NOT NULL CHECK (environment IN ('dev', 'deploy')),
+  passed        INT          NOT NULL,
+  known_fail    INT          NOT NULL,                  -- 감수한 실패(known_fail + 결정 번호)
+  target_fail   INT          NOT NULL,
+  unverified    INT          NOT NULL,                  -- 미검증(데이터 없음·실행 불가)
+  required_fail INT          NOT NULL,                  -- 0이어야 종료 조건 2 충족
+  ok            BOOLEAN      NOT NULL,
+  results       JSONB        NOT NULL,                  -- [{id, status, result, value}]
+  report        TEXT         NOT NULL
+);
+
 -- =====================================================================
 -- Stage 5-D — 데이터 유효기간·밸류에이션 기초값 (원본 migration 006_sector_freshness)
 -- =====================================================================

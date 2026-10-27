@@ -8,6 +8,10 @@
 #   target     : 통과하면 좋지만 지금 데이터로는 어려울 수 있음. 결과만 기록.
 #   known_fail : 알고 받아들인 실패. decision 에 결정 기록 번호를 적는다.
 #
+# 결과 집계 (D-030): 통과 / 감수한 실패(known_fail·결정 번호) / target 실패 / 미검증(데이터 없음·실행 불가) 네 칸,
+#   required 실패는 따로. 감수한 실패는 종료를 막지 않지만 '통과'에 합치지 않는다. 미검증은 종료 코드에 넣지 않고 따로 적는다.
+#   python -m app.ingest sanity --save --env deploy 가 배포 DB의 sanity_runs 표에 결과를 남긴다(배포 이미지에 이 파일이 들어 있다).
+#
 # 순위 정의 (D-012)
 #   *_rank       : 같은 시장(market)·같은 묶음(family) 안 프리셋 종합 순위. 1이 가장 높음.
 #   *_percentile : 같은 범위의 백분위(0~100, 높을수록 상위).
@@ -524,6 +528,14 @@ rules:
     independent: false
     issue: U-8, R3-4
     decision: D-028
+
+  - id: DEPLOY-sanity-ran
+    check: 배포 DB 점수 재계산 뒤 sanity Job 이 같은 as_of 로 실행되어 결과가 남음
+    status: required
+    independent: true
+    issue: U-6
+    decision: D-030
+    why: 개발 DB에서는 확인할 수 없어 미검증 — 배포 Job(--save --env deploy) 실행에서 통과
 
   - id: TOP20-theme-reviewed
     check: 프리셋 top20(시장 2 × 프리셋 4) 중 업종 코드로만 분류되고 직접 지정·판정 목록에 없는 종목 수 — 기록만
