@@ -1,9 +1,10 @@
 -- 종목 수치 분석: v_stock_metrics 1행 + 선택한 프리셋의 최신 매력도
+--   매력도는 전체 최신 계산일의 행만 — 점수를 내지 않게 된 종목(지주회사 등)의 옛 점수를 보이지 않는다(migration 013)
 --   순위·백분위는 같은 as_of·프리셋에서 점수가 있는 같은 country·같은 점수 묶음(family — 금융끼리) 종목끼리 (RANK·PERCENT_RANK)
 WITH sc AS (
     SELECT st.*
     FROM stock_scores st
-    WHERE st.stock_id = :stock_id AND st.preset_id = :preset_id
+    WHERE st.stock_id = :stock_id AND st.preset_id = :preset_id AND st.as_of = (SELECT MAX(x.as_of) FROM stock_scores x)
     ORDER BY st.as_of DESC
     LIMIT 1
 ),

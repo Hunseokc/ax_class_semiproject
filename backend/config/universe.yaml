@@ -63,7 +63,7 @@ stocks:
 # 순서: 국내는 KRX 전 종목 시가총액(1회 조회, 실패하면 DB 최신값), 미국은 stocks.cap_rank(SEC 발행주식수 × 종가 순위, app/ingest/background.py)
 benchmark:
   per_sector: 10          # 국가별 테마당 최대 종목 수(노출 종목 포함)
-  price_days: 400         # 일봉 보관 기간(달력일) — 변동성·12-1개월 모멘텀에 거래일 253개 필요
+  price_days: 800         # 일봉 보관 기간(달력일) — 변동성·12-1개월 모멘텀에 거래일 253개 필요. 800 = 약 2년: 점수 이력의 수익률 검증용(D-013)
   fin_years: 3            # FY 재무 연수 — 원자재 연동 테마의 3년 평균 순이익에도 쓴다 (유효기간은 data_freshness — 공시 일정 기반 + 90일 상한)
   reselect_days: 30       # 시가총액 순위로 다시 고르는 주기(매일 고르면 경계 종목이 들락날락)
   daily_at_kst: "07:00"   # 매일 이 시각 이후 1회 갱신(미국 장 마감 후)
@@ -80,7 +80,7 @@ sectors: [반도체·전자, IT·인터넷, 헬스케어, 자동차·운송장�
 # 종목마다 주 테마 1개: tickers 직접 지정 > 업종 코드. ksic = DART 기업개황 induty_code 접두어(가장 긴 접두어가 이긴다),
 #   sic = SEC SIC 범위("시작-끝" 또는 단일, 가장 좁은 범위가 이긴다). 어느 테마에도 없으면 테마·섹터 없음 → 비교 표본 제외
 # 노출 종목(stocks)은 반드시 tickers로 지정한다(업종 코드를 받기 전에도 master 적재만으로 주 테마가 정해지게)
-# scoring: general(기본) / financial(금융끼리 표준화, 매출 기준 지표 제외) / none(점수를 내지 않음 — 리츠)
+# scoring: general(기본) / financial(금융끼리 표준화, 매출 기준 지표 제외) / none(점수를 내지 않음 — 리츠·지주회사·상품 신탁, 사유는 unscored_reason)
 # commodity: 원자재 연동 테마 — 배지, E/P를 3년 평균 순이익으로, EPS 변화 제외. 값은 연결 원자재(indices code, category commodity)
 #   또는 none(연동이지만 무료 시세가 없음). commodity_by_ticker가 종목별로 우선한다
 themes:
@@ -117,7 +117,10 @@ themes:
      sic: ["3400-3569", "3580-3599", "3600", "3690-3699", "3740-3743", "3820-3829"], tickers: [URI]}
   - {name: 건설·엔지니어링, sector: 산업재, ksic: ["41", "42", "7212"], sic: ["1500-1799", "8700-8748"]}
   - {name: 운송·물류, sector: 산업재, ksic: ["49", "50", "51", "52"], sic: ["4000-4799"]}
-  - {name: 지주회사, sector: 산업재, ksic: ["649", "64992"]}     # 비금융 지주(연결재무라 일반 지표가 맞다). 금융지주는 금융 테마로 직접 지정
+  # 순수 지주: 이익 대부분이 지분법·배당이라 영업 지표가 맞지 않아 점수를 내지 않는다(D-004, 개발산출물/11 P4 — SK스퀘어 영업이익률 623%).
+  # 금융지주는 금융 테마로, 사업형 지주(에코프로·LS 등)는 사업 테마로 직접 지정한다
+  - {name: 지주회사, sector: 산업재, scoring: none, ksic: ["649", "64992"],
+     unscored_reason: "지주회사는 이익 대부분이 자회사 지분법 이익·배당이라 영업 지표 기준인 매력도 점수를 내지 않습니다. 자회사 점수와 순자산 가치를 함께 보세요."}
   # ---------------- 에너지·유틸리티
   - {name: 2차전지, sector: 에너지·유틸리티, ksic: ["282"], sic: ["3691"], commodity: none,     # 리튬은 무료 선물 시세가 없다
      tickers: ["373220", "006400", "247540", "086520", "005070", "003670", ALB, QS]}
@@ -148,8 +151,13 @@ themes:
   - {name: 은행·카드, sector: 금융, scoring: financial, ksic: ["641", "6491"], sic: ["6020-6036", "6100-6199"],
      tickers: ["105560", "055550", "086790", "316140", "138930", "175330", "139130"]}
   - {name: 보험, sector: 금융, scoring: financial, ksic: ["65"], sic: ["6310-6411"], tickers: ["138040"]}
-  - {name: 증권·자산운용, sector: 금융, scoring: financial, ksic: ["66"], sic: ["6200-6299"], tickers: ["071050", COIN]}
-  - {name: 리츠·부동산, sector: 금융, scoring: none, ksic: ["68"], sic: ["6500-6553", "6798"]}   # 실적 지표(FFO)가 없어 점수를 내지 않는다
+  - {name: 증권·자산운용, sector: 금융, scoring: financial, ksic: ["66"], sic: ["6200-6299"],
+     tickers: ["071050", COIN, "023590"]}       # 023590 다우기술: 키움증권 연결(부채/자본 21.9배)이라 금융끼리 비교(D-004)
+  - {name: 리츠·부동산, sector: 금융, scoring: none, ksic: ["68"], sic: ["6500-6553", "6798"],   # 실적 지표(FFO)가 없어 점수를 내지 않는다
+     unscored_reason: "리츠·부동산은 임대 수익(FFO)과 배당으로 봐야 해서 이익·매출 기준인 매력도 점수를 내지 않습니다. 배당수익률과 PBR을 함께 보세요."}
+  # 금·은 등 상품 신탁(SIC 6221 — GLD·IAU·ProShares Trust 등): 주식이 아니라 실물·선물 보유분이라 점수를 내지 않는다(D-004)
+  - {name: 상품 신탁, sector: 금융, scoring: none, sic: ["6221"], tickers: [GLD, IAU],
+     unscored_reason: "금·은 같은 상품을 보유하는 신탁은 영업하는 회사가 아니라서 매력도 점수를 내지 않습니다. 보유 상품 가격을 함께 보세요."}
 
 # 보조 테마 — 주 테마 밖의 큰 사업. 경쟁 비교·테마 필터에만 쓰고 섹터 중립화·비교군 선정에는 쓰지 않는다
 secondary_themes:
@@ -167,6 +175,9 @@ secondary_themes:
 # 수집 적재 공통
 ingest:
   flush_every: 20         # 재무·공시 적재를 몇 개 회사마다 한 트랜잭션으로 저장할지 (D3). 상세 수집(회사 1개)은 결과가 같다
+  # 지주사 재편 등으로 SEC CIK가 바뀐 종목 → 이전 CIK. 새 CIK companyfacts에 없는 해를 이전 CIK로 채운다(D-010)
+  sec_predecessor_cik:
+    XOM: "0000034088"     # 2026 ExxonMobil Holdings Corp(0002115436) 재편 — Exxon Mobil Corporation의 FY 재무
 
 # 백그라운드 재무 적재(상장 목록 종목을 우선순위대로 미리 받기, app/ingest/background.py)
 # 단위: ingestion_logs 행 수(회사 1건 = 1행 ≈ DART 호출 2~5번). 상세 화면·07:00 갱신이 쓴 행도 같이 센다

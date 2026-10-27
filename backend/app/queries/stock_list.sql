@@ -18,7 +18,8 @@ WITH base AS (
                        WHERE vs.stock_id = s.stock_id ORDER BY vs.as_of DESC LIMIT 1) v ON true
     LEFT JOIN v_fx_latest fx ON true
     LEFT JOIN LATERAL (SELECT st.score FROM stock_scores st
-                       WHERE st.stock_id = s.stock_id AND st.preset_id = (SELECT preset_id FROM scoring_presets WHERE code = :preset)
+                       WHERE st.stock_id = s.stock_id AND st.as_of = (SELECT MAX(x.as_of) FROM stock_scores x)
+                         AND st.preset_id = (SELECT preset_id FROM scoring_presets WHERE code = :preset)
                        ORDER BY st.as_of DESC LIMIT 1) sc ON true
     LEFT JOIN watchlist_items w ON w.stock_id = s.stock_id AND w.user_id = :user_id
     WHERE s.is_active

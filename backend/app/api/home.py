@@ -26,6 +26,7 @@ router = APIRouter(prefix="/home", tags=["home"])
             summary="시장 주목 종목 TOP N — 거래량 급증(20거래일 평균 대비 배수) 또는 매력도 순위 (노출 종목 + 관심종목)")
 def ranking(kind: Literal["volume_surge", "attractiveness"] = Query(description="volume_surge·attractiveness"),
             country: Literal["KR", "US"] = "KR",
+            family: Literal["general", "financial"] = Query("general", description="매력도 순위의 점수 묶음 — 금융은 금융끼리(별도 탭)"),
             limit: int = Query(5, ge=1, le=20),
             user_id: int = Depends(get_current_user_id),
             preset: dict = Depends(get_preset),
@@ -33,9 +34,9 @@ def ranking(kind: Literal["volume_surge", "attractiveness"] = Query(description=
     if kind == "volume_surge":
         items = get_volume_surge_ranking(db, country, limit, user_id=user_id)
     else:
-        items = get_attractiveness_ranking(db, country, limit, preset=preset["code"], user_id=user_id)
+        items = get_attractiveness_ranking(db, country, limit, preset=preset["code"], user_id=user_id, family=family)
     return {"kind": kind, "country": country, "preset": preset["code"] if kind == "attractiveness" else None,
-            "items": items}
+            "family": family if kind == "attractiveness" else None, "items": items}
 
 
 # ── [S6-C] 섹터 히트맵·시장 심리 지수 ──

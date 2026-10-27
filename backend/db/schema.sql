@@ -335,13 +335,13 @@ CREATE TABLE stock_scores (
   stock_id        INT          NOT NULL REFERENCES stocks ON DELETE CASCADE,
   as_of           DATE         NOT NULL,
   preset_id       SMALLINT     NOT NULL REFERENCES scoring_presets,
-  value_score     NUMERIC(8,4),                                   -- 팩터 점수 = 유효 지표 z_adj 평균 (Z 단위)
+  value_score     NUMERIC(8,4),                                   -- 팩터 점수 = 지표 z_adj 가중 평균을 국가·묶음 안에서 재표준화 (Z 단위, 모델 v2)
   quality_score   NUMERIC(8,4),
   growth_score    NUMERIC(8,4),
   safety_score    NUMERIC(8,4),
   momentum_score  NUMERIC(8,4),
-  composite       NUMERIC(8,4),                                   -- 유효 팩터 가중 평균(가중치 재정규화), 유효 팩터 < 3이면 NULL
-  score           NUMERIC(5,2) CHECK (score BETWEEN 0 AND 100),   -- 100·Φ(국가 내 표준화한 composite)
+  composite       NUMERIC(8,4),                                   -- Σ 가중치 × 팩터(빠진 팩터 0), 저평가·수익성 없거나 유효 팩터 < 3이면 NULL
+  score           NUMERIC(5,2) CHECK (score BETWEEN 0 AND 100),   -- 같은 국가·묶음·프리셋 안 백분위 100 × (n − 순위) / n
   factor_coverage SMALLINT     NOT NULL CHECK (factor_coverage BETWEEN 0 AND 5),
   data_quality    JSONB        NOT NULL DEFAULT '{}',             -- 계산 불가 지표·팩터와 사유
   PRIMARY KEY (stock_id, as_of, preset_id)

@@ -1,7 +1,8 @@
 """SEC 미국 재무 일괄 — frames API로 지표·기간마다 시장 전체 값을 받아 회사별 FY 재무를 만든다 (D8).
 
 companyfacts.zip(전 종목 원본)은 1.4GB라 Cloud Run 메모리에서 다루기 어렵고, frames는 호출 1회가 0.3~0.9MB다.
-태그 규칙은 sec.py get_annual_financials와 같다(CONCEPTS 우선순위, 기간형은 350~380일).
+태그 규칙은 sec.py get_annual_financials와 같다(CONCEPTS 우선순위, 기간형은 350~380일, 빈 영업이익·부채는 derive_missing).
+이전 CIK 연결(sec_predecessor_cik)은 회사별 API에서만 한다 — 대상이 노출 종목·비교군(XOM)이라 listed 일괄에는 필요 없다.
 
 - 기간형(매출·영업이익·순이익): CY{연도} frame. 회계연도가 12월에 끝나지 않아도 그 기간이 들어 있다(end가 결산일).
 - 순간형(자산·자본·부채): frames의 분기 순간값(CY{연도}Q{n}I)은 달력 분기에 맞춘 값이라, 회사마다 결산일과
@@ -21,7 +22,7 @@ from app.core.config import get_settings
 from app.providers.base import Financial, ProviderError
 from app.providers.convert import to_dec
 from app.providers.http import Throttle, call_with_retry
-from app.providers.sec import CONCEPTS
+from app.providers.sec import AUX_CONCEPTS, CONCEPTS, derive_missing
 
 log = logging.getLogger(__name__)
 _throttle = Throttle(0.25)            # sec.py와 같은 간격(초당 약 4건)
@@ -62,7 +63,7 @@ def get_annual_financials_bulk(ciks: set[str], years: int, *, last_year: int | N
     cy = list(range(last_year - years, last_year + 1))
     # 기간형: col → cik → end → (값, 개념)  — 우선순위 높은 개념이 먼저 채운다
     dur: dict[str, dict[str, dict[date, tuple[Decimal, str]]]] = {}
-    for col, concepts, duration in CONCEPTS:
+    for col, concepts, duration in CONCEPTS + AUX_CONCEPTS:
         if not duration:
             continue
         dur[col] = defaultdict(dict)
@@ -82,7 +83,7 @@ def get_annual_financials_bulk(ciks: set[str], years: int, *, last_year: int | N
     need_q = sorted({(e.year, (e.month - 1) // 3 + 1) for ends in fy_ends.values() for e in ends})
     # 순간형: 결산일이 들어 있는 달력 분기 frame만 받아 결산일과 같은 날짜 값만 쓴다
     inst: dict[str, dict[str, dict[date, tuple[Decimal, str]]]] = {}
-    for col, concepts, duration in CONCEPTS:
+    for col, concepts, duration in CONCEPTS + AUX_CONCEPTS:
         if duration:
             continue
         inst[col] = defaultdict(dict)
@@ -105,6 +106,9 @@ def get_annual_financials_bulk(ciks: set[str], years: int, *, last_year: int | N
                 vals[col] = hit[0] if hit else None
                 if hit and hit[1] != concepts[0]:
                     notes.append(f"{col}←{hit[1]}")
+            aux = {col: ((dur if duration else inst)[col].get(k, {}).get(end) or (None,))[0]
+                   for col, _, duration in AUX_CONCEPTS}
+            derive_missing(vals, aux, notes)
             fins.append(Financial(period_end=end, period_type="FY", data_source="SEC", accounting_std="US-GAAP",
                                   notes=notes, **vals))
         if fins:

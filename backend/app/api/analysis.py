@@ -4,6 +4,8 @@ Stage 6-B: 응답의 reference·reference_note(listed 참고 점수), metrics의
 """
 from __future__ import annotations
 
+import math
+
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -20,7 +22,7 @@ from app.queries import sql
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN, Num, Schema
 from app.core.config import get_settings
 from app.services.data_quality import data_quality, fiscal_year_mix
-from app.services.reference_score import reference_score
+from app.services.reference_score import reference_score, unscored_reason
 from app.services.scoring import FACTORS, METRICS, default_preset
 
 router = APIRouter(prefix="/stocks", tags=["analysis"])
@@ -31,8 +33,9 @@ SCORE_DISCLAIMER = ("매력도는 노출 종목과 매력도 비교군 안에서
                     "팩터 점수이며, 수익률 예측이나 투자 권유가 아닙니다.")
 PRESET_NOTE = "공개된 일반적 투자 스타일을 단순화한 가중치이며 특정 인물의 판단이 아닙니다."
 SCORE_METHOD = ("지표별로 같은 시장 안(금융은 금융끼리) 로버스트 Z(중앙값·MAD)를 구해 ±3으로 자르고, 같은 주 테마 평균을 축소 추정으로 빼 "
-                "섹터 중립화한 뒤(다시 ±3) 팩터 평균 → 프리셋 가중 평균 → 같은 범위 안에서 다시 표준화해 100·Φ(z)로 0~100 변환합니다. "
-                "금융 업종은 매출 기준 지표를, 원자재 연동 업종은 한 해 이익 변화를 쓰지 않고 E/P는 3년 평균 순이익으로 계산합니다.")
+                "섹터 중립화한 뒤(다시 ±3) 팩터 점수로 모으고, 팩터마다 같은 범위 안에서 다시 표준화해 프리셋 가중치로 더합니다(빠진 팩터는 0). "
+                "점수는 같은 시장 안 백분위(80 이상 = 상위 20%)입니다. 저평가 이익은 해마다 min(순이익, 0.78 × 영업이익)으로 일회성 이익을 자르고, "
+                "최신 이익이 3년 평균보다 크면 3년 평균을 씁니다. 금융 업종은 순이익 기준이고 매출·부채 지표를 쓰지 않습니다.")
 ACCOUNTING_NOTE = ("국내 종목 재무는 K-IFRS 연결(DART), 미국 종목은 US-GAAP(SEC)이며 PER·PBR은 국내 KRX 제공값, 미국은 SEC 발행주식수·FY 순이익·자본으로 계산한 값입니다. "
                    "회계기준·산정 방식이 달라 국가 간 수치 비교에는 한계가 있습니다.")
 PEER_METRICS = ["return_1m", "return_3m", "return_1y", "per", "pbr", "roe", "operating_margin", "revenue_yoy",
@@ -51,11 +54,12 @@ class PresetRef(Schema):
 
 
 class FactorOut(Schema):
-    score: Num | None                 # 유효 지표 z_adj 평균 (Z 단위)
+    score: Num | None                 # 팩터 점수 — 지표 z_adj 가중 평균을 같은 시장 안에서 재표준화한 값(Z 단위)
     weight: Num                       # 프리셋 가중치
-    effective_weight: Num | None      # 유효 팩터만으로 재정규화한 가중치
+    effective_weight: Num | None      # 점수에 쓴 가중치(빠진 팩터는 0으로 두고 다시 나누지 않으므로 = weight)
     contribution: Num | None          # effective_weight × score (합 = composite)
     available: bool
+    percentile: Num | None = None     # 같은 시장(금융은 금융끼리) 안 이 팩터의 백분위 100 × (n − 순위) / n — 레이더·요소 카드
 
 
 class MetricOut(Schema):
@@ -80,6 +84,20 @@ class PeerAverageOut(Schema):
     group_name: str
     size: int                         # 같은 국가 주 그룹 구성원 중 점수가 있는 종목 수(대상 포함)
     factors: dict[str, Num | None]    # 팩터 점수(Z) 평균
+    percentiles: dict[str, Num | None] = {}   # 구성원 팩터 백분위 평균(레이더의 테마 평균 선)
+
+
+class ThemeFactorPosition(Schema):
+    position: int                     # 같은 시장 테마 중 이 테마의 순위(테마 평균 팩터 점수 높은 순)
+    total: int
+    top_percent: int                  # 상위 p% = ⌈100 × 순위 / 테마 수⌉
+
+
+class ThemePositionOut(Schema):
+    """소속 테마(주 테마)가 같은 시장 테마들 사이에서 어디쯤인지 — 약한 테마의 1등을 구분하게 한다(D-003, U-1 표시 쪽)."""
+    group_name: str
+    themes: int                       # 비교한 테마 수(점수가 있는 구성원 2개 이상)
+    factors: dict[str, ThemeFactorPosition]
 
 
 class FinBasisOut(Schema):
@@ -100,10 +118,11 @@ class ScoreOut(Schema):
     data_quality: dict = {}
     method: str = SCORE_METHOD
     peer_average: PeerAverageOut | None = None   # 레이더 비교용 주 그룹 평균
+    theme_position: ThemePositionOut | None = None   # 소속 테마의 같은 시장 내 위치(테마 평균 팩터의 순위)
     reference: bool = False                      # 상장 목록 종목의 참고 점수(유니버스 밖)
     reference_note: str | None = None
     fin_basis: list[FinBasisOut] = []            # 같은 시장 비교 표본의 재무 기준 연도별 종목 수(연도 내림차순)
-    unscored_reason: str | None = None           # 업종 규칙으로 점수를 내지 않는 종목(리츠)의 사유 — as_of·score 없음
+    unscored_reason: str | None = None           # 업종 규칙으로 점수를 내지 않는 종목(리츠·지주회사·상품 신탁)의 사유 — as_of·score 없음
 
 
 class PresetOut(PresetRef):
@@ -189,17 +208,21 @@ class PeersChartOut(Schema):
 def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row) -> dict:
     out = {"preset": {k: preset[k] for k in ("code", "name", "description")}}
     if row["score_as_of"] is None:
+        # 비교 표본에 남아 있지만 점수를 내지 않는 테마(다음 비교군 재선정 전까지 — 지주회사·상품 신탁 등)
+        theme = db.execute(text("SELECT theme, family FROM v_stock_theme WHERE stock_id = :s"),
+                           {"s": stock_id}).mappings().first()
+        if theme and theme["family"] == "none":
+            out["unscored_reason"] = unscored_reason(theme["theme"])
         return out
     weights = dict(db.execute(text("SELECT factor, weight FROM scoring_weights WHERE preset_id = :p"),
                               {"p": preset["preset_id"]}).all())
     scores = {f: row[f"{f}_score"] for f in FACTORS}
-    valid_w = sum((weights[f] for f in FACTORS if scores[f] is not None), Decimal(0))
-    use = row["composite"] is not None and valid_w > 0
+    use = row["composite"] is not None
     factors = {}
-    for f in FACTORS:
-        ew = (weights[f] / valid_w).quantize(Decimal("0.0001")) if use and scores[f] is not None else None
+    for f in FACTORS:                       # 빠진 팩터는 0(중립)이라 가중치를 다시 나누지 않는다 — 기여도 합 = 종합
+        ew = weights[f] if use and scores[f] is not None else None
         factors[f] = {"score": scores[f], "weight": weights[f], "effective_weight": ew,
-                      "contribution": (weights[f] / valid_w * scores[f]).quantize(Decimal("0.0001")) if ew is not None else None,
+                      "contribution": (weights[f] * scores[f]).quantize(Decimal("0.0001")) if ew is not None else None,
                       "available": scores[f] is not None}
     mv = db.execute(text("SELECT metric, raw_value, z_raw, z_adj FROM stock_metric_values WHERE stock_id = :s AND as_of = :d"),
                     {"s": stock_id, "d": row["score_as_of"]}).mappings().all()
@@ -207,14 +230,51 @@ def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row)
     metrics = [{"metric": k, "label": d.label, "factor": d.factor, "direction": d.direction,
                 **{c: by_metric[k][c] if k in by_metric else None for c in ("raw_value", "z_raw", "z_adj")}}
                for k, d in METRICS.items()]
-    rank = ({"country": country, "family": (row["data_quality"] or {}).get("family", "general"),
+    family = (row["data_quality"] or {}).get("family", "general")
+    rank = ({"country": country, "family": family,
              "position": row["rank_position"], "total": row["rank_total"],
              "percentile": row["percentile"]} if row["rank_position"] is not None else None)
+    positions = db.execute(sql("factor_positions"), {"as_of": row["score_as_of"], "preset_id": preset["preset_id"],
+                                                      "country": country, "family": family}).mappings().all()
+    mine = {r["factor"]: r["percentile"] for r in positions if r["stock_id"] == stock_id}
+    for f in FACTORS:
+        factors[f]["percentile"] = mine.get(f)
+    peer = _peer_average(db, stock_id, country, preset["preset_id"], row["score_as_of"])
+    my_group = next((r["group_id"] for r in positions if r["stock_id"] == stock_id), None)
+    if peer and my_group is not None:
+        pcts: dict[str, list[Decimal]] = {}
+        for r in positions:
+            if r["group_id"] == my_group:
+                pcts.setdefault(r["factor"], []).append(r["percentile"])
+        peer["percentiles"] = {f: (sum(v) / len(v)).quantize(Decimal("0.01")) if (v := pcts.get(f)) else None for f in FACTORS}
     return {**out, "as_of": row["score_as_of"], "score": row["score"], "composite": row["composite"],
             "factor_coverage": row["factor_coverage"], "rank": rank, "factors": factors, "metrics": metrics,
             "data_quality": row["data_quality"] or {},
-            "peer_average": _peer_average(db, stock_id, country, preset["preset_id"], row["score_as_of"]),
+            "peer_average": peer, "theme_position": _theme_position(positions, my_group),
             "fin_basis": fiscal_year_mix(db.connection(), country, row["score_as_of"])}
+
+
+def _theme_position(positions, group_id: int | None) -> dict | None:
+    """테마마다 구성원(점수 있는 종목 2개 이상) 팩터 점수 평균을 내 같은 시장 테마 사이 순위를 매긴다."""
+    if group_id is None:
+        return None
+    sums: dict[tuple[str, int], list] = {}
+    names: dict[int, str] = {}
+    for r in positions:
+        if r["group_id"] is None:
+            continue
+        sums.setdefault((r["factor"], r["group_id"]), []).append(float(r["score"]))
+        names[r["group_id"]] = r["group_name"]
+    out: dict[str, dict] = {}
+    for f in FACTORS:
+        avgs = {g: sum(v) / len(v) for (fac, g), v in sums.items() if fac == f and len(v) >= 2}
+        if group_id not in avgs:
+            continue
+        position = 1 + sum(1 for a in avgs.values() if a > avgs[group_id])
+        out[f] = {"position": position, "total": len(avgs), "top_percent": math.ceil(100 * position / len(avgs))}
+    if not out:
+        return None
+    return {"group_name": names[group_id], "themes": max(v["total"] for v in out.values()), "factors": out}
 
 
 def _peer_average(db: Session, stock_id: int, country: str, preset_id: int, as_of) -> dict | None:

@@ -38,3 +38,6 @@ CREATE INDEX ix_fin_stock_type_end ON financial_statements (stock_id, period_typ
 
 -- 종목별 최근 공시 N건
 CREATE INDEX ix_disclosures_stock_filed ON disclosures (stock_id, filed_at DESC);
+
+-- 전체 최신 매력도 계산일(MAX(as_of)) — 화면·목록은 이 날의 점수만 읽는다(migration 013, 점수 이력이 매일 쌓임)
+CREATE INDEX ix_scores_as_of ON stock_scores (as_of);

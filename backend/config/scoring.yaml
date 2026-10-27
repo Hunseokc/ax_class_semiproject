@@ -1,8 +1,15 @@
 # 매력도 다중 팩터 모델 설정 → scoring_presets·scoring_weights로 적재 (개발산출물/09)
 # 유니버스 안에서의 상대적 위치를 나타내는 팩터 점수이며 수익률 예측·투자 권유가 아니다.
 
+# 모델 버전 — 점수 행(data_quality.model_version)에 남겨 같은 버전의 점수 이력만 비교한다(D-013).
+# 지표·합산 규칙을 바꾸면 올린다. v2 = 개발산출물/11 R11안(검토_장부 D-002)
+model_version: v2-2026-10-27
+
 # 섹터 중립화 축소 계수: z_adj = z − n/(n+k) × 주그룹 z 평균 (n = 주 그룹의 유효 표본 수)
 shrinkage_k: 5
+
+# 저평가 이익 = min(지배주주 순이익, after_tax × 영업이익) — 1 − 법인세 근사(미국 21%·국내 지방세 포함 24.2% 사이, D-002)
+after_tax: 0.78
 
 default_preset: balanced
 
@@ -18,7 +25,7 @@ presets:
     weights: {value: 0.05, quality: 0.10, growth: 0.35, safety: 0.10, momentum: 0.40}
   - code: growth
     name: 성장
-    description: 성장성 중심
+    description: 성장성 중심 — 성장 노출일 뿐 기대수익이 아님
     sort_order: 2
     weights: {value: 0.10, quality: 0.20, growth: 0.40, safety: 0.05, momentum: 0.25}
   - code: balanced

@@ -215,43 +215,41 @@ const scoreSection = h(`<section class="section card detail-section" aria-labell
     <div id="score"></div></section>`);
 $("#price-chart").closest("section").after(scoreSection);
 
-function gauge(score, { name = "매력도" } = {}) {
+// center·sub를 주면 가운데 글자를 바꾼다(매력도: "상위 p%" — 0~100 숫자 대신 같은 시장 위치, D-003)
+function gauge(score, { name = "매력도", center = null, sub = "/ 100", label = null } = {}) {
   const v = score === null ? 0 : Math.max(0, Math.min(100, score));
   const len = Math.PI * 70;   // 반원 길이 (r=70)
-  return `<svg class="gauge" viewBox="0 0 168 100" role="img" aria-label="${score === null ? `${name} 계산 불가` : `${name} ${num(score, 1)}점`}">
+  const big = center === null;
+  return `<svg class="gauge" viewBox="0 0 168 100" role="img" aria-label="${score === null ? `${name} 계산 불가` : label || `${name} ${num(score, 1)}점`}">
       <path d="M14 90 A70 70 0 0 1 154 90" fill="none" stroke="${color("--card-active")}" stroke-width="14" stroke-linecap="round"/>
       <path d="M14 90 A70 70 0 0 1 154 90" fill="none" stroke="${color("--lavender")}" stroke-width="14" stroke-linecap="round"
         stroke-dasharray="${(len * v) / 100} ${len}"/>
-      <text x="84" y="80" text-anchor="middle" font-size="30" font-weight="800">${score === null ? "–" : Math.round(score)}</text>
-      <text x="84" y="97" text-anchor="middle" font-size="11" fill="${color("--text-3")}">/ 100</text>
+      <text x="84" y="80" text-anchor="middle" font-size="${big ? 30 : 22}" font-weight="800">${score === null ? "–" : big ? Math.round(score) : center}</text>
+      <text x="84" y="97" text-anchor="middle" font-size="11" fill="${color("--text-3")}">${sub}</text>
     </svg>`;
 }
+// 같은 시장 상위 p% (1위도 최소 1%) — 점수(백분위) = 100 × (n − 순위) / n이라 상위 p% = 100 − 점수
+const topPercent = (rank) => Math.max(1, Math.ceil((100 * rank.position) / rank.total));
 
 // 매력도 5요소 — 화면 이름은 일상어로(내부 키는 그대로). 레이더 축·요소 카드·계산 근거 표가 같은 이름을 쓴다
 const FACTORS = [
-  { key: "value", label: "저평가", desc: "버는 돈·가진 자산에 비해 주가가 싼 편인가" },
-  { key: "quality", label: "수익성", desc: "자본과 매출로 돈을 잘 버는가 (최근 연간 기준)" },
-  { key: "growth", label: "성장성", desc: "매출과 이익이 작년보다 늘었나" },
-  { key: "safety", label: "안정성", desc: "주가가 덜 출렁이고 덜 빠지는가, 빚이 적은가" },
+  { key: "value", label: "저평가", desc: "일회성을 뺀 이익·가진 자산에 비해 주가가 싼 편인가 (실적이 나빠지는 중이면 감점)" },
+  { key: "quality", label: "수익성", desc: "가진 자산과 매출로 돈을 잘 버는가 (최근 연간 기준)" },
+  { key: "growth", label: "성장성", desc: "최근 2년 매출과 이익이 늘었나 (성장 정도일 뿐 기대수익이 아님)" },
+  { key: "safety", label: "안정성", desc: "주가가 덜 출렁이는가, 자산에 비해 빚이 적은가" },
   { key: "momentum", label: "주가 흐름", desc: "최근 1년 주가가 오르는 추세인가" },
 ];
 const FACTOR_LABEL = Object.fromEntries(FACTORS.map((f) => [f.key, f.label]));
-const SIGNED_METRICS = ["revenue_yoy", "eps_change_yield", "momentum"];
+const SIGNED_METRICS = ["revenue_cagr2", "profit_growth2", "momentum"];
 const rawFmt = (m) => (m.raw_value === null ? DASH
-  : m.metric === "debt_ratio" ? `${num(m.raw_value, 2)}배`
   : pct(m.raw_value, { digits: 1, sign: SIGNED_METRICS.includes(m.metric) }));
 const zFmt = (v) => {
   if (v === null || v === undefined) return DASH;
   const r = Math.round(v * 100) / 100;
   return r === 0 ? "0.00" : `${r > 0 ? "+" : ""}${num(r, 2)}`;
 };
-// 팩터 점수(Z) → 같은 시장 안 위치 0~100 (50 = 시장 중앙). 종합 점수와 같은 100·Φ(z) 변환
-const erf = (x) => {   // Abramowitz-Stegun 7.1.26 (오차 1.5e-7)
-  const t = 1 / (1 + 0.3275911 * Math.abs(x));
-  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
-  return x >= 0 ? y : -y;
-};
-const toPos = (z) => (z === null || z === undefined ? null : 100 * 0.5 * (1 + erf(z / Math.SQRT2)));
+// 레이더·요소 카드의 0~100 = 그 팩터의 같은 시장 안 백분위(API factors[k].percentile, 50 = 시장 중앙)
+const THEME_FACTORS = ["value", "quality", "growth"];   // 소속 테마 위치에 보여 주는 요소(D-003)
 // 요소별 '날씨': 같은 시장 안 위치 60 이상 맑음(강함) · 40~60 구름(보통) · 40 미만 비(약함)
 const WEATHER = [
   { min: 60, icon: icons.sun, word: "강함", cls: "wx--sun" },
@@ -294,7 +292,7 @@ function drawRadar(canvas, pos, peer) {
   }];
   if (peer) {
     datasets.push({
-      label: `${peer.group_name} 평균`, data: FACTORS.map((f) => toPos(peer.factors[f.key])), borderColor: color("--ice"),
+      label: `${peer.group_name} 평균`, data: FACTORS.map((f) => peer.percentiles?.[f.key] ?? null), borderColor: color("--ice"),
       backgroundColor: "transparent", borderWidth: 1.5, borderDash: [5, 4], pointRadius: 2, pointBackgroundColor: color("--ice"), spanGaps: true,
     });
   }
@@ -374,30 +372,51 @@ function renderScore(a) {
     return;
   }
   const dq = s.data_quality || {};
+  const mc = stock?.market_condition;   // 시장·섹터 점수는 상세 응답에서 — 프리셋을 바꿔 다시 그려도 그대로
+  if (s.score === null || s.score === undefined) {
+    // 점수가 없으면 일부 지표로 만든 요소값·레이더도 보이지 않는다(D-014) — 시장·섹터 점수(매력도와 별개)만 남긴다
+    const noFin = dq.score_null_code === "no_financials";
+    const box = h('<div class="score-panel__empty"></div>');
+    box.append(emptyState({
+      title: noFin ? "재무 정보가 없어 표기할 수 없습니다" : "매력도를 계산할 수 없습니다",
+      body: noFin ? "해외 상장 종목처럼 재무제표를 받을 곳이 없으면 저평가·수익성을 계산할 수 없어, 주가 같은 일부 정보만으로 점수를 내지 않습니다."
+        : esc(dq.score_null_reason || "") }));
+    if (mc) box.append(h(conditionRow(mc)));
+    $("#score").replaceChildren(box);
+    return;
+  }
+  const badges = dq.badges || [];   // 경고 배지(일회성 이익·결산 시점·재무 이력) — 설명은 계산 근거에도 적는다
   const market = s.rank?.country === "US" ? "미국" : "국내";
   const factors = Object.entries(s.factors);
-  const pos = Object.fromEntries(FACTORS.map((f) => [f.key, s.factors[f.key]?.available ? toPos(s.factors[f.key].score) : null]));
+  const pos = Object.fromEntries(FACTORS.map((f) => [f.key, s.factors[f.key]?.available ? (s.factors[f.key].percentile ?? null) : null]));
   const band = scoreBand(s.score);
   const peerWord = `${market}${s.rank?.family === "financial" ? " 금융" : ""} 비교군`;   // 금융은 금융끼리의 순위
-  const rankText = !s.rank ? "순위 없음" : `${peerWord} ${s.rank.total}개 중 <strong>${s.rank.position}위</strong>`;
-  const mc = stock?.market_condition;   // 시장·섹터 점수는 상세 응답에서 — 프리셋을 바꿔 다시 그려도 그대로
+  const rankText = !s.rank ? "순위 없음"
+    : `${peerWord} ${s.rank.total}개 중 <strong>${s.rank.position}위</strong> <span class="subtle">(상위 ${topPercent(s.rank)}%)</span>`;
+  const tp = s.theme_position;
+  const themeText = !tp ? "" : `<p class="score-theme subtle">소속 테마 <strong>${esc(tp.group_name)}</strong>는 같은 시장 테마 ${tp.themes}개 중 ${
+    THEME_FACTORS.filter((k) => tp.factors[k]).map((k) => `${FACTOR_LABEL[k]} ${tp.factors[k].position}위(상위 ${tp.factors[k].top_percent}%)`).join(" · ")
+  } — 테마 안 순위가 높아도 테마 자체가 약할 수 있습니다.</p>`;
   const el = h(`<div class="score-panel">
       <div class="score-panel__gauge score-panel__left">
         <div class="score-row">
-          <div class="score-row__gauge"><h3 class="score-row__title">매력 점수</h3>${gauge(s.score)}
+          <div class="score-row__gauge"><h3 class="score-row__title">매력도</h3>${gauge(s.score, s.rank
+            ? { center: `상위 ${topPercent(s.rank)}%`, sub: "같은 시장 안 위치", label: `매력도 같은 시장 상위 ${topPercent(s.rank)}%` } : {})}
             ${band ? `<p class="score-band"><i style="background:var(--gauge-${band.index})"></i>${band.label}</p>` : ""}</div>
           <div class="score-row__text">
             <p class="score-panel__rank">${rankText}</p>
-            <p class="subtle">${esc(s.preset.name)} 성향 · ${date(s.as_of)} 기준</p></div>
+            <p class="subtle">${esc(s.preset.name)} 성향 · ${date(s.as_of)} 기준</p>
+            ${badges.length ? `<p class="score-badges">${badges.map((b) => `<span class="badge badge--commodity" title="${esc(b.detail)}">${esc(b.label)}</span>`).join(" ")}</p>` : ""}</div>
         </div>
         ${mc ? conditionRow(mc) : ""}
         ${stock?.commodity ? commodityRow(stock.commodity) : ""}
       </div>
       <div class="score-panel__radar">
-        <div class="chart-box chart-box--radar"><canvas role="img" aria-label="매력도 5요소 레이더 (같은 시장 안 위치 0~100, 50 = 시장 중앙)"></canvas></div>
+        <div class="chart-box chart-box--radar"><canvas role="img" aria-label="매력도 5요소 레이더 (같은 시장 안 백분위 0~100, 50 = 시장 중앙)"></canvas></div>
         <div class="legend"><span><i style="background:${color("--lavender")}"></i>이 종목</span>
           ${s.peer_average ? `<span><i style="background:${color("--ice")}"></i>${esc(s.peer_average.group_name)} 평균 (${s.peer_average.size}종목)</span>` : ""}
           <span><i style="background:${color("--text-3")}"></i>시장 중앙 50</span></div>
+        ${themeText}
       </div>
       <p class="score-summary">${summarySentence(pos)}</p>
       <ul class="wx-list" aria-label="요소별 강약">${FACTORS.map((f) => {
@@ -413,16 +432,16 @@ function renderScore(a) {
 
   // 계산 근거(팩터 기여도·지표 원값/Z·메모·방법)는 접어 둔다
   const maxAbs = Math.max(0.5, ...factors.map(([, f]) => Math.abs(f.contribution ?? 0)));
-  const notes = [dq.score_null_reason, ...(dq.notes || [])].filter(Boolean);
+  const notes = [dq.score_null_reason, ...badges.map((b) => `${b.label}: ${b.detail}`), ...(dq.notes || [])].filter(Boolean);
   const basis = h(`<details class="score-method"><summary>계산 근거 보기 <span class="subtle">팩터 기여도 · 지표 원값과 표준점수(Z)</span></summary>
       <div class="score-basis">
         <p class="subtle">데이터 충족도 ${s.factor_coverage}/${s.factor_total} 요소${s.rank ? ` · 백분위 ${num(s.rank.percentile, 0)}` : ""}</p>
         ${s.fin_basis?.length ? `<p class="subtle">재무 기준 ${s.fin_basis.map((x) => `FY${x.fiscal_year} ${x.stocks}개`).join(" · ")}</p>` : ""}
         <div class="score-panel__factors">
-          <h3>팩터 기여도 <span class="subtle">(유효 팩터 가중치 × 팩터 점수, 합 = 종합 ${zFmt(s.composite)})</span></h3>
+          <h3>팩터 기여도 <span class="subtle">(가중치 × 팩터 점수, 빠진 팩터는 0, 합 = 종합 ${zFmt(s.composite)})</span></h3>
           ${factors.map(([k, f]) => contribRow(k, f, maxAbs)).join("")}
-          <p class="subtle">팩터 점수는 같은 시장 안 표준점수(Z) 단위입니다. 0이 시장 중앙, 음수 기여는 왼쪽으로 표시합니다.
-            레이더·요소 카드의 0~100은 이 Z를 100·Φ(Z)로 바꾼 값입니다.</p>
+          <p class="subtle">팩터 점수는 같은 시장 안에서 다시 표준화한 Z 단위입니다. 0이 시장 평균, 음수 기여는 왼쪽으로 표시합니다.
+            매력도와 레이더·요소 카드의 0~100은 같은 시장 안 백분위입니다(80 이상 = 상위 20%).</p>
         </div>
       </div></details>`);
   const body = basis.querySelector(".score-basis");

@@ -1,16 +1,19 @@
--- 매력도 1단계: 종목별 지표 원값 (기준: 종목별 최신 거래일 종가·최신 밸류에이션·최신 FY 재무)
+-- 매력도 1단계(모델 v2): 종목별 지표 원값 (기준: 종목별 최신 거래일 종가·최신 밸류에이션·최신 FY 재무)
 -- 대상: 파라미터 stock_id가 NULL이면 매력도 유니버스(활성 노출 종목 + 비교군, listed 제외)
 --       stock_id를 주면 그 종목만(상장 종목 목록의 참고 점수 계산용 — app/services/reference_score.py)
--- 지표 정의·NULL 사유는 개발산출물/09 2절. 한 종목당 10행(값이 없으면 raw_value NULL)
--- z_fixed: 정규화 없이 Z를 고정하는 경우(자본 ≤ 0인 부채비율 → −3). note: 대체 계산·고정 사유
--- null_note: 업종 규칙으로 일부러 비운 지표의 사유(missing_metrics에 기본 사유 대신 쓴다)
--- 주 테마(v_stock_theme) 규칙:
---   family financial(금융): 영업이익률·매출 YoY를 쓰지 않는다(은행·보험은 매출 구조가 다름)
---   family none(리츠): 점수를 내지 않는다 → 행을 만들지 않는다
---   원자재 연동(commodity_linked): E/P는 최근 3개 FY 평균 순이익 / 주식수(3개 미만이면 최신 FY), EPS 변화는 쓰지 않는다
+-- 지표 정의·NULL 사유는 개발산출물/09 2절(D-002). 한 종목당 10행(값이 없으면 raw_value NULL)
+-- note: 대체 계산 메모, null_note: 규칙으로 일부러 비운 지표의 사유(missing_metrics에 기본 사유 대신 쓴다)
+-- fy_count: 이어지는 FY 수(최대 3) — 3 미만이면 저평가 팩터를 그 비율만큼 줄인다(D-010, score_aggregate.sql)
+-- fy_end·ni0·oi0: 최신 FY 결산일·순이익·영업이익 — 경고 배지(일회성 이익·결산 시점, D-003)를 scoring.py가 만든다
+-- 재무 FY: 자산과 이익(순이익 또는 영업이익)이 있는 FY만 쓴다(일부 칸만 들어온 최신 FY는 건너뜀).
+--   t = 그중 최신, t−1·t−2 = 바로 뒤 FY 결산일보다 330~400일 앞선 FY(결산월 변경으로 끼어든 행은 건너뜀)
+-- 묶음(family, v_stock_theme): general / financial(순이익 기준, 매출·부채 지표 없음) / none(행을 만들지 않음)
+-- 해마다 저평가 이익 e = min(지배주주 순이익, after_tax × 영업이익) — 일회성 이익은 자르고 이자·비지배 몫은 남긴다.
+--   순이익이 없으면 after_tax × 영업이익, 영업이익이 없으면 순이익. 금융은 순이익
 WITH base AS (
-    SELECT vm.stock_id, vm.close, vm.eps, vm.bps, vm.volatility_1y, vm.max_drawdown_1y, vm.market_cap, vs.shares_outstanding,
-           COALESCE(t.family, 'general') AS family, COALESCE(t.commodity_linked, false) AS commodity
+    SELECT vm.stock_id, vm.close, vm.bps, vm.volatility_1y,
+           COALESCE(vm.market_cap, CAST(vs.shares_outstanding AS numeric) * vm.close) AS mcap,
+           COALESCE(t.family, 'general') AS family
     FROM v_stock_metrics vm
     JOIN stocks st ON st.stock_id = vm.stock_id
      AND CASE WHEN CAST(:stock_id AS int) IS NULL THEN st.is_active AND st.coverage <> 'listed'
@@ -20,26 +23,29 @@ WITH base AS (
                        WHERE x.stock_id = vm.stock_id ORDER BY x.as_of DESC LIMIT 1) vs ON true
     WHERE COALESCE(t.family, 'general') <> 'none'
 ),
-fy AS (
-    SELECT f.stock_id, f.period_end, f.revenue, f.operating_income, f.net_income, f.total_equity, f.total_debt,
-           LAG(f.period_end) OVER w AS prev_end,
-           LAG(f.revenue)    OVER w AS prev_revenue,
-           LAG(f.net_income) OVER w AS prev_net_income,
-           ROW_NUMBER() OVER (PARTITION BY f.stock_id ORDER BY f.period_end DESC) AS rn
+fy AS (                               -- 쓸 수 있는 FY
+    SELECT f.stock_id, f.period_end, f.revenue, f.operating_income, f.net_income, f.total_assets, f.total_debt
     FROM financial_statements f
-    WHERE f.period_type = 'FY'
-    WINDOW w AS (PARTITION BY f.stock_id ORDER BY f.period_end)
+    WHERE f.period_type = 'FY' AND f.total_assets IS NOT NULL
+      AND (f.net_income IS NOT NULL OR f.operating_income IS NOT NULL)
+      AND f.stock_id IN (SELECT b.stock_id FROM base b)
 ),
-fin AS (                              -- 최신 FY + 직전 FY(결산일 간격이 약 1년일 때만 인정, v_stock_metrics와 같은 규칙)
-    SELECT fy.*, COALESCE(fy.prev_end BETWEEN fy.period_end - 400 AND fy.period_end - 330, false) AS has_prev
-    FROM fy
-    WHERE fy.rn = 1
+t0 AS (
+    SELECT DISTINCT ON (fy.stock_id) fy.* FROM fy ORDER BY fy.stock_id, fy.period_end DESC
 ),
-fin3 AS (                             -- 최근 3개 FY 평균 순이익(원자재 연동 테마의 E/P) — 순이익이 있는 FY가 3개일 때만 쓴다
-    SELECT fy.stock_id, AVG(fy.net_income) AS avg_net_income, COUNT(fy.net_income) AS n
-    FROM fy
-    WHERE fy.rn <= 3
-    GROUP BY fy.stock_id
+chain AS (                            -- t, t−1, t−2 (결산일 간격 330~400일로 이어지는 FY)
+    SELECT t0.stock_id, t0.period_end AS end0,
+           t0.revenue AS rev0, t0.operating_income AS oi0, t0.net_income AS ni0, t0.total_assets AS ta0, t0.total_debt AS debt0,
+           p1.period_end AS end1, p1.operating_income AS oi1, p1.net_income AS ni1,
+           p2.period_end AS end2, p2.revenue AS rev2, p2.operating_income AS oi2, p2.net_income AS ni2,
+           p2.total_assets AS ta2, p2.total_debt AS debt2
+    FROM t0
+    LEFT JOIN LATERAL (SELECT fy.* FROM fy WHERE fy.stock_id = t0.stock_id
+                         AND fy.period_end BETWEEN t0.period_end - 400 AND t0.period_end - 330
+                       ORDER BY fy.period_end DESC LIMIT 1) p1 ON true
+    LEFT JOIN LATERAL (SELECT fy.* FROM fy WHERE fy.stock_id = t0.stock_id AND p1.period_end IS NOT NULL
+                         AND fy.period_end BETWEEN p1.period_end - 400 AND p1.period_end - 330
+                       ORDER BY fy.period_end DESC LIMIT 1) p2 ON true
 ),
 px AS (                               -- 최신 거래일부터 거꾸로 번호(rn = 1이 t)
     SELECT d.stock_id, d.close, ROW_NUMBER() OVER (PARTITION BY d.stock_id ORDER BY d.trade_date DESC) AS rn
@@ -56,57 +62,76 @@ mom AS (                              -- t−21, t−126, t−252 거래일 종�
     GROUP BY px.stock_id
 ),
 inp AS (
-    SELECT b.stock_id, b.close, b.bps, b.volatility_1y, b.max_drawdown_1y, f.revenue, f.operating_income, f.net_income,
-           f.total_equity, f.total_debt, f.has_prev, f.prev_revenue, f.prev_net_income,
-           m.c_21, m.c_126, m.c_252, b.family, b.commodity,
-           CASE WHEN f3.n = 3 THEN f3.avg_net_income END AS avg3_net_income,
-           -- EPS 환산용 주식수: 상장주식수, 없으면 시가총액 / 종가
-           COALESCE(CAST(b.shares_outstanding AS numeric), b.market_cap / NULLIF(b.close, 0)) AS shares,
-           b.eps AS eps_provider
+    SELECT b.*, c.end0, c.rev0, c.oi0, c.ni0, c.ta0, c.debt0, c.end1, c.oi1, c.ni1, c.end2, c.rev2, c.oi2, c.ni2, c.ta2, c.debt2,
+           m.c_21, m.c_126, m.c_252, (b.family = 'financial') AS fin,
+           CASE WHEN c.stock_id IS NULL THEN 0 WHEN c.end1 IS NULL THEN 1 WHEN c.end2 IS NULL THEN 2 ELSE 3 END AS fy_count
     FROM base b
-    LEFT JOIN fin f   ON f.stock_id = b.stock_id
-    LEFT JOIN fin3 f3 ON f3.stock_id = b.stock_id
+    LEFT JOIN chain c ON c.stock_id = b.stock_id
     LEFT JOIN mom m   ON m.stock_id = b.stock_id
 ),
-calc AS (
+earn AS (                             -- 해마다 저평가 이익 e와 수익성·성장성에 쓰는 이익 p(일반 영업이익, 금융 순이익)
     SELECT i.*,
-           CASE
-             -- 원자재 연동: 원자재 가격이 높은 해의 이익은 최고점이라 한 해 E/P는 실제보다 싸 보인다 → 3년 평균
-             WHEN i.commodity AND i.avg3_net_income IS NOT NULL THEN i.avg3_net_income / NULLIF(i.shares, 0)
-             -- KRX는 적자 기업 EPS를 주지 않으므로 FY 순이익 / 주식수로 대체 → 적자는 음수 E/P(하위)
-             ELSE COALESCE(i.eps_provider, i.net_income / NULLIF(i.shares, 0)) END AS eps,
-           (i.eps_provider IS NULL AND i.net_income IS NOT NULL AND i.shares > 0) AS eps_derived,
-           (i.commodity AND i.avg3_net_income IS NOT NULL AND i.shares > 0) AS eps_avg3
+           CASE WHEN i.fin THEN i.ni0 WHEN i.ni0 IS NULL THEN CAST(:after_tax AS numeric) * i.oi0 WHEN i.oi0 IS NULL THEN i.ni0
+                ELSE LEAST(i.ni0, CAST(:after_tax AS numeric) * i.oi0) END AS e0,
+           CASE WHEN i.fin THEN i.ni1 WHEN i.ni1 IS NULL THEN CAST(:after_tax AS numeric) * i.oi1 WHEN i.oi1 IS NULL THEN i.ni1
+                ELSE LEAST(i.ni1, CAST(:after_tax AS numeric) * i.oi1) END AS e1,
+           CASE WHEN i.fin THEN i.ni2 WHEN i.ni2 IS NULL THEN CAST(:after_tax AS numeric) * i.oi2 WHEN i.oi2 IS NULL THEN i.ni2
+                ELSE LEAST(i.ni2, CAST(:after_tax AS numeric) * i.oi2) END AS e2,
+           CASE WHEN i.fin THEN i.ni0 ELSE i.oi0 END AS p0,
+           CASE WHEN i.fin THEN i.ni2 ELSE i.oi2 END AS p2,
+           i.debt0 / NULLIF(i.ta0, 0) AS la0,
+           i.debt2 / NULLIF(i.ta2, 0) AS la2
     FROM inp i
+),
+calc AS (
+    SELECT e.*,
+           -- 업황 정점 방지: 3개 FY가 이어지면 min(최신 e, 3년 평균 e) (모든 업종 — 원자재 테마만이 아님)
+           CASE WHEN e.fy_count = 3 AND e.e1 IS NOT NULL AND e.e2 IS NOT NULL
+                THEN LEAST(e.e0, (e.e0 + e.e1 + e.e2) / 3) ELSE e.e0 END AS e_cons,
+           -- 가치 함정 신호(일반만, t vs t−2): 영업흑자·영업이익↑·매출↑·영업이익률↑·부채/자산↓ 중 계산할 수 있는 것.
+           -- 이익 관련 두 신호는 2년 전이 흑자일 때만 센다(흑자 전환 기저효과 방지)
+           CASE WHEN e.oi0 IS NOT NULL THEN 1 ELSE 0 END
+         + CASE WHEN e.oi0 IS NOT NULL AND e.oi2 > 0 THEN 1 ELSE 0 END
+         + CASE WHEN e.rev0 IS NOT NULL AND e.rev2 IS NOT NULL THEN 1 ELSE 0 END
+         + CASE WHEN e.oi0 IS NOT NULL AND e.oi2 > 0 AND e.rev0 > 0 AND e.rev2 > 0 THEN 1 ELSE 0 END
+         + CASE WHEN e.la0 IS NOT NULL AND e.la2 IS NOT NULL THEN 1 ELSE 0 END AS sig_n,
+           CASE WHEN e.oi0 > 0 THEN 1 ELSE 0 END
+         + CASE WHEN e.oi2 > 0 AND e.oi0 > e.oi2 THEN 1 ELSE 0 END
+         + CASE WHEN e.rev0 > e.rev2 THEN 1 ELSE 0 END
+         + CASE WHEN e.oi2 > 0 AND e.rev0 > 0 AND e.rev2 > 0 AND e.oi0 / e.rev0 > e.oi2 / e.rev2 THEN 1 ELSE 0 END
+         + CASE WHEN e.la0 < e.la2 THEN 1 ELSE 0 END AS sig_yes
+    FROM earn e
 )
-SELECT c.stock_id, v.metric, v.factor, v.raw_value, v.z_fixed, v.note, v.null_note
+SELECT c.stock_id, c.fy_count, c.end0 AS fy_end, c.ni0, c.oi0, v.metric, v.factor, v.raw_value, v.note, v.null_note
 FROM calc c
 CROSS JOIN LATERAL (VALUES
-    ('earnings_yield',   'value',    c.eps / NULLIF(c.close, 0), CAST(NULL AS numeric),
-        CASE WHEN c.eps_avg3 THEN '원자재 연동 업종 → 최근 3개 FY 평균 순이익 / 주식수'
-             WHEN c.commodity THEN '원자재 연동 업종이지만 FY 재무 3개 미만 → 최신 FY 기준'
-             WHEN c.eps_derived THEN 'EPS 미제공 → FY 순이익 / 주식수로 대체' END,
+    ('conservative_yield', 'value',
+        CASE WHEN c.mcap > 0 THEN c.e_cons / c.mcap END,
+        CASE WHEN c.e_cons IS NULL OR NOT c.mcap > 0 THEN NULL
+             WHEN c.fy_count < 3 THEN '재무 이력 ' || c.fy_count || '년 — 3년 평균 없이 최신 FY 이익'
+             WHEN c.e_cons < c.e0 THEN '최신 이익이 3년 평균보다 커서 3년 평균 이익 사용(업황 정점 방지)' END,
         CAST(NULL AS text)),
-    ('book_yield',       'value',    c.bps / NULLIF(c.close, 0), NULL, NULL, NULL),
-    ('roe',              'quality',  CASE WHEN c.total_equity > 0 THEN c.net_income / c.total_equity END, NULL, NULL, NULL),
-    ('operating_margin', 'quality',  CASE WHEN c.family <> 'financial' THEN c.operating_income / NULLIF(c.revenue, 0) END,
-        NULL, NULL, CASE WHEN c.family = 'financial' THEN '금융 업종 — 매출 기준 지표는 쓰지 않음' END),
-    ('revenue_yoy',      'growth',   CASE WHEN c.family <> 'financial' AND c.has_prev AND c.prev_revenue > 0
-                                          THEN c.revenue / c.prev_revenue - 1 END,
-        NULL, NULL, CASE WHEN c.family = 'financial' THEN '금융 업종 — 매출 기준 지표는 쓰지 않음' END),
-    -- (EPS_t − EPS_{t−1}) / 종가. 두 해 EPS 모두 FY 순이익 / 최신 주식수(주식수 변동은 반영하지 않음)
-    ('eps_change_yield', 'growth',   CASE WHEN NOT c.commodity AND c.has_prev AND c.shares > 0
-                                          THEN (c.net_income - c.prev_net_income) / c.shares / NULLIF(c.close, 0) END,
-        NULL, NULL, CASE WHEN c.commodity THEN '원자재 연동 업종 — 한 해 이익 변화는 원자재 가격을 따라 출렁여 쓰지 않음' END),
-    ('max_drawdown',     'safety',   c.max_drawdown_1y, NULL, NULL, NULL),
-    ('volatility',       'safety',   c.volatility_1y, NULL, NULL, NULL),
-    -- 안정성 = 낙폭·변동성·부채비율 평균 → 주가 출렁임 2/3, 부채 1/3
-    ('debt_ratio',       'safety',   CASE WHEN c.total_equity > 0 THEN c.total_debt / c.total_equity END,
-        CASE WHEN c.total_equity <= 0 THEN CAST(-3 AS numeric) END,
-        CASE WHEN c.total_equity <= 0 THEN '자본 ≤ 0 → 부채비율 Z = −3 고정' END, NULL),
+    ('book_yield',       'value',    c.bps / NULLIF(c.close, 0), NULL, NULL),
+    ('trap_signal',      'value',
+        CASE WHEN NOT c.fin AND c.end2 IS NOT NULL AND c.sig_n >= 3 THEN CAST(c.sig_yes AS numeric) / c.sig_n END,
+        NULL,
+        CASE WHEN c.fin THEN '금융 업종 — 매출·영업이익 기준 신호는 쓰지 않음' END),
+    ('return_on_assets', 'quality',  CASE WHEN c.ta0 > 0 THEN c.p0 / c.ta0 END, NULL, NULL),
+    ('operating_margin', 'quality',  CASE WHEN NOT c.fin THEN c.oi0 / NULLIF(c.rev0, 0) END,
+        NULL, CASE WHEN c.fin THEN '금융 업종 — 매출 기준 지표는 쓰지 않음' END),
+    ('revenue_cagr2',    'growth',
+        CASE WHEN NOT c.fin AND c.end2 IS NOT NULL AND c.rev2 > 0 AND c.rev0 IS NOT NULL
+             THEN CASE WHEN c.rev0 > 0 THEN SQRT(c.rev0 / c.rev2) - 1 ELSE -1 END END,
+        NULL, CASE WHEN c.fin THEN '금융 업종 — 매출 기준 지표는 쓰지 않음' END),
+    -- 2년 이익 변화 ÷ 2년 전 총자산: 2년 전 흑자일 때만(흑자 전환을 이익 성장으로 세지 않음 — 매출 성장만 반영)
+    ('profit_growth2',   'growth',
+        CASE WHEN c.end2 IS NOT NULL AND c.ta2 > 0 AND c.p2 > 0 AND c.p0 IS NOT NULL THEN (c.p0 - c.p2) / c.ta2 END,
+        NULL, CASE WHEN c.end2 IS NOT NULL AND c.p2 <= 0 THEN '2년 전 적자 — 흑자 전환은 이익 성장으로 세지 않음(매출 성장만 반영)' END),
+    ('volatility',       'safety',   c.volatility_1y, NULL, NULL),
+    ('liab_assets',      'safety',   CASE WHEN NOT c.fin THEN c.la0 END,
+        NULL, CASE WHEN c.fin THEN '금융 업종 — 예금·보험부채가 영업 자산이라 부채 지표는 쓰지 않음' END),
     ('momentum',         'momentum', CASE WHEN c.c_252 IS NOT NULL THEN c.c_21 / c.c_252 - 1
                                           WHEN c.c_126 IS NOT NULL THEN c.c_21 / c.c_126 - 1 END,
-        NULL,
         CASE WHEN c.c_252 IS NULL AND c.c_126 IS NOT NULL THEN '일봉 253개 미만 → 6-1개월 수익률로 대체' END, NULL)
-) AS v(metric, factor, raw_value, z_fixed, note, null_note)
+) AS v(metric, factor, raw_value, note, null_note)
 ORDER BY c.stock_id, v.metric

@@ -18,8 +18,10 @@ def get_volume_surge_ranking(db: Session, country: str, limit: int = 5, *, user_
     return [dict(r) for r in rows.mappings().all()]
 
 
-def get_attractiveness_ranking(db: Session, country: str, limit: int = 5, *, preset: str, user_id: int) -> list[dict]:
-    """매력도 순위 TOP N. value = 프리셋별 최신 매력도 점수(0~100, 같은 시장 안 상대적 위치). 점수 없는 종목은 제외."""
+def get_attractiveness_ranking(db: Session, country: str, limit: int = 5, *, preset: str, user_id: int,
+                               family: str = "general") -> list[dict]:
+    """매력도 순위 TOP N. value = 프리셋별 최신 매력도 점수(같은 시장·같은 점수 묶음 안 백분위). 점수 없는 종목은 제외.
+    family: 점수 묶음(general / financial) — 금융끼리 매긴 백분위를 일반 기업과 한 줄에 세우지 않는다(D-003)."""
     rows = db.execute(sql("home_attractiveness"),
-                      {"country": country, "limit": limit, "preset": preset, "user_id": user_id})
+                      {"country": country, "limit": limit, "preset": preset, "user_id": user_id, "family": family})
     return [dict(r) for r in rows.mappings().all()]

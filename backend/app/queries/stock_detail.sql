@@ -26,7 +26,7 @@ LEFT JOIN LATERAL (SELECT * FROM valuation_snapshots vs WHERE vs.stock_id = s.st
                    ORDER BY vs.as_of DESC LIMIT 1) v ON true
 LEFT JOIN v_fx_latest fx ON true
 LEFT JOIN v_stock_theme t ON t.stock_id = s.stock_id
-LEFT JOIN LATERAL (SELECT st.as_of, st.score FROM stock_scores st WHERE st.stock_id = s.stock_id
+LEFT JOIN LATERAL (SELECT st.as_of, st.score FROM stock_scores st WHERE st.stock_id = s.stock_id AND st.as_of = (SELECT MAX(x.as_of) FROM stock_scores x)
                      AND st.preset_id = (SELECT preset_id FROM scoring_presets WHERE code = :preset)
                    ORDER BY st.as_of DESC LIMIT 1) sc ON true
 WHERE m.code = :market AND s.ticker = :ticker

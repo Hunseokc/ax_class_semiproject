@@ -10,7 +10,7 @@ FROM portfolio_items pi
 JOIN stocks s  ON s.stock_id = pi.stock_id
 JOIN markets m ON m.market_id = s.market_id
 LEFT JOIN v_latest_price lp ON lp.stock_id = pi.stock_id
-LEFT JOIN LATERAL (SELECT st.score FROM stock_scores st WHERE st.stock_id = pi.stock_id
+LEFT JOIN LATERAL (SELECT st.score FROM stock_scores st WHERE st.stock_id = pi.stock_id AND st.as_of = (SELECT MAX(x.as_of) FROM stock_scores x)
                      AND st.preset_id = (SELECT preset_id FROM scoring_presets WHERE code = :preset)
                    ORDER BY st.as_of DESC LIMIT 1) sc ON true
 WHERE pi.portfolio_id = :pid
