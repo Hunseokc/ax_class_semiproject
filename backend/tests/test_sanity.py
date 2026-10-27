@@ -1,7 +1,7 @@
 """매력도 회귀 테스트 실행기(app/services/sanity.py) — check 식 계산과 픽스처에서 끝까지 실행."""
 from __future__ import annotations
 
-from app.services.sanity import Stock, eval_check, run
+from app.services.sanity import Data, Stock, case_theme, eval_check, run
 from app.services.scoring import compute_scores
 from tests.conftest import D
 from tests.test_scoring import universe  # noqa: F401 — 픽스처 재사용
@@ -49,3 +49,26 @@ rules:
     assert "| WEAK-theme-first | target | 통과 |" in report and "(기록만)" in report
     assert "| THEME-position-raw | required | 통과 |" in report and "차이 0" in report    # 화면 테마 위치 = 중립화 전(D-020)
     assert "| CLIP-order | target |" in report                       # 픽스처는 지표당 3~4종목이라 상위 7%가 3개 미만 → 지표 없음
+
+
+def test_theme_cases_compare_primary_theme_and_record_unreviewed_top20(engine, universe, tmp_path):  # noqa: F811
+    """D-024: 주 테마 == expected(비교 표본 밖 종목도 DB 주 테마로), DB에 없는 종목만 있으면 판정 못함(미검증).
+    TOP20-theme-reviewed는 업종 코드로만 분류된 top20 종목을 기록만 한다."""
+    compute_scores(engine, as_of=D)
+    cases = tmp_path / "cases.yaml"
+    cases.write_text("""
+cases:
+  - {id: THEME-main-business-KR, ticker: ["005380", "035420"], market: KR, check: 주 테마 == expected,
+     expected: {"005380": 자동차, "035420": 자동차}, status: required}
+  - {id: THEME-main-business-US, ticker: [AAPL, ZZZZ], market: US, check: 주 테마 == expected,
+     expected: {AAPL: 반도체}, status: required}
+rules:
+  - {id: TOP20-theme-reviewed, check: 업종 코드로만 분류된 top20, status: target}
+""", encoding="utf-8")
+    with engine.connect() as conn:
+        report, ok = run(conn, cases)
+        missing = case_theme(Data(conn), {"market": "US", "ticker": ["ZZZZ"], "expected": {"ZZZZ": "빅테크"}})
+    assert "| THEME-main-business-KR | required | 통과 | 2종목 중 다름 0 [] |" in report
+    assert "| THEME-main-business-US | required | 실패 |" in report and "AAPL 빅테크≠반도체" in report
+    assert "| TOP20-theme-reviewed | target | 통과 |" in report and "(기록만)" in report and not ok
+    assert missing == (None, "0종목 중 다름 0 [] · DB에 없음 ['ZZZZ']")
