@@ -141,13 +141,21 @@ class Data:
             for name, v in (("raw", r.raw_value), ("z_raw", r.z_raw), ("z_adj", r.z_adj)):
                 if v is not None:
                     getattr(s, name)[r.metric] = float(v)
-        for r in c.execute(text("""SELECT stock_id, period_end, revenue, operating_income, net_income, total_assets, total_debt
+        for r in c.execute(text("""SELECT stock_id, period_end, revenue, operating_income, net_income, total_assets, total_debt,
+                                          total_equity
                                    FROM financial_statements WHERE period_type = 'FY' ORDER BY stock_id, period_end""")).mappings():
             if r["stock_id"] in self.stocks:
                 self.stocks[r["stock_id"]].fins.append({k: (float(v) if k not in ("stock_id", "period_end") and v is not None else v)
                                                         for k, v in r.items()})
         self.mcap = {r.stock_id: float(r.mcap) for r in c.execute(text(
             "SELECT stock_id, market_cap AS mcap FROM v_stock_metrics WHERE market_cap IS NOT NULL")) if r.stock_id in self.stocks}
+        # 최신 밸류에이션(KRX·yfinance EPS·BPS)과 상장주식수 — 통화(D-026)·우선주(D-029) 규칙이 DB 재무와 대조한다
+        self.val = {r.stock_id: {k: None if r[k] is None else float(r[k]) for k in ("eps", "bps", "close", "shares")}
+                    for r in c.execute(text("""
+                        SELECT vm.stock_id, vm.eps, vm.bps, vm.close, vs.shares_outstanding AS shares
+                        FROM v_stock_metrics vm
+                        LEFT JOIN LATERAL (SELECT x.shares_outstanding FROM valuation_snapshots x WHERE x.stock_id = vm.stock_id
+                                           ORDER BY x.as_of DESC LIMIT 1) vs ON true""")).mappings() if r["stock_id"] in self.stocks}
         self.weights = {p["code"]: p["weights"] for p in self.cfg["presets"]}
 
     # ------------------------------------------------------------ 조회
@@ -242,6 +250,97 @@ def oneoff_cut(d: Data, s: Stock) -> tuple[bool, str]:
     ok = abs(es[0] - tax * t["operating_income"]) < 1e-6 and mc and got is not None and abs(got - e / mc) <= 1e-6 + 1e-4 * abs(e / mc)
     return bool(ok), (f"순이익/영업이익 {t['net_income'] / t['operating_income']:.1f}배 → e = {tax} × 영업이익, "
                       f"지표 {got:.4f} (기대 {e / mc:.4f})" if mc and got is not None else "시총·지표 없음")
+
+
+def e_cons(d: Data, s: Stock) -> float | None:
+    """score_metrics.sql과 같은 저평가 이익: 해마다 e(금융은 순이익), 3개 FY가 이어지면 min(e_t, 3년 평균)."""
+    tax = float(d.cfg["after_tax"])
+    es = [f["net_income"] if s.family == "financial" else _earn(f, tax) for f in s.chain()]
+    if not es or es[0] is None:
+        return None
+    return min(es[0], sum(es) / 3) if len(es) == 3 and None not in es else es[0]
+
+
+def common_share(d: Data, s: Stock) -> float | None:
+    """국내 우선주 보정(D-029): KRX BPS 주식수(최신 FY 지배 자본 ÷ BPS)가 보통주보다 3% 넘게 많으면 보통주 수 ÷ BPS 주식수."""
+    v, ch = d.val.get(s.stock_id, {}), s.chain()
+    eq, bps, shares = (ch[0]["total_equity"] if ch else None), v.get("bps"), v.get("shares")
+    if s.country != "KR" or not (eq and eq > 0 and bps and bps > 0 and shares and shares > 0) or eq / bps <= 1.03 * shares:
+        return None
+    return shares / (eq / bps)
+
+
+def case_bobcat_currency(d: Data, s: Stock):
+    """세후 보수 이익/시총이 KRX EPS ÷ 종가의 0.5~2배(D-026 — USD 공시가 원화 칸에 들어가면 1/1,422)."""
+    v, got = d.val.get(s.stock_id, {}), s.raw.get("conservative_yield")
+    if not v.get("eps") or not v.get("close") or got is None:
+        return None, "KRX EPS·종가 또는 지표 없음"
+    r = got / (v["eps"] / v["close"])
+    return 0.5 <= r <= 2, f"지표 {got:.4f} vs KRX EPS÷종가 {v['eps'] / v['close']:.4f} (비율 {r:.2f})"
+
+
+def rule_currency_krw(d: Data):
+    """국내 표본에서 KRX EPS·BPS ÷ DB 재무 기준(순이익·지배 자본 ÷ 상장주식수)이 50배를 넘게(또는 1/50 미만으로) 어긋나는 종목 0개."""
+    bad, checked = [], 0
+    for s in d.stocks.values():
+        v, ch = d.val.get(s.stock_id, {}), s.chain()
+        if s.country != "KR" or not ch or not v.get("shares"):
+            continue
+        for krx, db in ((v.get("eps"), ch[0]["net_income"]), (v.get("bps"), ch[0]["total_equity"])):
+            if krx and db and krx * db > 0:
+                checked += 1
+                r = krx / (db / v["shares"])
+                if max(r, 1 / r) > 50:
+                    bad.append(f"{s.ticker} {r:.0f}배")
+                    break
+    return not bad, f"{checked}개 값 중 50배 넘게 어긋남 {len(bad)} {bad[:6]}"
+
+
+def case_negative_equity_bp(d: Data, s: Stock):
+    """자본 ≤ 0이면 B/P가 비고 사유 '자본 음수'(D-027)."""
+    reason = (s.dq.get("missing_metrics") or {}).get("book_yield", "")
+    ok = "book_yield" not in s.raw and "자본 음수" in reason
+    eq = s.chain()[0]["total_equity"] if s.chain() else None
+    return ok, f"자본 {eq:,.0f} · B/P {'없음' if 'book_yield' not in s.raw else s.raw['book_yield']} · {reason or '사유 없음'}" \
+        if eq is not None else f"재무 없음 · B/P {s.raw.get('book_yield')}"
+
+
+def rule_negative_equity_no_bp(d: Data):
+    """최신 FY 지배 자본(또는 BPS) ≤ 0인 종목 중 B/P 값이 있는 종목 0개 — 테마 평균에도 들어가지 않는다(D-027)."""
+    def negative(s: Stock) -> bool:
+        eq, bps = s.chain()[0]["total_equity"], d.val.get(s.stock_id, {}).get("bps")
+        return (eq is not None and eq <= 0) or (bps is not None and bps <= 0)
+    neg = [s for s in d.stocks.values() if s.chain() and negative(s)]
+    left = [s.ticker for s in neg if "book_yield" in s.raw or "book_yield" in s.z_raw]
+    return not left, f"자본 ≤ 0 {len(neg)}종목 {[s.ticker for s in neg][:12]} 중 B/P 있음 {len(left)} {left[:6]}"
+
+
+def rule_oneoff_badge_wording(d: Data):
+    """순이익 > 영업이익 배지는 사실만(D-029): 이름 '순이익 > 영업이익', '일회성 이익으로 보고' 같은 단정 문구 없음."""
+    badges = [(s.ticker, b) for s in d.stocks.values() for b in s.dq.get("badges", []) if b.get("code") == "oneoff"]
+    bad = [t for t, b in badges if b.get("label") != "순이익 > 영업이익" or "일회성 이익으로 보고" in (b.get("detail") or "")]
+    page = stock_page()
+    js = page.read_text(encoding="utf-8") if page else ""
+    left = "일회성 이익으로 보고" in js
+    return not bad and not left, f"배지 {len(badges)}개 중 단정 문구 {len(bad)} {bad[:6]}" + (" · 화면 코드에 남음" if left else "")
+
+
+def rule_preferred_share_basis(d: Data):
+    """KRX BPS 주식수가 보통주보다 3% 넘게 많은 국내 종목에서 세후 보수 이익/시총 = e × 보통주 수 ÷ BPS 주식수 ÷ 보통주 시총(D-029)."""
+    checked, bad = [], []
+    for s in d.stocks.values():
+        c = common_share(d, s)
+        got, e = s.raw.get("conservative_yield"), (e_cons(d, s) if c else None)
+        v = d.val.get(s.stock_id, {})
+        mc = d.mcap.get(s.stock_id) or ((v.get("shares") or 0) * (v.get("close") or 0))
+        if c is None or got is None or e is None or not mc:
+            continue
+        checked.append(f"{s.ticker}(+{1 / c - 1:.0%})")
+        if abs(got - e * c / mc) > 1e-6 + 1e-4 * abs(e * c / mc):
+            bad.append(s.ticker)
+    if not checked:
+        return None, "BPS 주식수가 보통주보다 3% 넘게 많은 종목 없음 — 판정 대상 없음"
+    return not bad, f"대상 {len(checked)}종목 {checked[:8]} · 다름 {len(bad)} {bad[:6]}"
 
 
 def has_badge(s: Stock | None, code: str) -> bool:
@@ -654,6 +753,16 @@ def _with_stock(d: Data, c: dict, fn):
     return fn(d, s) if s is not None else (False, "표본에 없음")
 
 
+def _all_stocks(d: Data, c: dict, fn):
+    """ticker 목록의 종목마다 fn — 모두 통과해야 통과, 하나라도 판정 못하면(None) 판정 못함."""
+    out = []
+    for t in c["ticker"]:
+        s = d.by_ticker(str(t), c.get("market"))
+        out.append((t, *(fn(d, s) if s is not None else (None, "표본에 없음"))))
+    res = [r for _, r, _ in out]
+    return (None if None in res else all(res)), " · ".join(f"{t}: {v}" for t, _, v in out)
+
+
 def case_cj_history(s: Stock):
     years = [f["period_end"].year for f in s.chain()]
     return len(years) >= 3 and 2024 in years, f"이어지는 FY {years}"
@@ -689,6 +798,12 @@ SPECIAL = {
     "THEME-main-business-KR": case_theme,
     "THEME-main-business-US": case_theme,
     "TOP20-theme-reviewed": lambda d, c: rule_top20_theme_reviewed(d),
+    "BOBCAT-currency": lambda d, c: _with_stock(d, c, case_bobcat_currency),
+    "CURRENCY-krw": lambda d, c: rule_currency_krw(d),
+    "NEG-EQUITY-bp": lambda d, c: _all_stocks(d, c, case_negative_equity_bp),
+    "NEG-EQUITY-no-bp": lambda d, c: rule_negative_equity_no_bp(d),
+    "ONEOFF-badge-recurring": lambda d, c: rule_oneoff_badge_wording(d),
+    "PREF-share-basis": lambda d, c: rule_preferred_share_basis(d),
 }
 
 

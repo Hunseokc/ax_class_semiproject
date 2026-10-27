@@ -72,3 +72,25 @@ rules:
     assert "| THEME-main-business-US | required | 실패 |" in report and "AAPL 빅테크≠반도체" in report
     assert "| TOP20-theme-reviewed | target | 통과 |" in report and "(기록만)" in report and not ok
     assert missing == (None, "0종목 중 다름 0 [] · DB에 없음 ['ZZZZ']")
+
+
+def test_data_accuracy_rules_negative_equity_badge_wording_and_preferred_basis(engine, universe, tmp_path):  # noqa: F811
+    """D-026·D-027·D-029: 자본 음수면 B/P 없음, 배지는 사실만, 우선주 보통주 몫, 원화 단위 대조(픽스처는 단위가 맞지 않아 실패)."""
+    from sqlalchemy import text
+    with engine.begin() as conn:                                   # 삼성전자 BPS 주식수 1,260 = 보통주 1,000 + 26%
+        conn.execute(text("UPDATE valuation_snapshots SET bps = 0.1 WHERE stock_id = 1"))
+    compute_scores(engine, as_of=D)
+    cases = tmp_path / "cases.yaml"
+    cases.write_text("""
+rules:
+  - {id: NEG-EQUITY-no-bp, check: 자본 ≤ 0 이면 B/P 없음, status: required}
+  - {id: ONEOFF-badge-recurring, check: 배지 문구, status: required}
+  - {id: PREF-share-basis, check: 우선주 보통주 몫, status: required}
+  - {id: CURRENCY-krw, check: KRX EPS·BPS 대조, status: required}
+""", encoding="utf-8")
+    with engine.connect() as conn:
+        report, _ = run(conn, cases)
+    assert "| NEG-EQUITY-no-bp | required | 통과 | 자본 ≤ 0 1종목 ['005380'] 중 B/P 있음 0 [] |" in report
+    assert "| ONEOFF-badge-recurring | required | 통과 | 배지 1개 중 단정 문구 0 [] |" in report
+    assert "| PREF-share-basis | required | 통과 | 대상 1종목 ['005930(+26%)'] · 다름 0 [] |" in report
+    assert "| CURRENCY-krw | required | 실패 |" in report      # 픽스처 EPS 8 vs 순이익 12 ÷ 1,000주 — 단위가 다르면 잡는다
