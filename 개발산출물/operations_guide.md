@@ -150,7 +150,7 @@ financial_statements FY                  20896
 - 데이터를 처음부터 다시 만들 때는 `init-db --reset` → `master --offline` → `import-sample` → `seed-demo` 순서다. `--reset`은 DB를 통째로 비운다.
 
 **배포**: 서비스와 Jobs는 같은 이미지(`asia-northeast3-docker.pkg.dev/stockmind-512107/stockmind/api:<커밋>-<MMDDHHMM>`)를 쓴다.
-- 지금 배포된 이미지: 서비스·Jobs 3개 모두 `api:28ad7f6-10261606`(2026-10-26, 2차 로그인·테마 분류).
+- 지금 배포된 이미지: 서비스·Jobs 3개 모두 `api:7c2248d-10271134`(2026-10-27, 매력도 모델 v2 — PR #115).
 - Cloud Build는 쓰지 않는다. 로컬에서 빌드해 올린다.
 
 ```bash
@@ -172,6 +172,15 @@ done
 4. 이미지 push → 로그인 비밀값 3개에 런타임 서비스 계정 `secretAccessor` 부여 → `gcloud run deploy stockmind --image … --update-secrets JWT_SECRET=JWT_SECRET:latest,REDIS_URL=REDIS_URL:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest` → Jobs 3개 `--image`
 5. `benchmark --reselect`(배포 DB 대상) — 비교군 636종목·점수. 미국 ADR 20종목은 재무 빈 응답으로 점수 없음(정상 — 09 8절)
 6. 원자재 지수 5종은 다음 `stockmind-refresh`(매시 5분)가 2년치를 받는다
+
+**3차 적용 기록 (2026-10-27)** — 매력도 모델 v2(09 정의서, 검토 장부 D-002~D-017). 배포 DB 작업은 로컬 접속 없이 Job을 일회성 인자로 실행했다:
+`gcloud run jobs execute stockmind-benchmark --args="python,-m,app.ingest,<명령>,…" --region asia-northeast3 --project stockmind-512107 --wait`
+1. 이미지 push → `gcloud run deploy stockmind` → Jobs 3개 `--image` (명령은 하나씩 — 한 줄로 묶으면 Claude Code 자동 모드 권한 검사에 막힐 수 있다)
+2. `migrate 013_scores_v2`(stock_scores as_of 인덱스)
+3. `financials --years 3 --tickers 000120 086280 010060 121600 316140 001720 XOM CLX EMN EXP GTX OSK AEIS`(DART FY2024 누락·SEC 태그 보완·XOM 이전 CIK)
+4. `master --offline` — **테마 설정(scoring none·새 테마)은 이 명령의 sync_themes로만 peer_groups에 들어간다.** `benchmark`만 돌리면 지주회사가 계속 general로 남는다
+5. `benchmark --reselect` — 지주회사·상품 신탁이 표본에서 빠지고 v2 점수 계산
+6. 확인: SK스퀘어·GLD는 점수 없이 테마 사유, HLN은 `score_null_code = no_financials`, MU 가치 17/277·결산 시점 배지, 다우기술 금융 2/30
 
 > 이 절차는 2026-10-22 배포 상태(이미지 태그 형식, Cloud Build 미사용, 서비스·Job이 같은 이미지)를 조회해 맞춘 것이다. 레포에는 배포 스크립트가 없으므로, 실제로 쓰던 명령과 다르면 이 절을 고친다.
 
