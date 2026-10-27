@@ -580,6 +580,25 @@ def test_analysis_api_returns_contributions_metrics_and_rank(client, engine, uni
     assert all(f["contribution"] is None for f in none["factors"].values())
 
 
+def test_theme_position_uses_pre_neutralization_factors(client, engine, universe):
+    """소속 테마 위치 = 중립화 전 값(z_raw)으로 만든 팩터 F(가중 평균·이력 축소)의 테마 평균 순위, 주가 흐름 포함(D-020)."""
+    compute_scores(engine, as_of=D)
+    tp = client.get(f"{API}/stocks/KOSPI/005930/analysis").json()["attractiveness"]["theme_position"]
+    z_raw, _, _, _ = reference_scores(*reference_raw(universe))
+    _, hist = reference_raw(universe)
+
+    def raw_f(s, f):
+        pairs = [(METRICS[m].weight, v) for m, v in z_raw[s].items() if METRICS[m].factor == f]
+        v = sum(w * x for w, x in pairs) / sum(w for w, _ in pairs)
+        return v * hist[s] / 3 if f == "value" and hist[s] < 3 else v
+
+    themes = {1: (1, 2), 3: (5, 6)}                                      # KR 반도체·자동차(점수 있는 구성원 2개씩)
+    assert tp["group_name"] == "반도체" and "momentum" in tp["factors"]
+    for f, got in tp["factors"].items():
+        avg = {g: statistics.mean(raw_f(s, f) for s in ids) for g, ids in themes.items()}
+        assert got["position"] == 1 + sum(1 for a in avg.values() if a > avg[1]) and got["total"] == 2, f
+
+
 def test_preset_parameter_on_lists_and_unknown_preset(client, engine, universe):
     compute_scores(engine, as_of=D)
     client.post(f"{API}/watchlist", json={"market": "KOSPI", "ticker": "005930"})

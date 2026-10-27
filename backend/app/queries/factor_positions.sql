@@ -1,6 +1,6 @@
 -- 같은 as_of·프리셋·국가·점수 묶음(family) 종목의 팩터 점수(재표준화 Fs)와 같은 시장 백분위, 주 테마 (D-003)
 --   백분위 = 100 × (n − 순위) / n — 종합 점수(score_aggregate.sql)와 같은 정의. 80 이상 = 그 팩터 상위 20%
---   상세 화면의 레이더·요소 카드(이 종목·주 테마 평균)와 '소속 테마의 위치'(테마 평균 팩터의 순위)에 쓴다
+--   상세 화면의 레이더·요소 카드(이 종목·주 테마 평균)에 쓴다. '소속 테마의 위치'는 중립화 전 값으로 따로 낸다(theme_positions.sql, D-020)
 WITH base AS (
     SELECT st.stock_id, g.group_id, g.name AS group_name, v.factor, v.score
     FROM stock_scores st

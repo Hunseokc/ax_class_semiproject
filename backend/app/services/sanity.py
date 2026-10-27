@@ -23,7 +23,8 @@ from sqlalchemy import Connection, text
 
 from app.core.config import CONFIG_DIR
 from app.queries import sql
-from app.services.scoring import FACTORS, FISCAL_GAP_DAYS, METRICS, MIN_FACTORS, REQUIRED_FACTORS, load_config
+from app.services.scoring import (FACTORS, FISCAL_GAP_DAYS, METRICS, MIN_FACTORS, REQUIRED_FACTORS, load_config,
+                                  theme_positions)
 
 PRESET_KR = {"aggressive": "위험", "growth": "성장", "balanced": "균형", "value": "가치"}
 FACTOR_ALIAS = {"stability": "safety"}
@@ -455,9 +456,8 @@ def rule_trap(d: Data):
     return not pos, f"{len(vals)}종목 중 양수 {len(pos)}" + (f" (최대 +{max(pos):.2f})" if pos else "")
 
 
-def raw_composites(d: Data) -> dict[str, dict[int, float]]:
-    """중립화 전 값(z_raw)으로 같은 모델을 다시 합산한 프리셋별 종합 — score_aggregate.sql과 같은 규칙
-    (지표 가중 평균, 재무 이력 축소, 국가·묶음 안 재표준화, 빠진 팩터 0, 저평가·수익성 필수, 유효 팩터 ≥ 3)."""
+def raw_factors(d: Data) -> dict[int, dict[str, float]]:
+    """중립화 전 값(z_raw)으로 만든 팩터 F — score_aggregate.sql f1과 같은 규칙(지표 가중 평균, 재무 이력 축소)."""
     f0: dict[int, dict[str, float]] = {}
     for s in d.stocks.values():
         fs = {}
@@ -470,6 +470,13 @@ def raw_composites(d: Data) -> dict[str, dict[int, float]]:
             fs["value"] *= n / 3
         if fs:
             f0[s.stock_id] = fs
+    return f0
+
+
+def raw_composites(d: Data) -> dict[str, dict[int, float]]:
+    """중립화 전 값(z_raw)으로 같은 모델을 다시 합산한 프리셋별 종합 — score_aggregate.sql과 같은 규칙
+    (raw_factors → 국가·묶음 안 재표준화, 빠진 팩터 0, 저평가·수익성 필수, 유효 팩터 ≥ 3)."""
+    f0 = raw_factors(d)
     fz: dict[int, dict[str, float]] = defaultdict(dict)
     for c in ("US", "KR"):
         for fam in ("general", "financial"):
@@ -505,6 +512,32 @@ def weak_theme_firsts(d: Data, top_n: int = 20, share: float = 0.3) -> tuple[int
             per[f"{c}{PRESET_KR[p]}"] = hit
             total += len(hit)
     return total, per
+
+
+def rule_theme_position_raw(d: Data):
+    """화면 '소속 테마 위치'(scoring.theme_positions — 상세 API가 쓰는 값)가 중립화 전 F의 테마 평균 순위를
+    여기서 따로 계산한 값과 같은가(D-020). 테마 = 점수 있는 구성원 2개 이상, 순위 = 1 + 평균이 더 큰 테마 수."""
+    f0 = raw_factors(d)
+    checked, diff = 0, []
+    for c in ("US", "KR"):
+        for fam in ("general", "financial"):
+            got = {t["group_name"]: t["factors"] for t in theme_positions(d.conn, d.as_of, c, fam).values()}
+            members: dict[str, list[int]] = defaultdict(list)
+            for s in d.stocks.values():
+                if s.country == c and s.family == fam and s.scored and s.theme and s.stock_id in f0:
+                    members[s.theme].append(s.stock_id)
+            for f in FACTORS:
+                avg = {t: st.fmean(f0[sid][f] for sid in ids if f in f0[sid]) for t, ids in members.items()
+                       if sum(1 for sid in ids if f in f0[sid]) >= 2}
+                for t, a in avg.items():
+                    exp = (1 + sum(1 for b in avg.values() if b > a + 1e-9), len(avg))
+                    g = got.get(t, {}).get(f)
+                    checked += 1
+                    if g is None or (g["position"], g["total"]) != exp:
+                        diff.append(f"{c}{'·금융' if fam == 'financial' else ''} {t} {f} {g and g['position']} vs {exp[0]}")
+            extra = [t for t in got if t not in members]
+            diff += [f"{c} {t} 화면에만 있음" for t in extra]
+    return not diff and checked > 0, f"테마·팩터 {checked}칸 중 차이 {len(diff)} {diff[:6]}"
 
 
 def rule_weak_theme_first(d: Data):
@@ -565,6 +598,8 @@ SPECIAL = {
     "HOME-family-mix": lambda d, c: case_home_family_mix(d),
     "SCREEN-no-phi-number": lambda d, c: screen_check(["상위 ${topPercent", "개 중 <strong>"], ["toPos(", "erf("]),
     "SCREEN-theme-position": lambda d, c: screen_check(["theme_position", "소속 테마"], []),
+    "SCREEN-theme-position-momentum": lambda d, c: screen_check(
+        ['THEME_FACTORS = ["value", "quality", "growth", "momentum"]', "중립화 전"], []),
     "CJ-LOGISTICS-history": lambda d, c: _with_stock(d, c, lambda d, s: case_cj_history(s)),
     "BUYBACK-vs-DISTRESSED": lambda d, c: case_buyback(d),
     "R1-oneoff-top10": lambda d, c: rule_r1(d),
@@ -579,6 +614,7 @@ SPECIAL = {
     "R10-independent-benchmark": lambda d, c: rule_r10(d),
     "TRAP-penalty-only": lambda d, c: rule_trap(d),
     "WEAK-theme-first": lambda d, c: rule_weak_theme_first(d),
+    "THEME-position-raw": lambda d, c: rule_theme_position_raw(d),
 }
 
 

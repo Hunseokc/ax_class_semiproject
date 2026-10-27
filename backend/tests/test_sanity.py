@@ -37,11 +37,13 @@ rules:
   - {id: R6-score-honesty, check: 구간 라벨, status: required}
   - {id: TRAP-penalty-only, check: 함정 신호 z_adj ≤ 0, status: required}
   - {id: WEAK-theme-first, check: 약한 테마 1등 수, status: target}
+  - {id: THEME-position-raw, check: 테마 위치 = 중립화 전 테마 평균 순위, status: required}
 """, encoding="utf-8")
     with engine.connect() as conn:
         report, ok = run(conn, cases)
-    assert not ok and "통과 **4/5**" in report and "KAKAO-scored" in report.split("실패:")[1]
+    assert not ok and "통과 **5/6**" in report and "KAKAO-scored" in report.split("실패:")[1]
     assert "| KAKAO-known | known_fail | 실패(감수 D-999) |" in report
     assert "| R6-score-honesty | required | 통과 |" in report
     assert "| TRAP-penalty-only | required | 통과 |" in report and "양수 0" in report     # 중립화하지 않아 감점만(D-018)
     assert "| WEAK-theme-first | target | 통과 |" in report and "(기록만)" in report
+    assert "| THEME-position-raw | required | 통과 |" in report and "차이 0" in report    # 화면 테마 위치 = 중립화 전(D-020)
