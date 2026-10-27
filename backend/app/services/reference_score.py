@@ -25,8 +25,8 @@ from sqlalchemy import Connection, text
 from app.ingest.sectors import theme_by_name
 from app.queries import sql
 from app.services.data_quality import fiscal_year_mix
-from app.services.scoring import (FACTORS, METRICS, MIN_FACTORS, REQUIRED_FACTORS, load_config, metric_params, null_reason,
-                                  partition_label, rank_normal, score_badges)
+from app.services.scoring import (BADGE_FACTS, FACTORS, METRICS, MIN_FACTORS, REQUIRED_FACTORS, load_config, metric_params,
+                                  null_reason, partition_label, rank_normal, score_badges)
 
 UNSCORED_DEFAULT = "업종 특성상 이익·매출 기준인 매력도 점수를 내지 않습니다."
 FAMILY_WORD = {"general": "", "financial": " 금융"}
@@ -189,7 +189,7 @@ def reference_score(conn: Connection, stock_id: int, country: str, preset: dict)
                                 JOIN stocks s ON s.stock_id = st.stock_id JOIN markets mk ON mk.market_id = s.market_id
                                 WHERE st.as_of = :d AND mk.country = :c AND st.data_quality ? 'fiscal_mode' LIMIT 1"""),
                         {"d": as_of, "c": country}).scalar()
-    dq["badges"] = score_badges({k: mine[0][k] for k in ("fy_end", "ni0", "oi0", "fy_count")}, family,
+    dq["badges"] = score_badges({k: mine[0][k] for k in BADGE_FACTS}, family,
                                 date.fromisoformat(mode) if mode else None)
     if missing:
         dq["missing_metrics"] = missing

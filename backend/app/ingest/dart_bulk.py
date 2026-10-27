@@ -3,6 +3,7 @@
 파일: 공시정보 활용마당 > 재무정보 일괄다운로드의 연도별 사업보고서(4Q) 재무상태표(BS)·손익계산서(PL) zip.
   zip 안에 cp949 탭 구분 txt가 여러 개(일반·금융기타·보험·은행·증권 × 별도·연결) 들어 있다.
   열: 재무제표종류 · 종목코드([005930]) · 회사명 · … · 결산기준일 · 보고서종류 · 통화 · 항목코드 · 항목명 · 당기 · 전기 · 전전기
+  통화가 원화가 아니면(두산밥캣 USD) 결산일 USD/KRW로 환산해 넣는다(D-026 — jobs.to_krw, 환율은 DB fx_rates).
   손익 파일은 이름 없는 빈 열이 끼어 있어 열 위치가 파일마다 다르다 → 헤더 이름으로 찾는다.
   손익은 '손익계산서'(02)와 '단일 포괄손익계산서'(03) 중 회사가 고른 쪽에 있어 둘 다 읽는다.
 
@@ -21,8 +22,9 @@ from pathlib import Path
 
 from sqlalchemy import Engine, text
 
+from app.ingest.jobs import to_krw
 from app.ingest.store import job_log, upsert
-from app.providers.base import Financial
+from app.providers.base import Financial, ProviderError
 from app.providers.convert import to_dec
 from app.providers.dart import DartClient
 from app.services import freshness
@@ -31,6 +33,7 @@ log = logging.getLogger(__name__)
 
 ENCODING = "cp949"
 REQUIRED_COLUMNS: tuple[str, ...] = ("재무제표종류", "종목코드", "결산기준일", "보고서종류", "항목코드", "항목명", "당기")
+CURRENCY_COLUMN = "통화"             # 있으면 읽는다(없는 옛 파일은 원화로 본다)
 FIN_FIELDS = ("revenue", "operating_income", "net_income", "total_assets", "total_equity", "total_debt")
 CURSOR_SOURCE = "DART_A001"          # jobs.FEED_SOURCE와 같은 값 — 일괄 적재 뒤 공시 증분이 이어 받을 지점
 LOG_SOURCE = "DART_BULK"             # 하루 호출 예산(source='DART' 행)에 세지 않으려고 따로 둔다
@@ -46,6 +49,7 @@ class BulkRow:
     account_id: str                 # 항목코드
     account_nm: str                 # 항목명
     amount: Decimal | None          # 당기 금액(쉼표 제거). 빈 칸이면 None
+    currency: str | None = None     # 표시통화(KRW·USD). 열이 없으면 None
 
 
 def _statement(kind: str) -> str | None:
@@ -68,6 +72,7 @@ def parse_text(content: str, name: str = "") -> list[BulkRow]:
     if missing:
         raise ValueError(f"{name}: 필요한 열이 없습니다 — {', '.join(missing)}")
     col = {c: header.index(c) for c in REQUIRED_COLUMNS}      # 같은 이름이 둘이면 첫 번째(당기)
+    cur = header.index(CURRENCY_COLUMN) if CURRENCY_COLUMN in header else None
     out = []
     for line in lines[1:]:
         c = line.split("\t")
@@ -81,7 +86,8 @@ def parse_text(content: str, name: str = "") -> list[BulkRow]:
         out.append(BulkRow(stock_code=code, period_end=date.fromisoformat(c[col["결산기준일"]].strip()),
                            consolidated=kind.endswith("연결"), statement=stmt,
                            account_id=c[col["항목코드"]].strip(), account_nm=c[col["항목명"]].strip(),
-                           amount=to_dec(c[col["당기"]])))
+                           amount=to_dec(c[col["당기"]]),
+                           currency=(c[cur].strip().upper() or None) if cur is not None and cur < len(c) else None))
     return out
 
 
@@ -113,8 +119,17 @@ def to_financials(rows: list[BulkRow]) -> dict[str, list[Financial]]:
         if all(v is None for v in vals.values()):
             continue
         out[code].append(Financial(period_end=period_end, period_type="FY", data_source="DART", accounting_std="K-IFRS",
-                                   notes=([] if consolidated else ["fs_div=OFS"]) + notes, **vals))
+                                   notes=([] if consolidated else ["fs_div=OFS"]) + notes,
+                                   currency=next((r.currency for r in picked if r.currency), None), **vals))
     return {k: sorted(v, key=lambda f: f.period_end) for k, v in out.items()}
+
+
+def _db_rate_on(engine: Engine, day: date) -> Decimal | None:
+    """결산일(또는 그 전 10일 안 가장 가까운 날)의 DB USD/KRW 일별 환율."""
+    with engine.connect() as conn:
+        return conn.execute(text("""SELECT usd_krw FROM fx_rates WHERE granularity = 'DAILY'
+                                     AND (rate_at AT TIME ZONE 'Asia/Seoul')::date BETWEEN CAST(:d AS date) - 10 AND CAST(:d AS date)
+                                     ORDER BY rate_at DESC LIMIT 1"""), {"d": day}).scalar()
 
 
 def load_bulk(engine: Engine, paths: list[Path], *, as_of: date, years: int = 4) -> dict:
@@ -132,13 +147,22 @@ def load_bulk(engine: Engine, paths: list[Path], *, as_of: date, years: int = 4)
                                             WHERE m.country = 'KR'""")).all())
         matched = [(ids[code], fs[-years:]) for code, fs in fins.items() if code in ids]
         out["skipped"] = len(fins) - len(matched)
+        converted = []                                   # 외화 공시(두산밥캣 USD)는 결산일 환율로 원화 환산(D-026)
+        for sid, fs in matched:
+            try:
+                converted.append((sid, to_krw(fs, lambda d: _db_rate_on(engine, d))))
+            except ProviderError as e:
+                out["skipped"] += 1
+                res.notes.append(f"stock_id {sid}: {e}")
+        matched = converted
         now = datetime.now(timezone.utc)
         for i in range(0, len(matched), CHUNK):
             with engine.begin() as conn:
                 for sid, fs in matched[i:i + CHUNK]:
                     out["rows"] += upsert(conn, "financial_statements", [
                         {"stock_id": sid, "period_end": f.period_end, "period_type": "FY", **{k: getattr(f, k) for k in FIN_FIELDS},
-                         "data_source": f.data_source, "accounting_std": f.accounting_std} for f in fs],
+                         "data_source": f.data_source, "accounting_std": f.accounting_std,
+                         "currency": f.currency, "fx_rate": f.fx_rate} for f in fs],
                         ["stock_id", "period_end", "period_type"])
                     freshness.mark(conn, "financials", sid, True, country="KR", now=now)
         out["companies"] = len(matched)

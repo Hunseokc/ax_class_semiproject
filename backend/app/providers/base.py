@@ -65,6 +65,8 @@ class Financial:
     data_source: str = ""
     accounting_std: str | None = None
     notes: list[str] = field(default_factory=list)   # 대체 계정 사용 등 추적 정보
+    currency: str | None = None      # 공시 표시통화(DART 행의 currency). 원화가 아니면 적재 때 결산일 환율로 환산(D-026)
+    fx_rate: Decimal | None = None   # 환산에 쓴 환율(환산하지 않았으면 None)
 
 
 # ── [S5-D] 미국 밸류에이션 기초값 ──

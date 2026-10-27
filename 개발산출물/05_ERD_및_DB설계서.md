@@ -108,6 +108,8 @@ erDiagram
         numeric total_debt
         varchar data_source
         varchar accounting_std
+        varchar currency
+        numeric fx_rate
     }
     disclosures {
         int disclosure_id PK
@@ -434,6 +436,8 @@ FK가 없는 독립 테이블은 4개다.
 | total_debt | numeric(24,2) | Y |  |  | 부채총계 (KR Liabilities / US Liabilities) |
 | data_source | character varying(20) | N |  |  | 데이터 출처 |
 | accounting_std | character varying(20) | Y |  |  | K-IFRS / US-GAAP |
+| currency | character varying(3) | Y |  |  | 공시 표시통화(KRW·USD). 금액은 시장 통화로 환산해 저장(D-026, migration 014). NULL = 기록 전 행 |
+| fx_rate | numeric(12,4) | Y |  |  | 환산에 쓴 결산일 USD/KRW(원화 공시면 NULL). `CHECK (fx_rate > 0)` |
 
 제약: `CHECK (((data_source)::text = ANY ((ARRAY['DART'::character varying, 'SEC'::character varying, 'YFINANCE'::character varying])::text[])))` / `CHECK (((period_type)::text = ANY ((ARRAY['FY'::character varying, 'Q1'::character varying, 'Q2'::character varying, 'Q3'::character varying, 'Q4'::character varying])::text[])))` / `UNIQUE (stock_id, period_end, period_type)`
 
@@ -880,6 +884,7 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | `010_kis_source.sql` | `valuation_snapshots.source`에 `KIS`(한국투자증권 Open API) 허용 | — |
 | `011_auth.sql` | `users` 계정 칸(email·password_hash·google_sub·last_login_at·last_seen_at), `user_preferences` | — |
 | `012_themes.sql` | `stocks.ksic`, `peer_groups.sector`·`scoring`·`commodity_linked`, `indices.category`·`unit`, 국내 업종 확인 시각 초기화(뷰 `v_stock_theme`은 views.sql) | `master` → `benchmark --reselect` |
+| `014_fin_currency.sql` | `financial_statements.currency`·`fx_rate`(재무 표시통화와 원화 환산 환율 — 09 2절, D-026) | 외화 공시 종목 `financials --tickers 241560` → `scores` |
 
 **적용 순서 주의 (011·012)**: `migrate`는 마이그레이션 파일 뒤에 `views.sql` 전체를 다시 적용한다. `views.sql`의 `v_stock_theme`이 012에서 생기는 `peer_groups.sector`·`scoring`·`commodity_linked`를 읽기 때문에, **010 이하인 DB에서 011을 먼저 돌리면 뷰 단계에서 실패하고 011 전체가 롤백된다**(파일과 뷰가 한 트랜잭션). 그런 DB는 **012 → 011 순서**로 적용한다(둘 다 멱등이라 다시 돌려도 결과가 같다). 2026-10-26 배포 DB 적용 때 실제로 겪었다(troubleshooting 3).
 - 012 직후 `master`가 테마 38개를 맞춘다. `benchmark --reselect`가 업종 코드(국내 DART KSIC 약 2,500개 — 분당 45회라 약 1시간, 미국 SIC 약 6분)를 받은 뒤 비교군을 고른다. 이미 업종 코드를 받은 DB가 있으면 `stocks.ksic·sic·industry·industry_checked_at`을 시장+티커로 복사해 이 시간을 건너뛸 수 있다(2026-10-26 배포에서 로컬 값 4,089행 복사).

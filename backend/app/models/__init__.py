@@ -233,6 +233,8 @@ class FinancialStatement(Base):
     total_debt: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
     data_source: Mapped[str] = mapped_column(String(20))
     accounting_std: Mapped[str | None] = mapped_column(String(20))
+    currency: Mapped[str | None] = mapped_column(String(3))          # 공시 표시통화 — 금액은 환산 후(D-026)
+    fx_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))  # 환산 환율(원화 공시면 NULL)
     __table_args__ = (UniqueConstraint("stock_id", "period_end", "period_type"),)
 
 

@@ -288,7 +288,8 @@ def reference_raw(closes) -> tuple[dict[int, dict[str, float | None]], dict[int,
             r["return_on_assets"] = oi / ta
             r["operating_margin"] = oi / rev if rev else None
             r["liab_assets"] = debt / ta
-        r["book_yield"] = VALUATION[s][1] / close
+        # 자본 ≤ 0(최신 FY 지배 자본 또는 BPS)이면 B/P를 비운다(D-027 — 픽스처 현대차 자본 −5)
+        r["book_yield"] = None if (t and t[4] <= 0) or VALUATION[s][1] <= 0 else VALUATION[s][1] / close
         if t and t2:
             _, rev2, oi2, _, _, debt2, ta2 = t2
             r["revenue_cagr2"] = (math.sqrt(rev / rev2) - 1 if rev > 0 else -1.0) if rev2 > 0 else None
@@ -688,8 +689,10 @@ def test_financial_theme_drops_revenue_metrics_and_scores_separately(engine, uni
     # 금융은 순이익 기준: 총자산 이익률 = 순이익 / 자산
     assert float(mv[(6, "return_on_assets")].raw_value) == pytest.approx(30 / 95)
     assert mv[(1, "operating_margin")].raw_value is not None and st[1]["data_quality"]["partition"] == "KR"
-    # 금융 2종목끼리 표준화: B/P는 표본 2개 → RN Φ⁻¹(0.25)·Φ⁻¹(0.75) = ∓0.6745, 백분위는 50(1위)·0(2위)
-    assert {round(float(mv[(s, "book_yield")].z_raw), 4) for s in (5, 6)} == {0.6745, -0.6745}
+    # 금융 2종목끼리 표준화: 총자산 이익률은 표본 2개 → RN Φ⁻¹(0.25)·Φ⁻¹(0.75) = ∓0.6745, 백분위는 50(1위)·0(2위)
+    assert {round(float(mv[(s, "return_on_assets")].z_raw), 4) for s in (5, 6)} == {0.6745, -0.6745}
+    # 금융도 자본 ≤ 0이면 B/P를 비운다(D-027 — 현대차 자본 −5) → B/P 표본 1개라 z = 0
+    assert mv[(6, "book_yield")].raw_value is None and float(mv[(5, "book_yield")].z_raw) == 0
     assert {float(st[s]["score"]) for s in (5, 6) if st[s]["score"] is not None} <= {50.0, 0.0}
 
 
@@ -753,14 +756,42 @@ def test_score_badges_oneoff_fiscal_gap_and_short_history():
 
     from app.services.scoring import score_badges
     mode = date(2025, 12, 31)
-    kcc = score_badges({"ni0": Dec(1538), "oi0": Dec(428), "fy_end": mode, "fy_count": 3}, "general", mode)
-    assert [b["code"] for b in kcc] == ["oneoff"] and "3.6배" in kcc[0]["detail"]
+    kcc = score_badges({"ni0": Dec(1538), "oi0": Dec(428), "ni1": Dec(300), "oi1": Dec(400), "ni2": Dec(90), "oi2": Dec(-5),
+                        "fy_end": mode, "fy_count": 3}, "general", mode)
+    assert [b["code"] for b in kcc] == ["oneoff"] and kcc[0]["label"] == "순이익 > 영업이익"     # 사실만 — '일회성' 단정 안 함(D-029)
+    assert kcc[0]["detail"].startswith("순이익이 영업이익의 3.6배(최근 3년 중 2년). 일회성·지분법·금융수익일 수 있어")
+    assert "일회성 이익으로 보고" not in kcc[0]["detail"]
     assert score_badges({"ni0": Dec(5), "oi0": Dec(-1), "fy_end": mode, "fy_count": 3}, "general", mode)[0]["code"] == "oneoff"
     assert score_badges({"ni0": Dec(30), "oi0": Dec(9), "fy_end": mode, "fy_count": 3}, "financial", mode) == []   # 금융은 순이익 기준
     mu = score_badges({"ni0": Dec(1), "oi0": Dec(2), "fy_end": date(2026, 9, 3), "fy_count": 3}, "general", mode)
     assert [b["code"] for b in mu] == ["fiscal_gap"] and "8개월" in mu[0]["detail"]
     new = score_badges({"ni0": Dec(1), "oi0": Dec(2), "fy_end": mode, "fy_count": 1}, "general", mode)
     assert [b["code"] for b in new] == ["short_history"] and "1/3" in new[0]["detail"]
+
+
+def test_negative_equity_leaves_book_yield_empty_with_reason(engine, universe):
+    """D-027: 최신 FY 지배 자본 ≤ 0이면 B/P를 비우고(테마 평균에도 넣지 않음) 사유를 남긴다. 저평가는 남은 지표로 낸다."""
+    compute_scores(engine, as_of=D)
+    with engine.connect() as conn:
+        bp = dict(conn.execute(text("SELECT stock_id, raw_value FROM stock_metric_values WHERE metric = 'book_yield'")).all())
+        sc = scores_by(conn)
+    assert bp[6] is None and bp[5] is not None                                            # 현대차 자본 −5
+    assert sc[6]["data_quality"]["missing_metrics"]["book_yield"].startswith("자본 음수(자사주 매입 등)")
+    assert sc[6]["value_score"] is not None
+
+
+def test_preferred_shares_scale_earnings_to_common_holders(engine, universe):
+    """D-029: 국내에서 KRX BPS의 주식수(지배 자본 ÷ BPS)가 보통주보다 3% 넘게 많으면 e × 보통주 수 ÷ BPS 주식수를 보통주 시총과 비교."""
+    with engine.begin() as conn:                                   # 삼성전자 자본 126, 보통주 1,000주 → BPS 0.1이면 BPS 주식수 1,260(26% 많음)
+        conn.execute(text("UPDATE valuation_snapshots SET bps = 0.1 WHERE stock_id = 1"))
+    compute_scores(engine, as_of=D)
+    with engine.connect() as conn:
+        got = conn.execute(text("""SELECT raw_value FROM stock_metric_values
+                                   WHERE stock_id = 1 AND metric = 'conservative_yield'""")).scalar()
+        notes = scores_by(conn)[1]["data_quality"]["notes"]
+    es = [_earn(f[3], f[2]) for f in FIN[1]]
+    assert float(got) == pytest.approx(min(es[-1], sum(es) / 3) * (1000 / 1260) / (1000 * universe[1][-1]), rel=1e-6)
+    assert any("BPS 주식수가 보통주보다 26% 많음" in n for n in notes)
 
 
 def test_badges_are_stored_with_scores(engine, universe):

@@ -275,6 +275,8 @@ CREATE TABLE financial_statements (
   total_debt       NUMERIC(24,2),                                -- 부채총계 (KR Liabilities / US Liabilities)
   data_source      VARCHAR(20)   NOT NULL CHECK (data_source IN ('DART','SEC','YFINANCE')),
   accounting_std   VARCHAR(20),                                  -- K-IFRS / US-GAAP
+  currency         VARCHAR(3),                                   -- 공시 표시통화(KRW·USD). 금액은 시장 통화로 환산해 저장(migration 014, D-026)
+  fx_rate          NUMERIC(12,4) CONSTRAINT ck_fin_fx_rate CHECK (fx_rate > 0),   -- 환산에 쓴 결산일 환율(원화 공시면 NULL)
   UNIQUE (stock_id, period_end, period_type)
 );
 

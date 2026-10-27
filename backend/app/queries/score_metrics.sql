@@ -4,15 +4,20 @@
 -- 지표 정의·NULL 사유는 개발산출물/09 2절(D-002). 한 종목당 10행(값이 없으면 raw_value NULL)
 -- note: 대체 계산 메모, null_note: 규칙으로 일부러 비운 지표의 사유(missing_metrics에 기본 사유 대신 쓴다)
 -- fy_count: 이어지는 FY 수(최대 3) — 3 미만이면 저평가 팩터를 그 비율만큼 줄인다(D-010, score_aggregate.sql)
--- fy_end·ni0·oi0: 최신 FY 결산일·순이익·영업이익 — 경고 배지(일회성 이익·결산 시점, D-003)를 scoring.py가 만든다
+-- fy_end·ni0·oi0(·ni1·oi1·ni2·oi2): FY t(·t−1·t−2) 결산일·순이익·영업이익 — 경고 배지(순이익 > 영업이익·결산 시점, D-003·D-029)를
+--   scoring.py가 만든다
 -- 재무 FY: 자산과 이익(순이익 또는 영업이익)이 있는 FY만 쓴다(일부 칸만 들어온 최신 FY는 건너뜀).
 --   t = 그중 최신, t−1·t−2 = 바로 뒤 FY 결산일보다 330~400일 앞선 FY(결산월 변경으로 끼어든 행은 건너뜀)
 -- 묶음(family, v_stock_theme): general / financial(순이익 기준, 매출·부채 지표 없음) / none(행을 만들지 않음)
 -- 해마다 저평가 이익 e = min(지배주주 순이익, after_tax × 영업이익) — 일회성 이익은 자르고 이자·비지배 몫은 남긴다.
 --   순이익이 없으면 after_tax × 영업이익, 영업이익이 없으면 순이익. 금융은 순이익
+-- 국내 우선주(D-029): e는 보통주·우선주 전체 주주 몫, 시총은 보통주만이다. KRX BPS의 주식수(= 최신 FY 지배 자본 ÷ BPS)가
+--   보통주보다 3% 넘게 많으면 e × 보통주 수 ÷ BPS 주식수로 보통주 몫만 쓴다(B/P와 같은 주식수 기준). 3% 이하는 기준일·반올림 차이로 본다
+-- 자본 ≤ 0(최신 FY 지배 자본 또는 BPS)이면 B/P를 비운다(D-027 — 자사주 매입 우량 기업을 '가장 비싼 종목'으로 세지 않음)
 WITH base AS (
-    SELECT vm.stock_id, vm.close, vm.bps, vm.volatility_1y,
+    SELECT vm.stock_id, vm.country, vm.close, vm.bps, vm.volatility_1y,
            COALESCE(vm.market_cap, CAST(vs.shares_outstanding AS numeric) * vm.close) AS mcap,
+           CAST(vs.shares_outstanding AS numeric) AS shares,
            COALESCE(t.family, 'general') AS family
     FROM v_stock_metrics vm
     JOIN stocks st ON st.stock_id = vm.stock_id
@@ -24,7 +29,7 @@ WITH base AS (
     WHERE COALESCE(t.family, 'general') <> 'none'
 ),
 fy AS (                               -- 쓸 수 있는 FY
-    SELECT f.stock_id, f.period_end, f.revenue, f.operating_income, f.net_income, f.total_assets, f.total_debt
+    SELECT f.stock_id, f.period_end, f.revenue, f.operating_income, f.net_income, f.total_assets, f.total_debt, f.total_equity
     FROM financial_statements f
     WHERE f.period_type = 'FY' AND f.total_assets IS NOT NULL
       AND (f.net_income IS NOT NULL OR f.operating_income IS NOT NULL)
@@ -36,6 +41,7 @@ t0 AS (
 chain AS (                            -- t, t−1, t−2 (결산일 간격 330~400일로 이어지는 FY)
     SELECT t0.stock_id, t0.period_end AS end0,
            t0.revenue AS rev0, t0.operating_income AS oi0, t0.net_income AS ni0, t0.total_assets AS ta0, t0.total_debt AS debt0,
+           t0.total_equity AS eq0,
            p1.period_end AS end1, p1.operating_income AS oi1, p1.net_income AS ni1,
            p2.period_end AS end2, p2.revenue AS rev2, p2.operating_income AS oi2, p2.net_income AS ni2,
            p2.total_assets AS ta2, p2.total_debt AS debt2
@@ -62,7 +68,7 @@ mom AS (                              -- t−21, t−126, t−252 거래일 종�
     GROUP BY px.stock_id
 ),
 inp AS (
-    SELECT b.*, c.end0, c.rev0, c.oi0, c.ni0, c.ta0, c.debt0, c.end1, c.oi1, c.ni1, c.end2, c.rev2, c.oi2, c.ni2, c.ta2, c.debt2,
+    SELECT b.*, c.end0, c.rev0, c.oi0, c.ni0, c.ta0, c.debt0, c.eq0, c.end1, c.oi1, c.ni1, c.end2, c.rev2, c.oi2, c.ni2, c.ta2, c.debt2,
            m.c_21, m.c_126, m.c_252, (b.family = 'financial') AS fin,
            CASE WHEN c.stock_id IS NULL THEN 0 WHEN c.end1 IS NULL THEN 1 WHEN c.end2 IS NULL THEN 2 ELSE 3 END AS fy_count
     FROM base b
@@ -99,19 +105,30 @@ calc AS (
          + CASE WHEN e.oi2 > 0 AND e.oi0 > e.oi2 THEN 1 ELSE 0 END
          + CASE WHEN e.rev0 > e.rev2 THEN 1 ELSE 0 END
          + CASE WHEN e.oi2 > 0 AND e.rev0 > 0 AND e.rev2 > 0 AND e.oi0 / e.rev0 > e.oi2 / e.rev2 THEN 1 ELSE 0 END
-         + CASE WHEN e.la0 < e.la2 THEN 1 ELSE 0 END AS sig_yes
+         + CASE WHEN e.la0 < e.la2 THEN 1 ELSE 0 END AS sig_yes,
+           COALESCE(e.eq0 <= 0, false) OR COALESCE(e.bps <= 0, false) AS neg_book,
+           -- 보통주 몫(국내, BPS 주식수가 보통주보다 3% 넘게 많을 때만) = 보통주 수 ÷ (지배 자본 ÷ BPS)
+           CASE WHEN e.country = 'KR' AND e.shares > 0 AND e.eq0 > 0 AND e.bps > 0 AND e.eq0 / e.bps > 1.03 * e.shares
+                THEN e.shares / (e.eq0 / e.bps) END AS common_share
     FROM earn e
 )
-SELECT c.stock_id, c.fy_count, c.end0 AS fy_end, c.ni0, c.oi0, v.metric, v.factor, v.raw_value, v.note, v.null_note
+SELECT c.stock_id, c.fy_count, c.end0 AS fy_end, c.ni0, c.oi0, c.ni1, c.oi1, c.ni2, c.oi2,
+       v.metric, v.factor, v.raw_value, v.note, v.null_note
 FROM calc c
 CROSS JOIN LATERAL (VALUES
     ('conservative_yield', 'value',
-        CASE WHEN c.mcap > 0 THEN c.e_cons / c.mcap END,
+        CASE WHEN c.mcap > 0 THEN c.e_cons * COALESCE(c.common_share, 1) / c.mcap END,
         CASE WHEN c.e_cons IS NULL OR NOT c.mcap > 0 THEN NULL
-             WHEN c.fy_count < 3 THEN '재무 이력 ' || c.fy_count || '년 — 3년 평균 없이 최신 FY 이익'
-             WHEN c.e_cons < c.e0 THEN '최신 이익이 3년 평균보다 커서 3년 평균 이익 사용(업황 정점 방지)' END,
+             ELSE NULLIF(CONCAT_WS('; ',
+                  CASE WHEN c.fy_count < 3 THEN '재무 이력 ' || c.fy_count || '년 — 3년 평균 없이 최신 FY 이익'
+                       WHEN c.e_cons < c.e0 THEN '최신 이익이 3년 평균보다 커서 3년 평균 이익 사용(업황 정점 방지)' END,
+                  CASE WHEN c.common_share IS NOT NULL
+                       THEN 'BPS 주식수가 보통주보다 ' || ROUND(100 * (1 / c.common_share - 1)) || '% 많음(우선주 등) — 이익의 보통주 몫 '
+                            || ROUND(100 * c.common_share) || '%만 보통주 시총과 비교' END), '') END,
         CAST(NULL AS text)),
-    ('book_yield',       'value',    c.bps / NULLIF(c.close, 0), NULL, NULL),
+    ('book_yield',       'value',
+        CASE WHEN NOT c.neg_book THEN c.bps / NULLIF(c.close, 0) END, NULL,
+        CASE WHEN c.neg_book THEN '자본 음수(자사주 매입 등) — 장부가 기준 저평가를 계산하지 않음' END),
     ('trap_signal',      'value',
         CASE WHEN NOT c.fin AND c.end2 IS NOT NULL AND c.sig_n >= 3 THEN CAST(c.sig_yes AS numeric) / c.sig_n END,
         NULL,

@@ -146,6 +146,11 @@ class DartClient:
                 notes.append(f"{col}←{how}")
         return values, notes
 
+    @staticmethod
+    def _currency(rows: list[dict]) -> str | None:
+        """재무제표 표시통화(행마다 있는 currency). K-IFRS 1021은 원화 외 표시통화를 허용한다 — 두산밥캣은 USD(D-026)."""
+        return next((str(r["currency"]).strip().upper() for r in rows if (r.get("currency") or "").strip()), None)
+
     def get_annual_financials(self, stock: StockRef, years: int, fiscal_month: int = 12,
                               last_year: int | None = None) -> list[Financial]:
         last_year = last_year or date.today().year - 1
@@ -170,7 +175,8 @@ class DartClient:
             last_day = calendar.monthrange(y, fiscal_month)[1]
             out.append(Financial(period_end=date(y, fiscal_month, last_day), period_type="FY",
                                  data_source="DART", accounting_std="K-IFRS",
-                                 notes=([f"fs_div={fs_div}"] if fs_div != "CFS" else []) + notes, **vals))
+                                 notes=([f"fs_div={fs_div}"] if fs_div != "CFS" else []) + notes,
+                                 currency=self._currency(rows) or self._currency(nxt_rows), **vals))
         return out
 
     # ------------------------------------------------------------ 공시
