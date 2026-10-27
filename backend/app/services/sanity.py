@@ -46,10 +46,19 @@ def default_cases_path() -> Path:
     raise FileNotFoundError("sanity_cases.yaml을 찾지 못했습니다 — --cases로 경로를 주세요")
 
 
-def stock_page() -> Path | None:
-    """종목 상세 화면 코드(frontend/js/pages/stock.js) — 컨테이너 /srv/frontend 또는 저장소 frontend."""
+def stock_page(name: str = "stock.js") -> Path | None:
+    """화면 코드(frontend/js/pages/<name>, 기본 종목 상세) — 컨테이너 /srv/frontend 또는 저장소 frontend."""
     for root in (CONFIG_DIR.parent, CONFIG_DIR.parent.parent):
-        p = root / "frontend" / "js" / "pages" / "stock.js"
+        p = root / "frontend" / "js" / "pages" / name
+        if p.exists():
+            return p
+    return None
+
+
+def doc_09() -> Path | None:
+    """09 정의서 — 저장소에서만 있다(배포 이미지에는 sanity 목록만 넣는다)."""
+    for root in (CONFIG_DIR.parent, CONFIG_DIR.parent.parent):
+        p = root / "개발산출물" / "09_매력도_점수_정의서.md"
         if p.exists():
             return p
     return None
@@ -480,8 +489,10 @@ def rule_r9(d: Data):
     data_loss = [s.ticker for s in lost if s.family != "none" and s.fins
                  and s.dq.get("score_null_code", "no_financials") == "no_financials"]
     intended = [s.ticker for s in lost if s.family == "none"]
+    fin = [s.ticker for s in lost if s.dq.get("score_null_code") == "financial_profile"]
     return not data_loss, (f"이전 {prev}: 재무 칸 누락으로 잃음 {len(data_loss)} {data_loss[:15]} · "
-                           f"재무 없음(표기 안 함, D-014) {len(no_fin)} {no_fin[:15]} · 점수 없음 테마 {len(intended)}")
+                           f"재무 없음(표기 안 함, D-014) {len(no_fin)} {no_fin[:15]} · 점수 없음 테마 {len(intended)}"
+                           + (f" · 금융 업종 비교로 바뀜(D-028) {len(fin)}" if fin else ""))
 
 
 # ── 독립 기준(개발산출물/11 5절) ──
@@ -722,6 +733,49 @@ def rule_top20_theme_reviewed(d: Data):
     return True, f"고유 {len(seen)}종목 (기록만) · " + " ".join(f"{k} {len(v)}{v if v else ''}" for k, v in per.items())
 
 
+def rule_financial_no_composite(d: Data):
+    """금융 묶음은 종합 점수·프리셋 순위·5단계 라벨이 없다(score_null_code = financial_profile), 홈 금융 탭에 순위 목록이 없다(D-028)."""
+    fin = [s for s in d.stocks.values() if s.family == "financial" and s.dq]
+    bad = [s.ticker for s in fin if s.composite or s.pct or s.dq.get("score_null_code") != "financial_profile"]
+    listed = 0
+    for c in ("US", "KR"):
+        listed += len(d.conn.execute(sql("home_attractiveness"), {"country": c, "limit": 20, "preset": "balanced",
+                                                                  "user_id": 0, "family": "financial"}).all())
+    page = stock_page("home.js")
+    tab = page is None or "getFinancialPeers" in page.read_text(encoding="utf-8")
+    return bool(fin) and not bad and not listed and tab, (
+        f"금융 {len(fin)}종목 중 종합 점수 있음 {len(bad)} {bad[:6]} · 홈 금융 순위 행 {listed}"
+        + ("" if tab else " · 홈 금융 탭이 업종 비교가 아님"))
+
+
+def case_financial_pb_roe_view(d: Data):
+    """종목 화면(금융): 같은 하위 업종 P/B·ROE(3년 평균)·P/E와 산점도 위치 — 표본 ≥ 8이면 회귀선, 아니면 중앙값(D-028)."""
+    from app.services.financial_profile import REGRESSION_MIN, financial_overview
+    wrong, groups = [], []
+    for c in ("US", "KR"):
+        for g in financial_overview(d.conn, c):
+            groups.append(f"{c} {g['theme']} {g['n']}개 {g['method']}")
+            if (g["method"] == "regression") != (g["n"] >= REGRESSION_MIN) or any(
+                    m["pb"] is not None and m["roe3"] is not None and not m["position"] for m in g["members"]):
+                wrong.append(f"{c} {g['theme']}")
+    screen, note = screen_check(["financial_profile", "ROE 대비 P/B", "회귀선", "중앙값", "P/E"], [])
+    if screen is None:
+        return None, note
+    return bool(groups) and not wrong and screen, f"{' · '.join(groups)} · 규칙 어긋남 {wrong} · {note}"
+
+
+def case_growth_label(d: Data):
+    """팩터 이름 '과거 실적 성장', 성장 프리셋 설명에 '미래 성장 예측이 아닙니다'(D-032) — 화면·DB 프리셋·09."""
+    screen, note = screen_check(['label: "과거 실적 성장"'], ['label: "성장성"'])
+    desc = d.conn.execute(text("SELECT description FROM scoring_presets WHERE code = 'growth'")).scalar() or ""
+    doc = doc_09()
+    in_doc = doc is None or "과거 실적 성장" in doc.read_text(encoding="utf-8")
+    ok = "미래 성장 예측이 아닙니다" in desc
+    if screen is None:
+        return None, note
+    return screen and ok and in_doc, f"{note} · 성장 프리셋 설명 '{desc}'" + ("" if in_doc else " · 09에 없음")
+
+
 def case_home_family_mix(d: Data):
     bad = []
     for c in ("US", "KR"):
@@ -813,6 +867,10 @@ SPECIAL = {
     "NEG-EQUITY-no-bp": lambda d, c: rule_negative_equity_no_bp(d),
     "ONEOFF-badge-recurring": lambda d, c: rule_oneoff_badge_wording(d),
     "PREF-share-basis": lambda d, c: rule_preferred_share_basis(d),
+    "FIN-no-composite": lambda d, c: rule_financial_no_composite(d),
+    "FIN-pb-roe-view": lambda d, c: case_financial_pb_roe_view(d),
+    "INSURER-oci-roe": lambda d, c: (None, "총포괄이익(지배)을 아직 수집하지 않음 — D-033 수집 뒤 required"),
+    "GROWTH-label": lambda d, c: case_growth_label(d),
 }
 
 

@@ -94,3 +94,25 @@ rules:
     assert "| ONEOFF-badge-recurring | required | 통과 | 배지 1개 중 단정 문구 0 [] |" in report
     assert "| PREF-share-basis | required | 통과 | 대상 1종목 ['005930(+26%)'] · 다름 0 [] |" in report
     assert "| CURRENCY-krw | required | 실패 |" in report      # 픽스처 EPS 8 vs 순이익 12 ÷ 1,000주 — 단위가 다르면 잡는다
+
+
+def test_financial_and_growth_label_rules(engine, universe, tmp_path):  # noqa: F811
+    """D-028·D-032: 금융 묶음은 종합 점수·홈 순위 없이 업종 안 비교(표본 < 8이면 중앙값), 성장 팩터 이름·프리셋 설명."""
+    from tests.test_scoring import _theme_rule
+    _theme_rule(engine, 3, scoring="financial")                    # 자동차(NAVER·현대차)를 금융 묶음으로
+    compute_scores(engine, as_of=D)
+    cases = tmp_path / "cases.yaml"
+    cases.write_text("""
+cases:
+  - {id: FIN-pb-roe-view, target: stock 화면 (금융), check: 업종 안 P/B·ROE·P/E, status: required}
+  - {id: INSURER-oci-roe, target: stock 화면 (보험), check: 총포괄이익 ROE, status: target}
+  - {id: GROWTH-label, target: stock·홈 화면, check: 과거 실적 성장, status: required}
+rules:
+  - {id: FIN-no-composite, check: 금융 종합 점수 없음, status: required}
+""", encoding="utf-8")
+    with engine.connect() as conn:
+        report, ok = run(conn, cases)
+    assert "| FIN-no-composite | required | 통과 | 금융 2종목 중 종합 점수 있음 0 [] · 홈 금융 순위 행 0 |" in report
+    assert "| FIN-pb-roe-view | required | 통과 | KR 자동차 1개 median" in report
+    assert "| INSURER-oci-roe | target | 확인 못함 |" in report
+    assert "| GROWTH-label | required | 통과 |" in report and "미래 성장 예측이 아닙니다" in report

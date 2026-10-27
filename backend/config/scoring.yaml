@@ -7,7 +7,8 @@
 # v2.2 = 로버스트 Z(±3) → 순위 정규 점수 RN(D-019, 수정 2 PR C)
 # v2.3 = 주 테마는 연결 매출 최대 사업 부문(직접 지정), 지분법 지주·금융 연결 점수 없음(D-024·D-025, 수정 3 PR A)
 # v2.4 = 재무 표시통화 원화 환산, 자본 ≤ 0이면 B/P 없음, 우선주 보통주 몫(D-026·D-027·D-029, 수정 3 PR B)
-model_version: v2.4-2026-10-27
+# v2.5 = 금융 묶음은 종합 점수·순위 없음(업종 안 P/B–ROE 비교), 성장 이름 '과거 실적 성장'(D-028·D-032, 수정 3 PR C)
+model_version: v2.5-2026-10-27
 
 # 섹터 중립화 축소 계수: z_adj = z − n/(n+k) × 주그룹 z 평균 (n = 주 그룹의 유효 표본 수)
 shrinkage_k: 5
@@ -29,7 +30,7 @@ presets:
     weights: {value: 0.05, quality: 0.10, growth: 0.35, safety: 0.10, momentum: 0.40}
   - code: growth
     name: 성장
-    description: 성장성 중심 — 성장 노출일 뿐 기대수익이 아님
+    description: 최근 실적이 크게 늘어난 회사 중심 — 미래 성장 예측이 아닙니다
     sort_order: 2
     weights: {value: 0.10, quality: 0.20, growth: 0.40, safety: 0.05, momentum: 0.25}
   - code: balanced

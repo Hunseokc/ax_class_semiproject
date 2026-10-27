@@ -576,6 +576,39 @@ class HomeRankingOut(Schema):
     items: list[HomeRankItem]
 
 
+# 금융 묶음 하위 업종 비교(D-028) — 종목 화면(analysis.attractiveness.financial_profile)과 홈 금융 탭이 같은 모양을 쓴다
+class FinancialPeerOut(Schema):
+    stock_id: int
+    ticker: str
+    name: str
+    market: str
+    pb: Num | None                           # 종가 / BPS (BPS ≤ 0이면 null)
+    roe3: Num | None                         # ROE 최근 3개 FY 평균(0.12 = 12%)
+    pe: Num | None                           # 종가 / EPS (적자면 null)
+    is_target: bool = False
+    gap: Num | None = None                   # P/B − 회귀선(또는 중앙값) P/B. 음수 = 같은 ROE의 동종사보다 장부가 대비 쌈
+    position: str | None = None              # 위치 문구(참고 정보)
+
+
+class FinancialProfileOut(Schema):
+    theme: str                               # 하위 업종 = 주 테마(은행·카드 / 보험 / 증권·자산운용)
+    country: str
+    method: Literal["regression", "median"]  # P/B·ROE가 둘 다 있는 종목 8개 이상이면 회귀선, 아니면 중앙값
+    n: int
+    slope: Num | None = None                 # 회귀선 P/B = intercept + slope × ROE
+    intercept: Num | None = None
+    median_roe: Num | None = None
+    median_pb: Num | None = None
+    note: str
+    members: list[FinancialPeerOut]
+    target: FinancialPeerOut | None = None   # 종목 화면에서만 — 이 종목 행
+
+
+class FinancialPeersOut(Schema):
+    country: Literal["KR", "US"]
+    groups: list[FinancialProfileOut]
+
+
 SessionStatus = Literal["today", "holiday", "previous_session"]
 
 

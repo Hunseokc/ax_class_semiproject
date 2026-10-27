@@ -17,7 +17,7 @@ const FALLBACK = {
   note: "공개된 일반적 투자 스타일을 단순화한 가중치이며 특정 인물의 판단이 아닙니다.",
   presets: [
     { code: "aggressive", name: "위험", description: "모멘텀·성장 중심", sort_order: 1 },
-    { code: "growth", name: "성장", description: "성장성 중심", sort_order: 2 },
+    { code: "growth", name: "성장", description: "최근 실적이 크게 늘어난 회사 중심 — 미래 성장 예측이 아닙니다", sort_order: 2 },
     { code: "balanced", name: "균형", description: "5개 팩터 균등", sort_order: 3 },
     { code: "value", name: "가치", description: "저평가·안정성 중심", sort_order: 4 },
   ],

@@ -693,7 +693,45 @@ def test_financial_theme_drops_revenue_metrics_and_scores_separately(engine, uni
     assert {round(float(mv[(s, "return_on_assets")].z_raw), 4) for s in (5, 6)} == {0.6745, -0.6745}
     # 금융도 자본 ≤ 0이면 B/P를 비운다(D-027 — 현대차 자본 −5) → B/P 표본 1개라 z = 0
     assert mv[(6, "book_yield")].raw_value is None and float(mv[(5, "book_yield")].z_raw) == 0
-    assert {float(st[s]["score"]) for s in (5, 6) if st[s]["score"] is not None} <= {50.0, 0.0}
+    # 금융 묶음은 팩터 점수만 남기고 종합·백분위를 내지 않는다(D-028)
+    for s in (5, 6):
+        assert st[s]["composite"] is None and st[s]["score"] is None
+        assert st[s]["data_quality"]["score_null_code"] == "financial_profile"
+
+
+def test_financial_family_shows_pb_roe_profile_instead_of_rank(client, engine, universe):
+    """D-028: 금융 종목 화면은 종합 점수·순위·요소값 대신 같은 하위 업종 안 P/B·ROE(3년 평균)·P/E와 위치(참고 정보).
+    홈 금융 탭은 순위 목록이 아니라 하위 업종별 비교다."""
+    _theme_rule(engine, 3, scoring="financial")                             # 자동차(NAVER 5, 현대차 6)를 금융 묶음으로
+    compute_scores(engine, as_of=D)
+    a = client.get(f"{API}/stocks/KOSPI/005380/analysis").json()["attractiveness"]
+    assert a["score"] is None and a["rank"] is None and a["factors"] == {} and a["theme_position"] is None
+    assert a["data_quality"]["score_null_code"] == "financial_profile"
+    fp = a["financial_profile"]
+    assert (fp["theme"], fp["method"], fp["n"], fp["target"]["ticker"]) == ("자동차", "median", 1, "005380")
+    assert fp["target"]["roe3"] is None and fp["target"]["position"] is None          # 현대차 자본이 모두 음수라 ROE 없음
+    naver = next(m for m in fp["members"] if m["ticker"] == "035420")
+    assert float(naver["roe3"]) == pytest.approx((-10 / 50 - 15 / 40) / 2) and naver["pe"] is None   # EPS 없음
+    assert float(naver["pb"]) == pytest.approx(universe[5][-1] / 40, rel=1e-3)
+    assert float(fp["target"]["pe"]) == pytest.approx(universe[6][-1] / 5, rel=1e-3)
+    home = client.get(f"{API}/home/financial-peers", params={"country": "KR"}).json()
+    assert [g["theme"] for g in home["groups"]] == ["자동차"] and len(home["groups"][0]["members"]) == 2
+    assert client.get(f"{API}/home/ranking", params={"kind": "attractiveness", "country": "KR",
+                                                      "family": "financial"}).json()["items"] == []
+
+
+def test_financial_profile_fit_uses_regression_from_eight_and_median_below():
+    from app.services.financial_profile import fit, position
+    pts = [(0.05 + 0.01 * i, 0.3 + 0.1 * i) for i in range(8)]            # P/B = 10 × ROE − 0.2
+    f = fit(pts)
+    assert f["method"] == "regression" and f["slope"] == pytest.approx(10) and f["intercept"] == pytest.approx(-0.2)
+    gap, label = position(f, 0.10, 0.5)                                    # 같은 ROE의 회귀선 P/B 0.8보다 0.3 낮다
+    assert gap == pytest.approx(-0.3) and "장부가 대비 싸게" in label
+    m = fit(pts[:7])                                                       # 7개면 중앙값 기준
+    assert m["method"] == "median" and m["median_roe"] == pytest.approx(0.08) and m["median_pb"] == pytest.approx(0.6)
+    gap, label = position(m, 0.10, 0.9)
+    assert gap == pytest.approx(0.3) and "ROE는 높고 P/B는 높습니다" in label
+    assert position(m, None, 0.9) == (None, None)
 
 
 def test_three_year_conservative_earnings_apply_to_every_theme(engine, universe):

@@ -344,6 +344,29 @@ cases:
     decision: D-027
     why: 자사주 매입 우량 기업의 B/P가 꼴찌권(BKNG 가치 173위)
 
+  # ── 금융 표시·성장 이름 (D-028·D-032, 수정 3 PR C) ──
+  - id: FIN-pb-roe-view
+    target: stock 화면 (금융)
+    check: 같은 하위 업종 안 P/B·ROE(3년 평균)·P/E와 산점도 위치 표시. 표본 ≥ 8이면 회귀선, 아니면 중앙값 기준
+    status: required
+    issue: U-8
+    decision: D-028
+
+  - id: INSURER-oci-roe
+    target: stock 화면 (보험)
+    check: 보험 종목은 총포괄이익(지배) 기준 ROE를 함께 표시
+    status: target          # D-033 수집 뒤 required
+    issue: R3-4
+    decision: D-028
+    why: 현대해상 2년 순이익 1.87조 vs 자본 변화 + 배당 −0.90조
+
+  - id: GROWTH-label
+    target: stock·홈 화면, 09
+    check: 팩터 이름 '과거 실적 성장', 성장 프리셋 설명에 '미래 성장 예측이 아닙니다'
+    status: required
+    issue: U-5
+    decision: D-032
+
   # ── 반대 방향 (우량한데 점수가 낮은 종목) ──
   - id: MSI-balanced
     ticker: MSI
@@ -493,6 +516,14 @@ rules:
     independent: false
     issue: R3-6
     decision: D-029
+
+  # 라운드 3 제안 HYUNDAI-MARINE-clean-surplus·INSURER-clean-surplus는 넣지 않는다 — D-028로 금융 순위가 없어져 검사 대상이 사라짐
+  - id: FIN-no-composite
+    check: 금융 묶음 종목은 종합 점수·프리셋 순위·5단계 라벨이 화면·API에 없음(score_null_code = financial_profile), 홈 금융 탭에 순위 목록 없음
+    status: required
+    independent: false
+    issue: U-8, R3-4
+    decision: D-028
 
   - id: TOP20-theme-reviewed
     check: 프리셋 top20(시장 2 × 프리셋 4) 중 업종 코드로만 분류되고 직접 지정·판정 목록에 없는 종목 수 — 기록만

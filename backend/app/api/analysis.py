@@ -20,7 +20,9 @@ from app.core.errors import NotFound, Unprocessable
 from app.queries import sql
 from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN, Num, Schema
 from app.core.config import get_settings
+from app.schemas.api import FinancialProfileOut
 from app.services.data_quality import data_quality, fiscal_year_mix
+from app.services.financial_profile import stock_profile
 from app.services.reference_score import reference_score, unscored_reason
 from app.services.scoring import FACTORS, METRICS, default_preset, theme_positions
 
@@ -124,6 +126,7 @@ class ScoreOut(Schema):
     reference_note: str | None = None
     fin_basis: list[FinBasisOut] = []            # 같은 시장 비교 표본의 재무 기준 연도별 종목 수(연도 내림차순)
     unscored_reason: str | None = None           # 업종 규칙으로 점수를 내지 않는 종목(리츠·지주회사·상품 신탁)의 사유 — as_of·score 없음
+    financial_profile: FinancialProfileOut | None = None   # 금융 묶음 — 종합 점수 대신 같은 하위 업종 안 P/B·ROE 비교(D-028)
 
 
 class PresetOut(PresetRef):
@@ -232,6 +235,10 @@ def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row)
                 **{c: by_metric[k][c] if k in by_metric else None for c in ("raw_value", "z_raw", "z_adj")}}
                for k, d in METRICS.items()]
     family = (row["data_quality"] or {}).get("family", "general")
+    if family == "financial":               # 종합 점수·순위·라벨·요소값 없이 업종 안 비교만(D-028)
+        return {**out, "as_of": row["score_as_of"], "data_quality": row["data_quality"] or {},
+                "financial_profile": stock_profile(db.connection(), stock_id, country),
+                "fin_basis": fiscal_year_mix(db.connection(), country, row["score_as_of"])}
     rank = ({"country": country, "family": family,
              "position": row["rank_position"], "total": row["rank_total"],
              "percentile": row["percentile"]} if row["rank_position"] is not None else None)

@@ -239,9 +239,16 @@ def theme_positions(conn, as_of: date, country: str, family: str) -> dict[int, d
 NO_FINANCIALS = "재무 정보가 없어 표기할 수 없습니다"
 
 
-def null_reason(coverage: int, has_required: bool) -> tuple[str, str]:
-    """점수를 내지 않는 이유 (코드, 문구). no_financials: 저평가·수익성을 계산할 재무가 없다 — 주가·B/P 같은
-    일부 정보만으로 점수·요소값을 보이지 않는다(D-014, 재무 원천이 없는 해외 상장 등)."""
+FINANCIAL_PROFILE = ("금융 업종(은행·보험·증권)은 회계 구조가 서로 달라 종합 매력도 점수·순위를 내지 않습니다 — "
+                     "같은 하위 업종 안 P/B·ROE·P/E 비교를 참고하세요")
+
+
+def null_reason(coverage: int, has_required: bool, family: str = "general") -> tuple[str, str]:
+    """점수를 내지 않는 이유 (코드, 문구). financial_profile: 금융 묶음은 종합 점수 대신 업종 안 P/B–ROE 비교(D-028).
+    no_financials: 저평가·수익성을 계산할 재무가 없다 — 주가·B/P 같은 일부 정보만으로 점수·요소값을 보이지 않는다
+    (D-014, 재무 원천이 없는 해외 상장 등)."""
+    if family == "financial":
+        return "financial_profile", FINANCIAL_PROFILE
     if not has_required:
         return "no_financials", f"{NO_FINANCIALS} — 저평가·수익성을 계산할 재무가 없어 일부 지표만으로는 점수를 내지 않습니다"
     return "few_factors", f"유효 팩터 {coverage}/5개 — {MIN_FACTORS}개 이상이어야 점수를 냅니다"
@@ -279,7 +286,7 @@ def aggregate(conn: Connection, as_of: date, notes: dict[int, list[str]] | None 
         if unavailable:
             dq["unavailable_factors"] = unavailable
         if r["composite"] is None:
-            dq["score_null_code"], dq["score_null_reason"] = null_reason(r["factor_coverage"], r["has_required"])
+            dq["score_null_code"], dq["score_null_reason"] = null_reason(r["factor_coverage"], r["has_required"], r["family"])
         if notes and r["stock_id"] in notes:
             dq["notes"] = notes[r["stock_id"]]
         out.append({**r, "as_of": as_of, "dq": json.dumps(dq, ensure_ascii=False)})

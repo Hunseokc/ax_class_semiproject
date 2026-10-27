@@ -220,6 +220,8 @@ export const searchStocks = (q, signal) => request("GET", "/stocks/search", { pa
 // 시장 주목 종목 — kind: volume_surge(거래량 급증) · attractiveness(매력도 순위)
 export const getHomeRanking = (kind, country, limit = 5, family = "general") =>
   api.get("/home/ranking", { kind, country, limit, preset: getPreset(), ...(kind === "attractiveness" ? { family } : {}) });
+// 금융 탭 — 하위 업종마다 P/B·ROE(3년 평균)·P/E와 ROE 대비 P/B 위치(순위 없음, D-028)
+export const getFinancialPeers = (country) => api.get("/home/financial-peers", { country });
 export const getSectors = (country) => api.get("/home/sectors", { country });
 export const getSentiment = (country) => api.get("/home/sentiment", { country });
 
