@@ -192,7 +192,8 @@ def test_factor_weighting_restandardization_missing_zero_and_required(engine):
     # 수익성(필수)이 없으면 팩터 3개여도 점수 없음
     s8 = balanced[8]
     assert s8["factor_coverage"] == 3 and s8["composite"] is None and s8["score"] is None
-    assert "저평가·수익성" in s8["data_quality"]["score_null_reason"]
+    assert "저평가·수익성" in s8["data_quality"]["score_null_reason"] and s8["data_quality"]["score_null_code"] == "no_financials"
+    assert s8["data_quality"]["score_null_reason"].startswith("재무 정보가 없어 표기할 수 없습니다")   # D-014
     assert set(s8["data_quality"]["unavailable_factors"]) == {"quality", "growth"}
 
 

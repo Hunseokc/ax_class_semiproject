@@ -58,7 +58,7 @@ export const plainAxis = { grid: { display: false }, border: { display: false } 
 // TODO(D가 ui.js로 이동): 원본은 components/ui.js에 있다. ui.js는 D 소유라 A 담당인 이 파일에 두었다 (이름·동작은 원본 그대로)
 export function scoreBadge(score) {
   return score === null || score === undefined
-    ? '<span class="score score--none" title="매력도 데이터 부족">–</span>'
+    ? '<span class="score score--none" title="매력도 표기 안 함 — 재무 정보 부족 등(상세 화면에서 이유 확인)">–</span>'
     : `<span class="score" title="매력도 백분위 ${Math.round(score)} — 같은 시장 상위 ${Math.max(1, Math.ceil(100 - score))}% (투자 권유 아님)">${Math.round(score)}</span>`;
 }
 

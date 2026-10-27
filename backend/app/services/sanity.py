@@ -29,8 +29,10 @@ FACTOR_ALIAS = {"stability": "safety"}
 TRUSTS = {"GLD", "IAU", "SLV", "PSLV"}
 FIN_LINKED = {"023590"}                                   # 다우기술(키움증권 연결)
 HOLD_RE = re.compile(r"홀딩스|지주")
-# R4 경기순환: 원자재 연동 테마 + 메모리·저장장치(테마가 '반도체'라 목록으로 정한다 — D-012의 '메모리 반도체')
-MEMORY = {"MU", "SNDK", "WDC", "STX", "000660"}
+# R4 경기순환: 원자재 연동 테마 + 메모리·저장장치(테마가 '반도체'라 목록으로 정한다 — D-012의 '메모리 반도체', D-017)
+# (국가, 티커)로 적는다 — R4는 시장마다 따로 세므로 SK하이닉스는 국내 가치 top10에서만 센다
+MEMORY = {("US", "MU"), ("US", "SNDK"), ("US", "WDC"), ("US", "STX"), ("KR", "000660")}
+MARKET_COUNTRY = {"US": "US", "KR": "KR"}           # sanity_cases.yaml의 market 값 → 국가
 TOP_LABELS = ("매우 낮음", "낮음", "보통", "높음", "매우 높음")
 
 
@@ -141,8 +143,10 @@ class Data:
         self.weights = {p["code"]: p["weights"] for p in self.cfg["presets"]}
 
     # ------------------------------------------------------------ 조회
-    def by_ticker(self, ticker: str) -> Stock | None:
-        return next((s for s in self.stocks.values() if s.ticker == ticker), None)
+    def by_ticker(self, ticker: str, market: str | None = None) -> Stock | None:
+        """market(US·KR)을 주면 그 국가 종목만 — 국내 숫자 티커와 미국 영문 티커가 겹치지 않아도 시장을 섞어 찾지 않는다."""
+        country = MARKET_COUNTRY.get(market or "")
+        return next((s for s in self.stocks.values() if s.ticker == ticker and (country is None or s.country == country)), None)
 
     def general(self, country: str) -> list[Stock]:
         return [s for s in self.stocks.values() if s.country == country and s.family == "general"]
@@ -283,7 +287,7 @@ def rule_r3(d: Data):
 
 
 def rule_r4(d: Data):
-    out = {c: [s.ticker for s in d.top(c, "value", 10) if s.commodity or s.ticker in MEMORY] for c in ("US", "KR")}
+    out = {c: [s.ticker for s in d.top(c, "value", 10) if s.commodity or (s.country, s.ticker) in MEMORY] for c in ("US", "KR")}
     return all(len(v) <= 3 for v in out.values()), " / ".join(f"{c} {len(v)} {v}" for c, v in out.items())
 
 
@@ -352,7 +356,9 @@ def rule_r8(d: Data):
 
 
 def rule_r9(d: Data):
-    """모델 버전이 바뀌기 전 마지막 계산일에 점수가 있던 종목 중, 지금 '재무 데이터 부족'으로 점수를 잃은 종목."""
+    """모델 버전이 바뀌기 전 마지막 계산일에 점수가 있던 종목 중, 재무가 있는데 칸이 비어 점수를 잃은 종목.
+    재무가 아예 없는 종목(해외 상장 등)은 '재무 정보가 없어 표기할 수 없습니다'로 막는 것이 설계라 따로 센다(D-014).
+    재무를 받던 종목이 0건이 되는 경우(XOM CIK 변경)는 SEC-tags-scored 같은 종목 case로 잡는다."""
     ver = d.cfg["model_version"]
     prev = d.conn.execute(text("""SELECT MAX(as_of) FROM stock_scores
                                   WHERE as_of < :d AND COALESCE(data_quality->>'model_version', '') <> :v"""),
@@ -363,10 +369,12 @@ def rule_r9(d: Data):
                                         WHERE st.as_of = :d AND p.code = 'balanced' AND st.score IS NOT NULL"""),
                                 {"d": prev}).scalars())
     lost = [s for sid, s in d.stocks.items() if sid in before and not s.scored]
-    data_loss = [s.ticker for s in lost if s.family != "none" and "재무" in (s.dq.get("score_null_reason") or "재무 없음")]
+    no_fin = [s.ticker for s in lost if s.family != "none" and not s.fins]
+    data_loss = [s.ticker for s in lost if s.family != "none" and s.fins
+                 and s.dq.get("score_null_code", "no_financials") == "no_financials"]
     intended = [s.ticker for s in lost if s.family == "none"]
-    return not data_loss, (f"이전 {prev}: 재무 부족으로 잃음 {len(data_loss)} {data_loss[:15]} · "
-                           f"설계상 제외 {len(intended)}")
+    return not data_loss, (f"이전 {prev}: 재무 칸 누락으로 잃음 {len(data_loss)} {data_loss[:15]} · "
+                           f"재무 없음(표기 안 함, D-014) {len(no_fin)} {no_fin[:15]} · 점수 없음 테마 {len(intended)}")
 
 
 # ── 독립 기준(개발산출물/11 5절) ──
@@ -461,28 +469,31 @@ def case_buyback(d: Data):
             if eq_neg and (ch[0]["operating_income"] or 0) < 0:
                 dist.append(s.factors["safety"])
     med = st.median(dist) if dist else None
-    vals = {t: (d.by_ticker(t).factors.get("safety") if d.by_ticker(t) else None) for t in ("MCK", "PM")}
+    vals = {t: (d.by_ticker(t, "US").factors.get("safety") if d.by_ticker(t, "US") else None) for t in ("MCK", "PM")}
     ok = med is not None and all(v is not None and v > med for v in vals.values())
     return ok, f"MCK {vals['MCK']} · PM {vals['PM']} vs 잠식+적자 중앙값 {med} (n={len(dist)})"
 
 
-def case_cj_history(d: Data, ticker: str):
-    s = d.by_ticker(ticker)
-    if s is None:
-        return False, "표본에 없음"
+def _with_stock(d: Data, c: dict, fn):
+    s = d.by_ticker(str(c["ticker"]), c.get("market"))
+    return fn(d, s) if s is not None else (False, "표본에 없음")
+
+
+def case_cj_history(s: Stock):
     years = [f["period_end"].year for f in s.chain()]
     return len(years) >= 3 and 2024 in years, f"이어지는 FY {years}"
 
 
 SPECIAL = {
-    "KCC-oneoff-cut": lambda d, c: oneoff_cut(d, d.by_ticker(str(c["ticker"]))) if d.by_ticker(str(c["ticker"])) else (False, "표본에 없음"),
-    "MICHANG-oneoff-cut": lambda d, c: oneoff_cut(d, d.by_ticker(str(c["ticker"]))) if d.by_ticker(str(c["ticker"])) else (False, "표본에 없음"),
-    "KCC-MICHANG-badge": lambda d, c: (all(has_badge(d.by_ticker(t), "oneoff") for t in c["ticker"]),
-                                        " · ".join(f"{t} {'있음' if has_badge(d.by_ticker(t), 'oneoff') else '없음'}" for t in c["ticker"])),
+    "KCC-oneoff-cut": lambda d, c: _with_stock(d, c, oneoff_cut),
+    "MICHANG-oneoff-cut": lambda d, c: _with_stock(d, c, oneoff_cut),
+    "KCC-MICHANG-badge": lambda d, c: (all(has_badge(d.by_ticker(t, c.get("market")), "oneoff") for t in c["ticker"]),
+                                        " · ".join(f"{t} {'있음' if has_badge(d.by_ticker(t, c.get('market')), 'oneoff') else '없음'}"
+                                                   for t in c["ticker"])),
     "HOME-family-mix": lambda d, c: case_home_family_mix(d),
     "SCREEN-no-phi-number": lambda d, c: screen_check(["상위 ${topPercent", "개 중 <strong>"], ["toPos(", "erf("]),
     "SCREEN-theme-position": lambda d, c: screen_check(["theme_position", "소속 테마"], []),
-    "CJ-LOGISTICS-history": lambda d, c: case_cj_history(d, str(c["ticker"])),
+    "CJ-LOGISTICS-history": lambda d, c: _with_stock(d, c, lambda d, s: case_cj_history(s)),
     "BUYBACK-vs-DISTRESSED": lambda d, c: case_buyback(d),
     "R1-oneoff-top10": lambda d, c: rule_r1(d),
     "R2-turnaround-growth": lambda d, c: rule_r2(d),
@@ -503,7 +514,7 @@ def run_case(d: Data, c: dict) -> tuple[bool | None, str]:
     tickers = c["ticker"] if isinstance(c.get("ticker"), list) else [c.get("ticker")]
     results, vals = [], []
     for t in tickers:
-        s = d.by_ticker(str(t))
+        s = d.by_ticker(str(t), c.get("market"))
         r = eval_check(c["check"], s)
         results.append(r)
         vals.append(f"{t}: {describe(s)}")

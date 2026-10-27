@@ -203,7 +203,7 @@ def reference_score(conn: Connection, stock_id: int, country: str, preset: dict)
     if notes:
         dq["notes"] = notes
     if composite is None:
-        dq["score_null_reason"] = null_reason(coverage, has_required)
+        dq["score_null_code"], dq["score_null_reason"] = null_reason(coverage, has_required)
     neutral = (f"주 테마 '{theme['theme']}' 비교군 {max(map(len, group.values()), default=0)}개로 섹터 중립화했습니다." if theme
                else "주 테마가 없어 섹터 중립화는 하지 않았습니다.")
     return {

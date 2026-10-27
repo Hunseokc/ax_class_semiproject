@@ -1,10 +1,10 @@
 ## sanity 결과 — 점수 계산일 2026-10-27 · 모델 v2-2026-10-27
 
-> 수정 1(검토_장부 D-011 PR 2~6) 뒤 `python -m app.ingest sanity`로 돌린 결과다. 데이터는 **개발 DB**(일봉·밸류에이션 2026-10-26)이고,
+> 수정 1(검토_장부 D-011 PR 2~6, D-014·D-017 반영) 뒤 `python -m app.ingest sanity`로 돌린 결과다. 데이터는 **개발 DB**(일봉·밸류에이션 2026-10-26)이고,
 > DART FY2024 누락 5종목과 SEC 태그 보완 7종목(XOM·CLX·EMN·EXP·GTX·OSK·AEIS)은 개발 DB에서 다시 받은 뒤 계산했다.
 > 배포 DB는 PR 1(재배포)과 같은 재수집을 마친 뒤 다시 돌려야 같은 결과가 나온다.
 
-required(known_fail 포함) 통과 **31/32** — 실패: R9-no-score-loss
+required(known_fail 포함) 통과 **32/32**
 
 | id | status | 결과 | 실제 값 |
 |---|---|---|---|
@@ -44,5 +44,6 @@ required(known_fail 포함) 통과 **31/32** — 실패: R9-no-score-loss
 | R6-score-honesty | required | 통과 | 식 불일치 0 · 종합 순서 뒤집힘 0 · 구간 라벨 불일치 0 |
 | R7-badge-inflation | target | 통과 | US 5.9% / KR 17.0% (원자재 배지 제외) |
 | R8-top10-stability | target | 실패 | US위험 7 US성장 8 US균형 5 US가치 6 KR위험 7 KR성장 7 KR균형 5 KR가치 6 |
-| R9-no-score-loss | required | 실패 | 이전 2026-10-26: 재무 부족으로 잃음 13 ['NGG', 'MUFG', 'ENB', 'CP', 'DEO', 'HLN', 'RYAAY', 'BNTX', 'TM', 'SMFG', 'DRD', 'MESO', 'IPX'] · 설계상 제외 12 |
+| R9-no-score-loss | required | 통과 | 이전 2026-10-26: 재무 칸 누락으로 잃음 0 [] · 재무 없음(표기 안 함, D-014) 13 ['NGG', 'MUFG', 'ENB', 'CP', 'DEO', 'HLN', 'RYAAY', 'BNTX', 'TM', 'SMFG', 'DRD', 'MESO', 'IPX'] · 점수 없음 테마 12 |
 | R10-independent-benchmark | required | 통과 | 이상 종목 14(≤14) · 우량 거짓 음성 26(≤27) · {'US위험': 2, 'US성장': 1, 'US균형': 0, 'US가치': 0, 'KR위험': 3, 'KR성장': 4, 'KR균형': 3, 'KR가치': 1} |
+[sanity] 완료 0.3s

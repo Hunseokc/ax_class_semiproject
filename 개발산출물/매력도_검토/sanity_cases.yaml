@@ -276,7 +276,7 @@ rules:
     issue: P6
 
   - id: R4-cycle-value
-    check: 가치 top10 중 경기순환 테마(원자재 5개 + 메모리 반도체) 종목 ≤ 3개
+    check: 가치 top10 중 경기순환 테마(원자재 5개 + 메모리 반도체) 종목 ≤ 3개 — 메모리는 미국 MU·SNDK·WDC·STX, 국내 SK하이닉스, 시장별로 센다(D-017)
     status: target
     independent: true
     issue: P5, R1-8
@@ -309,10 +309,12 @@ rules:
     why: D-003으로 해법을 표시로 옮겼으므로 측정만
 
   - id: R9-no-score-loss
-    check: 모델 변경 전 점수가 있던 종목 중 '재무 데이터 누락' 때문에 점수를 잃은 종목 0개
+    check: 모델 변경 전 점수가 있던 종목 중 재무가 있는데 칸이 비어 점수를 잃은 종목 0개 (재무가 아예 없는 종목은 따로 표시)
     status: required
     independent: true
     issue: R1-6
+    decision: D-014
+    why: 재무 원천이 없는 해외 상장 종목은 "재무 정보가 없어 표기할 수 없습니다"로 막는 것이 설계(D-014)
 
   - id: R10-independent-benchmark
     check: 11번 5절 독립 기준 이상 종목 수 ≤ 14, 우량 거짓 음성 ≤ 27

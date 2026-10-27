@@ -372,6 +372,19 @@ function renderScore(a) {
     return;
   }
   const dq = s.data_quality || {};
+  const mc = stock?.market_condition;   // 시장·섹터 점수는 상세 응답에서 — 프리셋을 바꿔 다시 그려도 그대로
+  if (s.score === null || s.score === undefined) {
+    // 점수가 없으면 일부 지표로 만든 요소값·레이더도 보이지 않는다(D-014) — 시장·섹터 점수(매력도와 별개)만 남긴다
+    const noFin = dq.score_null_code === "no_financials";
+    const box = h('<div class="score-panel__empty"></div>');
+    box.append(emptyState({
+      title: noFin ? "재무 정보가 없어 표기할 수 없습니다" : "매력도를 계산할 수 없습니다",
+      body: noFin ? "해외 상장 종목처럼 재무제표를 받을 곳이 없으면 저평가·수익성을 계산할 수 없어, 주가 같은 일부 정보만으로 점수를 내지 않습니다."
+        : esc(dq.score_null_reason || "") }));
+    if (mc) box.append(h(conditionRow(mc)));
+    $("#score").replaceChildren(box);
+    return;
+  }
   const badges = dq.badges || [];   // 경고 배지(일회성 이익·결산 시점·재무 이력) — 설명은 계산 근거에도 적는다
   const market = s.rank?.country === "US" ? "미국" : "국내";
   const factors = Object.entries(s.factors);
@@ -384,7 +397,6 @@ function renderScore(a) {
   const themeText = !tp ? "" : `<p class="score-theme subtle">소속 테마 <strong>${esc(tp.group_name)}</strong>는 같은 시장 테마 ${tp.themes}개 중 ${
     THEME_FACTORS.filter((k) => tp.factors[k]).map((k) => `${FACTOR_LABEL[k]} ${tp.factors[k].position}위(상위 ${tp.factors[k].top_percent}%)`).join(" · ")
   } — 테마 안 순위가 높아도 테마 자체가 약할 수 있습니다.</p>`;
-  const mc = stock?.market_condition;   // 시장·섹터 점수는 상세 응답에서 — 프리셋을 바꿔 다시 그려도 그대로
   const el = h(`<div class="score-panel">
       <div class="score-panel__gauge score-panel__left">
         <div class="score-row">
