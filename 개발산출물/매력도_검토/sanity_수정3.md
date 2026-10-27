@@ -295,3 +295,94 @@ required(known_fail 포함) 통과 **48/50** — 실패: DAEHAN-SHIPBUILDING-val
 | TOP20-theme-reviewed | target | 통과 | 고유 73종목 (기록만) · US위험 15['MU', 'FIX', 'STX', 'SN', 'WDC', 'LITE', 'SCCO', 'NEM', 'LLY', 'EXEL', 'IRDM', 'POWL', 'MRK', 'MNST', 'ROST'] US성장 15['MU', 'STX', 'WDC', 'NEM', 'FIX', 'SCCO', 'EXEL', 'LLY', 'POWL', 'SN', 'LITE', 'MNST', 'CDE', 'IRDM', 'PLTR'] US균형 18['MU', 'MNST', 'EXEL', 'NEM', 'MLI', 'IPAR', 'JNJ', 'MRK', 'EPD', 'SCCO', 'DUK', 'NEU', 'VZ', 'AEP', 'D', 'CF', 'WDC', 'AME'] US가치 19['T', 'PHM', 'DUK', 'EPD', 'MLI', 'MNST', 'VZ', 'CBT', 'TOL', 'GNTX', 'IPAR', 'DIS', 'FISV', 'PFE', 'MU', 'AEP', 'D', 'MCD', 'EXEL'] KR위험 15['458870', '278470', '462870', '131290', '031980', '161390', '042700', '062040', '024840', '080220', '041830', '236200', '009150', '440110', '003230'] KR성장 15['458870', '462870', '278470', '257720', '042700', '062040', '003230', '031980', '236200', '483650', '161390', '214150', '080220', '083650', '131290'] KR균형 16['462870', '236200', '271560', '161390', '458870', '259960', '214150', '033780', '145020', '093050', '278470', '257720', '002960', '041830', '071320', '062040'] KR가치 19['462870', '071320', '271560', '003480', '161390', '093050', '145020', '003650', '005880', '016380', '236200', '259960', '439260', '004690', '017940', '030200', '000120', '214150', '073240'] |
 
 </details>
+
+## PR D — 검증 장치 (D-030), 점수 변경 없음(모델 v2.5 그대로)
+
+실행기 출력이 이 문서의 4칸 형식을 직접 낸다. `sanity --save`(개발 DB, `environment = dev`)로 `sanity_runs`에 1행 남김.
+
+**통과 51 · 감수한 실패 2 · target 실패 4 · 미검증 3** · required 실패 2 (required·known_fail 51개: 통과 46 + 감수한 실패 2 · 미검증 1 · 실패 2)
+
+- 새 항목: DEPLOY-sanity-ran(required) — 개발 DB에서는 **미검증**("배포 DB Job(--save --env deploy)에서만 확인"). 배포 Job을 만들고 돌리면 통과로 남는다(운영 가이드 5차 6~7단계).
+- 미검증 3: THEME-main-business-unjudged(판정 못한 6종목), INSURER-oci-roe(총포괄이익 미수집), DEPLOY-sanity-ran(배포 DB에서만).
+- required 실패 2: DAEHAN-SHIPBUILDING-value(대한조선 가치 14위 — v2.2 기준선부터), R10-independent-benchmark(이상 23 > 16 — 기준선 18, PR A 동료 효과로 24, PR B 23).
+
+<details><summary>PR D 전체 표 (최종 — 수정 3 반영 모델 v2.5)</summary>
+
+| id | status | 결과 | 실제 값 |
+|---|---|---|---|
+| SIRI-growth | required | 통과 | SIRI: 균형 150/272 가치 150/272 성장 180/272 |
+| RIVN-growth | required | 통과 | RIVN: 균형 253/272 가치 263/272 성장 190/272 |
+| INTC-growth | required | 통과 | INTC: 균형 258/272 가치 258/272 성장 253/272 |
+| LOTTE-HOLDINGS-growth | required | 통과 | 004990: 표본에 없음 |
+| ASIANA-growth | required | 통과 | 020560: 균형 282/297 가치 282/297 성장 283/297 |
+| SARAMIN-balanced | required | 통과 | 143240: 균형 76/297 가치 65/297 성장 179/297 |
+| KCC-oneoff-cut | required | 통과 | 순이익/영업이익 3.6배 → e = 0.78 × 영업이익, 지표 0.0882 (기대 0.0882) |
+| MICHANG-oneoff-cut | required | 통과 | 순이익/영업이익 2.0배 → e = 0.78 × 영업이익, 지표 0.1326 (기대 0.1326) |
+| KCC-MICHANG-badge | required | 통과 | 002380 있음 · 003650 있음 |
+| WDC-value | required | 통과 | WDC: 균형 19/272 가치 116/272 성장 5/272 |
+| HANIL-HOLDINGS-value | required | 통과 | 003300: 균형 67/297 가치 46/297 성장 167/297 |
+| HANIL-HOLDINGS-value-strict | required | 통과 | 003300: 균형 67/297 가치 46/297 성장 167/297 |
+| HOME-family-mix | required | 통과 | family 섞임 없음 |
+| SCREEN-no-phi-number | required | 통과 | 화면 코드 확인 |
+| SCREEN-theme-position | required | 통과 | 화면 코드 확인 |
+| SCREEN-theme-position-momentum | required | 통과 | 화면 코드 확인 |
+| GLD-IAU-not-scored | required | 통과 | GLD: 표본에 없음 · IAU: 표본에 없음 |
+| DAOU-family | required | 통과 | 023590: 점수 없음 |
+| HOLDING-equity-method | required | 통과 | 000240: 점수 없음 |
+| FIN-consolidated-nonfinancial | required | 통과 | 000880: 점수 없음 · 023590: 점수 없음 |
+| SKSQUARE-not-scored | required | 통과 | 402340: 표본에 없음 |
+| SEC-tags-scored | required | 통과 | XOM: 균형 73/272 가치 59/272 성장 138/272 · CLX: 균형 224/272 가치 210/272 성장 211/272 · EMN: 균형 137/272 가치 79/272 성장 181/272 · EXP: 균형 157/272 가치 84/272 성장 209/272 · GTX: 균형 192/272 가치 179/272 성장 168/272 · OSK: 균형 140/272 가치 34/272 성장 183/272 · AEIS: 균형 216/272 가치 206/272 성장 197/272 |
+| DAEHAN-SHIPBUILDING-value | required | 실패 | 439260: 균형 45/297 가치 14/297 성장 108/297 |
+| CJ-LOGISTICS-history | required | 통과 | 이어지는 FY [2025, 2024, 2023] |
+| MU-value | required | 통과 | MU: 균형 1/272 가치 16/272 성장 1/272 |
+| SIRI-value | required | 통과 | SIRI: 균형 150/272 가치 150/272 성장 180/272 |
+| KGSTEEL-value | target | 통과 | 016380: 균형 60/297 가치 11/297 성장 168/297 |
+| T-value | known_fail | 실패(감수 D-001) | T: 균형 31/272 가치 1/272 성장 111/272 |
+| DNAUTO-weak-theme-first | target | 실패 | 007340: 균형 14/297 가치 5/297 성장 32/297 |
+| THEME-main-business-KR | required | 통과 | 35종목 중 다름 0 [] |
+| THEME-main-business-US | required | 통과 | 30종목 중 다름 0 [] |
+| THEME-main-business-unjudged | target | 확인 못함 | 판정 못함 048410 정밀화학 · HON 항공우주·방산 · CTAS 레저·의류·소비서비스 · FISV 인터넷 플랫폼 · CPAY 인터넷 플랫폼 · PYPL 인터넷 플랫폼 |
+| SPEAR-business-combination-growth | known_fail | 실패(감수 D-005) | 347700: 균형 48/297 가치 188/297 성장 2/297 |
+| BOBCAT-currency | required | 통과 | 지표 0.0872 vs KRX EPS÷종가 0.0859 (비율 1.02) |
+| NEG-EQUITY-bp | required | 통과 | BKNG: 자본 -5,578,000,000 · B/P 없음 · 자본 음수(자사주 매입 등) — 장부가 기준 저평가를 계산하지 않음 · HCA: 자본 -6,027,000,000 · B/P 없음 · 자본 음수(자사주 매입 등) — 장부가 기준 저평가를 계산하지 않음 · MCD: 자본 -1,791,000,000 · B/P 없음 · 자본 음수(자사주 매입 등) — 장부가 기준 저평가를 계산하지 않음 · PM: 자본 -9,994,000,000 · B/P 없음 · 자본 음수(자사주 매입 등) — 장부가 기준 저평가를 계산하지 않음 · YUM: 자본 -7,325,000,000 · B/P 없음 · 자본 음수(자사주 매입 등) — 장부가 기준 저평가를 계산하지 않음 |
+| FIN-pb-roe-view | required | 통과 | US 보험 11개 regression · US 은행·카드 7개 median · US 증권·자산운용 9개 regression · KR 보험 10개 regression · KR 은행·카드 10개 regression · KR 증권·자산운용 9개 regression · 규칙 어긋남 [] · 화면 코드 확인 |
+| INSURER-oci-roe | target | 확인 못함 | 총포괄이익(지배)을 아직 수집하지 않음 — D-033 수집 뒤 required |
+| GROWTH-label | required | 통과 | 화면 코드 확인 · 성장 프리셋 설명 '최근 실적이 크게 늘어난 회사 중심 — 미래 성장 예측이 아닙니다' |
+| MSI-balanced | target | 실패 | MSI: 균형 184/272 가치 178/272 성장 179/272 |
+| ADP-balanced | target | 실패 | ADP: 균형 149/272 가치 114/272 성장 161/272 |
+| BUYBACK-vs-DISTRESSED | required | 통과 | MCK -0.3733 · PM -0.255 vs 잠식+적자 중앙값 -2.2317 (n=1) |
+| R1-oneoff-top10 | required | 통과 | 잘리지 않은 일회성 0개 [] |
+| R2-turnaround-growth | required | 통과 | US 0 [] / KR 0 [] |
+| R3-value-trap | required | 통과 | US 0 [] / KR 1 ['016380'] |
+| R4-cycle-value | target | 통과 | US 2 ['EPD', 'MLI'] / KR 1 ['003650'] |
+| R5-fiscal-gap-badge | required | 통과 | 대상 10종목 · 배지 없음 0 [] |
+| R6-score-honesty | required | 통과 | 식 불일치 0 · 종합 순서 뒤집힘 0 · 구간 라벨 불일치 0 |
+| R7-badge-inflation | target | 통과 | US 7.0% / KR 15.5% (원자재 배지 제외) |
+| R8-top10-stability | target | 실패 | US위험 8 US성장 8 US균형 7 US가치 6 KR위험 6 KR성장 7 KR균형 6 KR가치 6 |
+| R9-no-score-loss | required | 통과 | 이전 2026-10-27: 재무 칸 누락으로 잃음 0 [] · 재무 없음(표기 안 함, D-014) 0 [] · 점수 없음 테마 3 · 금융 업종 비교로 바뀜(D-028) 56 |
+| R10-independent-benchmark | required | 실패 | 이상 종목 23(≤16) · 우량 거짓 음성 24(≤27) · {'US위험': 4, 'US성장': 3, 'US균형': 2, 'US가치': 0, 'KR위험': 6, 'KR성장': 4, 'KR균형': 3, 'KR가치': 1} |
+| TRAP-penalty-only | required | 통과 | 562종목 중 양수 0 |
+| WEAK-theme-first | target | 통과 | 22개 (기록만) · US위험 2['IRDM', 'BE'] US성장 1['IRDM'] US균형 3['IPAR', 'NEU', 'VZ'] US가치 4['T', 'FSLR', 'DIS', 'EXEL'] KR위험 3['462870', '024840', '457190'] KR성장 2['462870', '112610'] KR균형 3['236200', '458870', '007340'] KR가치 4['007340', '145020', '236200', '214150'] |
+| THEME-position-raw | required | 통과 | 테마·팩터 315칸 중 차이 0 [] |
+| CLIP-order | required | 통과 | 18개 지표 최저 0.58 |
+| CURRENCY-krw | required | 통과 | 594개 값 중 50배 넘게 어긋남 0 [] |
+| NEG-EQUITY-no-bp | required | 통과 | 자본 ≤ 0 18종목 ['PM', 'DELL', 'ABBV', 'MCD', 'MO', 'BKNG', 'MCK', 'SBUX', 'LOW', 'MAR', 'HCA', 'HLT'] 중 B/P 있음 0 [] |
+| ONEOFF-badge-recurring | required | 통과 | 배지 49개 중 단정 문구 0 [] |
+| PREF-share-basis | required | 통과 | 대상 22종목 ['005930(+13%)', '005380(+29%)', '097950(+6%)', '000210(+8%)', '375500(+8%)', '051900(+12%)', '066570(+11%)', '051910(+11%)'] · 다름 0 [] |
+| FIN-no-composite | required | 통과 | 금융 59종목 중 종합 점수 있음 0 [] · 홈 금융 순위 행 0 |
+| DEPLOY-sanity-ran | required | 확인 못함 | 배포 DB Job(--save --env deploy)에서만 확인 — 이번 실행은 개발 DB 기록 |
+| TOP20-theme-reviewed | target | 통과 | 고유 73종목 (기록만) · US위험 15['MU', 'FIX', 'STX', 'SN', 'WDC', 'LITE', 'SCCO', 'NEM', 'LLY', 'EXEL', 'IRDM', 'POWL', 'MRK', 'MNST', 'ROST'] US성장 15['MU', 'STX', 'WDC', 'NEM', 'FIX', 'SCCO', 'EXEL', 'LLY', 'POWL', 'SN', 'LITE', 'MNST', 'CDE', 'IRDM', 'PLTR'] US균형 18['MU', 'MNST', 'EXEL', 'NEM', 'MLI', 'IPAR', 'JNJ', 'MRK', 'EPD', 'SCCO', 'DUK', 'NEU', 'VZ', 'AEP', 'D', 'CF', 'WDC', 'AME'] US가치 19['T', 'PHM', 'DUK', 'EPD', 'MLI', 'MNST', 'VZ', 'CBT', 'TOL', 'GNTX', 'IPAR', 'DIS', 'FISV', 'PFE', 'MU', 'AEP', 'D', 'MCD', 'EXEL'] KR위험 15['458870', '278470', '462870', '131290', '031980', '161390', '042700', '062040', '024840', '080220', '041830', '236200', '009150', '440110', '003230'] KR성장 15['458870', '462870', '278470', '257720', '042700', '062040', '003230', '031980', '236200', '483650', '161390', '214150', '080220', '083650', '131290'] KR균형 16['462870', '236200', '271560', '161390', '458870', '259960', '214150', '033780', '145020', '093050', '278470', '257720', '002960', '041830', '071320', '062040'] KR가치 19['462870', '071320', '271560', '003480', '161390', '093050', '145020', '003650', '005880', '016380', '236200', '259960', '439260', '004690', '017940', '030200', '000120', '214150', '073240'] |
+
+</details>
+
+## 요약 — 수정 3 전후 (같은 개발 DB)
+
+| | 통과 | 감수한 실패 | target 실패 | 미검증 | required 실패 |
+|---|---|---|---|---|---|
+| 기준선 v2.2 | 35 | 1 | 5 | 0 | 3 (대한조선·R10 18·CLIP-order) |
+| PR A v2.3 | 41 | 2 | 5 | 1 | 2 (대한조선·R10 24) |
+| PR B v2.4 | 48 | 2 | 4 | 1 | 2 (대한조선·R10 23) |
+| PR C v2.5 | 51 | 2 | 4 | 2 | 2 (대한조선·R10 23) |
+| **PR D v2.5** | **51** | **2** | **4** | **3** | **2** (대한조선·R10 23) |
+
+- 종료 조건 2(required 전부 통과)는 **채우지 못했다**: 대한조선·R10 두 개가 이 DB의 v2.2 기준선부터 실패한다. 합격선은 같은 데이터로 바꾸지 않는다(D-030). 라운드 4(데이터)가 두 DB의 차이(비교군 재선정·FY2025 재무)와 R10 상승 원인을 측정한다(장부 U-9).
