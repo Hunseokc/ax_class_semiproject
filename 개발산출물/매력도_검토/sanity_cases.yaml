@@ -159,10 +159,30 @@ cases:
   - id: DAOU-family
     ticker: "023590"   # 다우기술
     market: KR
-    check: family == financial or not_scored
+    check: not_scored
     status: required
     issue: P4
-    why: 키움증권 연결, 부채/자본 21.9배
+    decision: D-025
+    why: D-025로 금융 연결 회사는 점수 없음(종전 family == financial). 키움증권 연결, 금융사업부 매출 98.6%
+
+  # ── D-025 지분법 지주·금융 연결 (수정 3 PR A) ──
+  - id: HOLDING-equity-method
+    ticker: "000240"   # 한국앤컴퍼니
+    market: KR
+    check: not_scored
+    status: required
+    issue: D-004
+    decision: D-025
+    why: 한국타이어 지분법 — 영업이익률 28.2%(테마 중앙값 6.6%), 부채/자산 0.09로 국내 가치 1위였음
+
+  - id: FIN-consolidated-nonfinancial
+    ticker: ["000880", "023590"]   # 한화, 다우기술
+    market: KR
+    check: not_scored
+    status: required
+    issue: D-004, U-2
+    decision: D-025
+    why: 금융 자회사 연결(한화생명 · 키움증권)로 일반 기업 지표가 왜곡됨
 
   - id: SKSQUARE-not-scored
     ticker: "402340"   # SK스퀘어
@@ -243,6 +263,67 @@ cases:
     status: target
     issue: U-1, U-2
     why: 2차전지 테마(적자·매출 감소) 안 1등이라 중립화로 지표가 부풀려짐. 수정 1 국내 가치 1위, V1 측정 7위
+
+  # ── U-2 테마 분류 — 연결 매출 최대 사업 (D-024, 수정 3 PR A) ──
+  # 라운드 3 확실 오분류 + 보류 33종목 중 판정한 종목. 근거는 backend/config/universe.yaml 주석.
+  # 변경안과 다른 점: 2025 사업보고서로 다시 보니 삼성물산(028260)은 상사 35.9% > 건설 34.7%라 유통·커머스,
+  #   SK오션플랜트(100090)는 특수선 59% > 해상풍력 34%라 조선이다(라운드 3은 2024 자료).
+  - id: THEME-main-business-KR
+    ticker: ["007340", "074600", "225570", "347700", "051910", "030530", "028260", "081660", "127710",
+             "000150", "020150", "058470", "102710", "100090", "025770", "036800", "462860", "037460",
+             "022100", "010780", "046890", "328130", "466100", "026960", "047050", "039200", "121600",
+             "281740", "011790", "010170", "018260", "181710", "457190", "300080", "420770"]
+    market: KR
+    check: 주 테마 == expected
+    expected: {"007340": 기계·로봇, "074600": 반도체 장비·소재, "225570": 게임·엔터·미디어, "347700": 항공우주·방산,
+               "051910": 2차전지, "030530": 반도체 장비·소재, "028260": 유통·커머스, "081660": 레저·의류·소비서비스,
+               "127710": 게임·엔터·미디어, "000150": 기계·로봇, "020150": 2차전지, "058470": 반도체 장비·소재,
+               "102710": 반도체 장비·소재, "100090": 조선, "025770": 소프트웨어·IT서비스,
+               "036800": 소프트웨어·IT서비스, "462860": 소프트웨어·IT서비스, "037460": 유통·커머스,
+               "022100": 소프트웨어·IT서비스, "010780": 유틸리티, "046890": 반도체, "328130": 의료기기·서비스,
+               "466100": 기계·로봇, "026960": 유통·커머스, "047050": 유통·커머스, "039200": 바이오,
+               "121600": 2차전지, "281740": 반도체 장비·소재, "011790": 석유화학, "010170": 하드웨어·통신장비,
+               "018260": 운송·물류, "181710": 소프트웨어·IT서비스, "457190": 정밀화학, "300080": 소프트웨어·IT서비스,
+               "420770": 반도체 장비·소재}
+    status: required
+    issue: U-2, R3-1
+    decision: D-024
+    why: 법인 업종 코드(별도·과거 사업)가 연결 주력 사업과 다름. 라운드 3 순위 변화 중앙값 17계단(잡음 1)
+
+  - id: THEME-main-business-US
+    ticker: [IT, KMB, LTH, MTN, CHDN, HXL, OSK, FSS, CVS, SHW, MMM, WWD, HUBB, ABT, WOR, CALX, QCOM, ECL, FELE, LFUS,
+             SNDK, CRS, ATI, APO, CCL, RCL, IFF, SXT, MOD, APP]
+    market: US
+    check: 주 테마 == expected
+    expected: {IT: 소프트웨어·IT서비스, KMB: 화장품·생활용품, LTH: 레저·의류·소비서비스, MTN: 레저·의류·소비서비스,
+               CHDN: 레저·의류·소비서비스, HXL: 항공우주·방산, OSK: 기계·로봇, FSS: 기계·로봇, CVS: 의료기기·서비스,
+               SHW: 정밀화학, MMM: 기계·로봇, WWD: 항공우주·방산, HUBB: 전력 인프라, ABT: 의료기기·서비스,
+               WOR: 건자재, CALX: 하드웨어·통신장비, QCOM: 반도체, ECL: 정밀화학, FELE: 기계·로봇,
+               LFUS: 전자부품·디스플레이, SNDK: 반도체, CRS: 항공우주·방산, ATI: 항공우주·방산, APO: 보험,
+               CCL: 레저·의류·소비서비스, RCL: 레저·의류·소비서비스, IFF: 식음료·담배, SXT: 식음료·담배,
+               MOD: 기계·로봇, APP: 인터넷 플랫폼}
+    status: required
+    issue: U-2, R3-1
+    decision: D-024
+    why: SIC가 분사(3M·Worthington) 뒤에도 그대로이거나 등록 업종이라 주력 사업과 다름
+
+  # 보류 33종목 중 D-024로 판정하지 못한 종목 — 업종 코드 그대로 두고 미검증으로 센다(09 11절)
+  - id: THEME-main-business-unjudged
+    ticker: ["048410", HON, CTAS, FISV, CPAY, PYPL]
+    check: 사람이 판정 — 현대바이오(매출이 사업을 대표하지 못함) · HON(2026-08 분할) · CTAS(맞는 테마 없음) · FISV·CPAY·PYPL(결제 업종 테마 결정 필요)
+    status: target
+    issue: U-2
+    decision: D-024
+
+  # ── R1-9 / D-005 사업 결합 매출 (수정 3 PR A) ──
+  - id: SPEAR-business-combination-growth
+    ticker: "347700"   # 스피어
+    market: KR
+    check: growth_rank > 10
+    status: known_fail
+    decision: D-005
+    issue: R1-9
+    why: 매출 33억 → 956억(2년 28.8배, 사업 결합)으로 국내 성장·위험 1위. M1의 '매출 − 자산 성장' 후보로 다시 측정
 
   # ── 반대 방향 (우량한데 점수가 낮은 종목) ──
   - id: MSI-balanced
@@ -365,3 +446,11 @@ rules:
     independent: false
     issue: R2-1, D-019
     why: 수정 1 모델 −0.47~0.31 (SNDK +1,093%가 묶음 16위). 회귀 방지용 — RN이 낫다는 근거로 세지 않는다
+
+  - id: TOP20-theme-reviewed
+    check: 프리셋 top20(시장 2 × 프리셋 4) 중 업종 코드로만 분류되고 직접 지정·판정 목록에 없는 종목 수 — 기록만
+    status: target
+    independent: false
+    issue: U-2
+    decision: D-024
+    why: 새로 상위에 오른 종목의 분류를 라운드마다 사람이 확인하게 함
