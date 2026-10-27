@@ -1,4 +1,4 @@
-# 매력도 모델 회귀 테스트 목록 (초안)
+# 매력도 모델 회귀 테스트 목록 v2 (2026-10-27, D-012)
 #
 # 한 번 찾은 반례를 "다시 나오면 안 되는 조건"으로 고정한 목록이다.
 # 모델을 고칠 때마다 전부 돌려서 결과를 라운드 보고서와 검토_장부.md에 남긴다.
@@ -8,12 +8,15 @@
 #   target     : 통과하면 좋지만 지금 데이터로는 어려울 수 있음. 결과만 기록.
 #   known_fail : 알고 받아들인 실패. decision 에 결정 기록 번호를 적는다.
 #
-# 순위 기준: 같은 market·family 묶음 안 순위 (미국 general / 국내 general / 금융 각각).
+# 순위 정의 (D-012)
+#   *_rank       : 같은 시장(market)·같은 묶음(family) 안 프리셋 종합 순위. 1이 가장 높음.
+#   *_percentile : 같은 범위의 백분위(0~100, 높을수록 상위).
+#   *_factor     : 팩터 F 값(재표준화 후).
+#   not_scored   : 점수가 없음(신탁·지주 테마·리츠 등).
+#   scored       : 점수가 있음.
 # 종목코드는 DB 기준으로 한 번 확인할 것.
-# 아래 임계값(top20, 20% 등)은 초안이다. 바꾸면 그 이유를 결정 기록에 남긴다.
 #
-# 주의(순환성): rules 중 일부는 처방과 같은 축(순이익 vs 영업이익)을 쓴다.
-# independent: false 인 규칙만 통과했다고 개선됐다고 판단하지 말 것.
+# 주의(순환성): independent: false 인 규칙만 통과했다고 개선됐다고 판단하지 말 것.
 
 cases:
   # ── P1 성장성 기저효과 ──
@@ -30,7 +33,7 @@ cases:
     market: US
     check: growth_percentile < 80
     status: required
-    issue: P1
+    issue: P1, R1-3
     why: 적자 지속인데 적자 축소만으로 성장 상위
 
   - id: INTC-growth
@@ -66,21 +69,29 @@ cases:
     issue: P2, P6
     why: 순이익 = 영업이익 × 5.5, 매출 3년 연속 감소
 
-  - id: KCC-value
+  - id: KCC-oneoff-cut
     ticker: "002380"   # KCC
     market: KR
-    check: value_rank > 20
+    check: 일회성 해(순이익 > 1.2 × 영업이익)의 저평가 이익 e == 0.78 × 영업이익
     status: required
-    issue: P2
-    why: 순이익 = 영업이익 × 3.6
+    issue: P2, R1-8
+    why: 순이익 = 영업이익 × 3.6. 순위가 아니라 차단 장치를 검사한다(영업 기준으로는 실제로 쌈)
 
-  - id: MICHANG-value
+  - id: MICHANG-oneoff-cut
     ticker: "003650"   # 미창석유
     market: KR
-    check: value_rank > 20
+    check: 일회성 해(순이익 > 1.2 × 영업이익)의 저평가 이익 e == 0.78 × 영업이익
     status: required
-    issue: P2
-    why: 순이익 = 영업이익 × 2.0
+    issue: P2, R1-8
+    why: 순이익 = 영업이익 × 2.0. KCC와 같음
+
+  - id: KCC-MICHANG-badge
+    ticker: ["002380", "003650"]
+    market: KR
+    check: 일회성 배지 표시
+    status: required
+    issue: P11
+    why: 사용자가 순이익 기준 PER과 점수가 왜 다른지 알 수 있어야 함
 
   - id: WDC-value
     ticker: WDC
@@ -90,6 +101,24 @@ cases:
     issue: P2, P5
     why: 지분 매각 이익(순이익 × 2.1), 메모리 업황
 
+  # ── R1-1 연결 영업이익 ÷ 지배주주 시총 ──
+  - id: HANIL-HOLDINGS-value
+    ticker: "003300"   # 한일홀딩스
+    market: KR
+    check: value_rank > 10
+    status: required
+    issue: R1-1
+    why: 영업이익 ÷ 시총이면 가치 4위. 세후 보수 이익으로 16위
+
+  - id: HANIL-HOLDINGS-value-strict
+    ticker: "003300"
+    market: KR
+    check: value_rank > 20
+    status: known_fail
+    decision: D-001
+    issue: R1-1
+    why: 비지배 몫을 가르려면 비지배지분 순이익 수집 필요
+
   # ── P3 홈 순위 묶음 혼합 ──
   - id: HOME-family-mix
     target: home_attractiveness
@@ -97,6 +126,20 @@ cases:
     status: required
     issue: P3
     why: 현대해상(금융 30개 중 1위)이 SK하이닉스(일반 309개 중 1위)보다 위에 표시됨
+
+  - id: SCREEN-no-phi-number
+    target: stock 화면
+    check: Φ 0~100 숫자 대신 "N개 중 M위 (상위 p%)"와 20% 구간 라벨 표시
+    status: required
+    issue: P3, P11
+    why: Φ 점수와 실제 백분위가 최대 17.6점 어긋남
+
+  - id: SCREEN-theme-position
+    target: stock 화면
+    check: 소속 테마의 같은 시장 내 위치(팩터별 구간) 표시
+    status: required
+    issue: U-1
+    why: 약한 테마의 1등을 사용자가 구분할 수 있어야 함(D-003)
 
   # ── P4 비주식·연결·지주 ──
   - id: GLD-IAU-not-scored
@@ -123,6 +166,32 @@ cases:
     issue: P4
     why: 지주회사, 영업이익률 623%(지분법)
 
+  # ── R1-6 데이터 누락으로 정상 대형주가 빠지면 안 됨 ──
+  - id: SEC-tags-scored
+    ticker: [XOM, CLX, EMN, EXP, GTX, OSK, AEIS]
+    market: US
+    check: scored
+    status: required
+    issue: R1-6
+    why: XOM 재무 0건(CIK 변경), 나머지는 SEC 영업이익·순이익 태그 누락
+
+  # ── R1-5 재무 이력 부족 ──
+  - id: DAEHAN-SHIPBUILDING-value
+    ticker: "439260"   # 대한조선
+    market: KR
+    check: value_rank > 20
+    status: required
+    issue: R1-5
+    why: 신규 상장, 축소 규칙 없이 국내 가치 2위
+
+  - id: CJ-LOGISTICS-history
+    ticker: "000120"   # CJ대한통운
+    market: KR
+    check: 재무 FY ≥ 3 (FY2024 포함)
+    status: required
+    issue: R1-5
+    why: FY2024 누락으로 축소 없이 국내 가치 1위. 재수집 대상 5종목 대표
+
   # ── P5 업황 정점 ──
   - id: MU-value
     ticker: MU
@@ -131,6 +200,24 @@ cases:
     status: required
     issue: P5
     why: 순이익 3년간 100배, 변동성 81%인데 "저평가·안정성 중심" 가치 1위
+
+  # ── P6 가치 함정 ──
+  - id: SIRI-value
+    ticker: SIRI
+    market: US
+    check: value_rank > 20 and balanced_rank > 20
+    status: required
+    issue: P6, P8
+    why: 합병 장부가 B/P 1.25, 매출 감소 가치 함정
+
+  - id: KGSTEEL-value
+    ticker: "016380"   # KG스틸
+    market: KR
+    check: value_rank > 10
+    status: target
+    issue: P6
+    decision: D-009
+    why: 매출 2년 연속 감소 철강. 현금흐름 수집 전에는 어려움
 
   # ── P8 부채·장부가 ──
   - id: T-value
@@ -142,14 +229,6 @@ cases:
     issue: P8
     why: EV 분모가 없어서 부채 많은 통신주가 싸 보임
 
-  - id: SIRI-value
-    ticker: SIRI
-    market: US
-    check: value_rank > 20 and balanced_rank > 20
-    status: required
-    issue: P6, P8
-    why: 합병 장부가 B/P 1.25, 매출 감소 가치 함정
-
   # ── 반대 방향 (우량한데 점수가 낮은 종목) ──
   - id: MSI-balanced
     ticker: MSI
@@ -157,7 +236,7 @@ cases:
     check: balanced_rank <= 100
     status: target
     issue: P7
-    why: 10번 보고서 기준 우량 조건 충족, 균형 231위
+    why: 우량 조건 충족, 균형 하위. 원인은 주가 흐름
 
   - id: ADP-balanced
     ticker: ADP
@@ -165,29 +244,30 @@ cases:
     check: balanced_rank <= 100
     status: target
     issue: P7
-    why: 10번 보고서 기준 우량 조건 충족, 균형 157위
+    why: 우량 조건 충족. 고객 예탁금으로 부채/자산 0.90
 
   - id: BUYBACK-vs-DISTRESSED
     ticker: [MCK, PM]
     market: US
     check: stability_factor > 같은 시장 '자본잠식 + 영업적자' 종목들의 stability_factor 중앙값
     status: required
-    issue: P7
+    issue: P7, R1-4
     why: 자사주 매입 우량 기업과 부실기업이 같은 부채 Z −3
 
 # 개별 종목이 아니라 표본 전체에 거는 규칙
 rules:
   - id: R1-oneoff-top10
-    check: 각 프리셋 top10 에 '순이익 > 영업이익 × 2' 종목 0개
+    check: 각 프리셋 top10 에 '순이익 > 영업이익 × 2' 이면서 저평가 이익이 잘리지 않은 종목 0개
     status: required
     independent: false
     issue: P2
 
   - id: R2-turnaround-growth
-    check: 성장 top20 중 2년 전 영업적자였던 종목 ≤ 2개
+    check: 성장 top20 중 '2년 전 영업적자' 이면서 '2년 매출 CAGR ≤ 같은 시장 중앙값' 인 종목 ≤ 2개
     status: required
     independent: true
-    issue: P1
+    issue: P1, R1-8
+    why: 매출이 실제로 크게 는 흑자 전환(SK하이닉스·SNDK)은 반례가 아님
 
   - id: R3-value-trap
     check: 가치 top20 중 매출 2년 연속 감소 종목 ≤ 2개
@@ -195,11 +275,12 @@ rules:
     independent: true
     issue: P6
 
-  - id: R4-cycle-peak
-    check: 가치 top20 중 '최신 영업이익 ≥ 직전 2년 평균 × 2' 종목 ≤ 2개
-    status: required
+  - id: R4-cycle-value
+    check: 가치 top10 중 경기순환 테마(원자재 5개 + 메모리 반도체) 종목 ≤ 3개
+    status: target
     independent: true
-    issue: P5
+    issue: P5, R1-8
+    why: 이익 배수 기준은 실제 성장(NVDA·EXEL)도 걸어서 테마 기준으로 바꿈
 
   - id: R5-fiscal-gap-badge
     check: 결산일 차이 > 6개월 종목은 100% 경고 배지 표시
@@ -208,20 +289,34 @@ rules:
     issue: P9, P11
 
   - id: R6-score-honesty
-    check: 표본 100개 이상 묶음에서 '80점 이상' 비율이 실제 상위 20% 와 ±3%p 이내
+    check: 화면의 백분위 구간 라벨이 실제 백분위와 일치(구간 경계 오차 0)
     status: required
     independent: true
     issue: P11
+    why: D-003으로 Φ 숫자를 빼므로 라벨 정확도를 검사
 
   - id: R7-badge-inflation
-    check: 경고 배지가 붙는 종목 비율 ≤ 30%
+    check: 경고 배지(원자재 제외)가 붙는 종목 비율 ≤ 30%
     status: target
     independent: true
     issue: P11
-    why: 배지가 너무 많으면 의미를 잃음
 
   - id: R8-top10-stability
     check: 가중치 하나 ±0.1 변경 시 각 프리셋 top10 교집합 ≥ 7개
     status: target
     independent: true
     issue: P10
+    why: D-003으로 해법을 표시로 옮겼으므로 측정만
+
+  - id: R9-no-score-loss
+    check: 모델 변경 전 점수가 있던 종목 중 '재무 데이터 누락' 때문에 점수를 잃은 종목 0개
+    status: required
+    independent: true
+    issue: R1-6
+
+  - id: R10-independent-benchmark
+    check: 11번 5절 독립 기준 이상 종목 수 ≤ 14, 우량 거짓 음성 ≤ 27
+    status: required
+    independent: true
+    issue: D-002
+    why: R11 측정치보다 나빠지면 안 됨
