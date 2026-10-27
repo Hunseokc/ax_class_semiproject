@@ -163,13 +163,21 @@ def test_theme_tickers_override_codes_and_secondary_themes():
     assert _theme("US", "AMZN", sic=5961)[0] == "빅테크"
     assert [t.name for t in secondary_themes("AMZN")] == ["유통·커머스", "소프트웨어·IT서비스"]
     assert _theme("KR", "105560", ksic="64992") == ("은행·카드", "금융")  # 금융지주는 지주회사가 아니라 은행
+    # D-024: 연결 매출이 가장 큰 사업 — 법인(별도)·등록 당시 업종 코드와 다르면 직접 지정
+    assert _theme("KR", "007340", ksic="28202")[0] == "기계·로봇"       # DN오토모티브: 공작기계 53%, 코드는 축전지
+    assert _theme("US", "MMM", sic=3841)[0] == "기계·로봇"              # 3M: 2024 헬스케어 분사 뒤에도 코드는 의료기기
+    assert _theme("US", "CCL", sic=4400)[0] == "레저·의류·소비서비스"  # 크루즈는 수운이 아니라 여행·휴양
+    assert _theme("US", "FISV", sic=7389)[0] == "인터넷 플랫폼"         # 판정 못한 종목은 업종 코드 그대로(09 11절)
 
 
 def test_unscored_themes_trusts_holdings_and_financial_consolidation():
-    """D-004: 순수 지주·상품 신탁은 점수 없음(사유 포함), 다우기술(키움증권 연결)은 금융 묶음."""
+    """D-004·D-025: 순수 지주·상품 신탁은 점수 없음(사유 포함). 지분법 지주(한국앤컴퍼니)와 금융 자회사를 연결한
+    비금융 회사(한화 — 한화생명, 다우기술 — 키움증권)도 지주회사 테마로 점수를 내지 않는다."""
     assert _theme("US", "GLD", sic=6221)[0] == "상품 신탁" and _theme("US", "AGQ", sic=6221)[0] == "상품 신탁"
     assert _theme("US", "X", sic=6211)[0] == "증권·자산운용"           # 6221만 신탁, 나머지 6200대는 증권
-    assert _theme("KR", "023590", ksic="582") == ("증권·자산운용", "금융")
+    for ticker, ksic in (("023590", "582"), ("000880", "20494"), ("000240", "303")):
+        assert _theme("KR", ticker, ksic=ksic) == ("지주회사", "산업재")
+    assert "금융 연결" in theme_by_name()["지주회사"].unscored_reason
     for name in ("지주회사", "상품 신탁", "리츠·부동산"):
         t = theme_by_name()[name]
         assert t.scoring == "none" and t.unscored_reason

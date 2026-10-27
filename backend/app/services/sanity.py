@@ -586,6 +586,35 @@ def rule_weak_theme_first(d: Data):
     return True, f"{total}개 (기록만) · " + " ".join(f"{k} {len(v)}{v if v else ''}" for k, v in per.items())
 
 
+def case_theme(d: Data, c: dict):
+    """주 테마 == expected (D-024 — 연결 매출 최대 사업으로 직접 지정한 종목). 비교 표본 밖(상장 목록) 종목도 DB 주 테마로 본다.
+    DB에 없는 종목은 판정하지 못한 것으로 남긴다(미검증)."""
+    country = MARKET_COUNTRY.get(c.get("market") or "")
+    rows = dict(d.conn.execute(text("""
+        SELECT s.ticker, t.theme FROM stocks s JOIN markets m ON m.market_id = s.market_id
+        LEFT JOIN v_stock_theme t ON t.stock_id = s.stock_id
+        WHERE m.country = :c AND s.ticker = ANY(:t)"""), {"c": country, "t": [str(x) for x in c["ticker"]]}).all())
+    expected = {str(k): v for k, v in c["expected"].items()}
+    wrong = [f"{t} {rows[t]}≠{e}" for t, e in expected.items() if t in rows and rows[t] != e]
+    missing = [t for t in expected if t not in rows]
+    note = f"{len(expected) - len(missing)}종목 중 다름 {len(wrong)} {wrong[:6]}" + (f" · DB에 없음 {missing}" if missing else "")
+    return (None if missing and not wrong else not wrong), note
+
+
+def rule_top20_theme_reviewed(d: Data):
+    """프리셋 top20(시장 2 × 프리셋 4) 중 업종 코드로만 분류된(themes.tickers에 직접 지정되지 않은) 종목 — 기록만(D-024).
+    새로 상위에 오른 종목의 주 테마를 라운드마다 사람이 사업보고서로 확인하게 하려는 목록이다."""
+    from app.ingest.sectors import themes
+    direct = {x for t in themes() for x in t.tickers}
+    seen, per = set(), {}
+    for c in ("US", "KR"):
+        for p in PRESET_KR:
+            hit = [s.ticker for s in d.top(c, p, 20) if s.ticker not in direct]
+            per[f"{c}{PRESET_KR[p]}"] = hit
+            seen |= {(c, t) for t in hit}
+    return True, f"고유 {len(seen)}종목 (기록만) · " + " ".join(f"{k} {len(v)}{v if v else ''}" for k, v in per.items())
+
+
 def case_home_family_mix(d: Data):
     bad = []
     for c in ("US", "KR"):
@@ -657,6 +686,9 @@ SPECIAL = {
     "WEAK-theme-first": lambda d, c: rule_weak_theme_first(d),
     "THEME-position-raw": lambda d, c: rule_theme_position_raw(d),
     "CLIP-order": lambda d, c: rule_clip_order(d),
+    "THEME-main-business-KR": case_theme,
+    "THEME-main-business-US": case_theme,
+    "TOP20-theme-reviewed": lambda d, c: rule_top20_theme_reviewed(d),
 }
 
 
