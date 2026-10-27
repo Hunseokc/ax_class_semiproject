@@ -325,6 +325,25 @@ cases:
     issue: R1-9
     why: 매출 33억 → 956억(2년 28.8배, 사업 결합)으로 국내 성장·위험 1위. M1의 '매출 − 자산 성장' 후보로 다시 측정
 
+  # ── 데이터 정확성 (D-026·D-027, 수정 3 PR B) ──
+  - id: BOBCAT-currency
+    ticker: "241560"   # 두산밥캣
+    market: KR
+    check: 세후 보수 이익/시총이 KRX EPS ÷ 종가의 0.5~2배
+    status: required
+    issue: R3-2
+    decision: D-026
+    why: USD 공시가 원화로 저장돼 지표 0.000061(원화 환산 0.0864)
+
+  - id: NEG-EQUITY-bp
+    ticker: [BKNG, HCA, MCD, PM, YUM]
+    market: US
+    check: B/P 비어 있음, missing_metrics 사유에 '자본 음수'
+    status: required
+    issue: R3-3
+    decision: D-027
+    why: 자사주 매입 우량 기업의 B/P가 꼴찌권(BKNG 가치 173위)
+
   # ── 반대 방향 (우량한데 점수가 낮은 종목) ──
   - id: MSI-balanced
     ticker: MSI
@@ -446,6 +465,34 @@ rules:
     independent: false
     issue: R2-1, D-019
     why: 수정 1 모델 −0.47~0.31 (SNDK +1,093%가 묶음 16위). 회귀 방지용 — RN이 낫다는 근거로 세지 않는다
+
+  - id: CURRENCY-krw
+    check: 국내 표본에서 KRX EPS·BPS ÷ DB 재무 기준(순이익·지배 자본 ÷ 상장주식수)이 50배를 넘는 종목 0개
+    status: required
+    independent: true
+    issue: R3-2
+    decision: D-026
+
+  - id: NEG-EQUITY-no-bp
+    check: 최신 FY 지배 자본 ≤ 0 인 종목 중 B/P 값이 있는 종목 0개 (테마 평균에도 들어가지 않음)
+    status: required
+    independent: false
+    issue: R3-3
+    decision: D-027
+
+  - id: ONEOFF-badge-recurring
+    check: 일회성 배지 문구에 '일회성 이익으로 보고' 같은 단정 표현 없음, 이름 '순이익 > 영업이익'
+    status: required
+    independent: false
+    issue: R3-5
+    decision: D-029
+
+  - id: PREF-share-basis
+    check: KRX BPS 주식수가 보통주보다 3% 넘게 많은 종목에서 세후 보수 이익/시총 = e × 보통주 수 / BPS 주식수 / 보통주 시총
+    status: required        # 라운드 3 제안은 target — D-029로 채택해 required
+    independent: false
+    issue: R3-6
+    decision: D-029
 
   - id: TOP20-theme-reviewed
     check: 프리셋 top20(시장 2 × 프리셋 4) 중 업종 코드로만 분류되고 직접 지정·판정 목록에 없는 종목 수 — 기록만
