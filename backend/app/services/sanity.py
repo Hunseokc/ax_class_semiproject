@@ -1,15 +1,18 @@
 """매력도 회귀 테스트 — 개발산출물/매력도_검토/sanity_cases.yaml의 cases·rules를 DB의 최신 점수로 판정한다.
 
-실행: python -m app.ingest sanity [--cases 경로] [--as-of 날짜] [--out 결과.md]
+실행: python -m app.ingest sanity [--cases 경로] [--as-of 날짜] [--out 결과.md] [--save [--env dev|deploy]]
   - 순위·백분위 정의는 sanity_cases.yaml 머리말(D-012): *_rank = 같은 시장·같은 묶음 안 프리셋 순위,
     *_percentile = 같은 범위 백분위(= stock_scores.score), *_factor = 재표준화한 팩터 점수, not_scored / scored
   - 일반 case는 check 식을 그대로 계산하고(and·or·비교), 식으로 쓸 수 없는 case·rule은 id별 함수로 판정한다
-  - known_fail은 결정 번호(decision)가 있으면 종료 조건상 통과로 센다(검토_장부 0절)
+  - 결과는 네 칸으로 센다(D-030): 통과 / 감수한 실패(known_fail·결정 번호) / target 실패 / 미검증(데이터 없음·실행 불가).
+    required 실패는 따로 적고 종료를 막는다. 감수한 실패는 종료를 막지 않지만 '통과'에 합치지 않는다
+  - --save면 결과를 sanity_runs 표에 남긴다(배포 Job은 --env deploy — 배포 DB에서도 sanity를 돌린 기록, D-030)
   - 독립 기준(R10)은 개발산출물/11 5절 정의를 옮긴 것이다(I1 구조·I2 매출 2년 감소·I3 영업적자 이력·I5 극단 변동성, 상식적 우량)
-반환 코드: required(known_fail 제외) 중 실패가 있으면 1
+반환 코드: required(known_fail은 결정 번호가 있으면 제외) 중 실패가 있으면 1. 미검증은 종료 코드에 넣지 않고 따로 적는다
 """
 from __future__ import annotations
 
+import json
 import math
 import re
 import statistics as st
@@ -104,8 +107,9 @@ class Stock:
 
 
 class Data:
-    def __init__(self, conn: Connection, as_of: date | None = None):
+    def __init__(self, conn: Connection, as_of: date | None = None, save_env: str | None = None):
         self.conn = conn
+        self.save_env = save_env            # 이번 실행을 sanity_runs에 남기면 그 환경(dev / deploy), 남기지 않으면 None
         self.as_of = as_of or conn.execute(text("SELECT MAX(as_of) FROM stock_scores")).scalar()
         self.cfg = load_config()
         self.stocks: dict[int, Stock] = {}
@@ -871,7 +875,36 @@ SPECIAL = {
     "FIN-pb-roe-view": lambda d, c: case_financial_pb_roe_view(d),
     "INSURER-oci-roe": lambda d, c: (None, "총포괄이익(지배)을 아직 수집하지 않음 — D-033 수집 뒤 required"),
     "GROWTH-label": lambda d, c: case_growth_label(d),
+    "DEPLOY-sanity-ran": lambda d, c: rule_deploy_sanity(d),
 }
+
+
+def rule_deploy_sanity(d: Data):
+    """배포 DB 점수 재계산 뒤 sanity Job이 같은 as_of로 실행되어 결과가 남음(D-030). 이 실행이 배포 DB 기록(--save --env deploy)이면
+    통과 — 결과가 sanity_runs에 남는다. 개발 DB·기록하지 않는 실행에서는 확인할 수 없어 미검증."""
+    if d.save_env == "deploy":
+        return True, f"이번 실행을 배포 DB sanity_runs에 기록(점수 계산일 {d.as_of})"
+    last = d.conn.execute(text("""SELECT MAX(as_of) FROM sanity_runs WHERE environment = 'deploy'""")).scalar()
+    return None, (f"배포 DB Job(--save --env deploy)에서만 확인 — 이번 실행은 {'개발 DB 기록' if d.save_env else '기록 안 함'}"
+                  + (f" · 이 DB의 마지막 배포 기록 {last}" if last else ""))
+
+
+KINDS = ("passed", "known_fail", "target_fail", "unverified", "required_fail")
+KIND_LABEL = {"passed": "통과", "known_fail": "감수한 실패", "target_fail": "target 실패", "unverified": "미검증",
+              "required_fail": "required 실패"}
+
+
+def classify(status: str, ok: bool | None, decision: str | None) -> str:
+    """네 칸(D-030) + required 실패. known_fail은 결정 번호가 있어야 '감수한 실패' — 없으면 required 실패로 센다."""
+    if ok is None:
+        return "unverified"
+    if ok:
+        return "passed"
+    if status == "known_fail" and decision:
+        return "known_fail"
+    if status == "target":
+        return "target_fail"
+    return "required_fail"
 
 
 def run_case(d: Data, c: dict) -> tuple[bool | None, str]:
@@ -889,27 +922,43 @@ def run_case(d: Data, c: dict) -> tuple[bool | None, str]:
     return all(results), " · ".join(vals)
 
 
-def run(conn: Connection, cases_path: Path | None = None, as_of: date | None = None) -> tuple[str, bool]:
-    """반환: (마크다운 보고, required 전부 통과 여부 — known_fail은 결정 번호가 있으면 통과)."""
+def run(conn: Connection, cases_path: Path | None = None, as_of: date | None = None, *,
+        save: bool = False, env: str = "dev") -> tuple[str, bool]:
+    """반환: (마크다운 보고, required 실패 없음). 결과는 네 칸(통과 / 감수한 실패 / target 실패 / 미검증)과 required 실패로
+    따로 센다(D-030). save면 sanity_runs에 한 행을 남긴다(env = dev / deploy). 커밋은 호출한 쪽이 한다."""
     spec = yaml.safe_load((cases_path or default_cases_path()).read_text(encoding="utf-8"))
-    d = Data(conn, as_of)
-    lines = [f"## sanity 결과 — 점수 계산일 {d.as_of} · 모델 {d.cfg['model_version']}", "",
-             "| id | status | 결과 | 실제 값 |", "|---|---|---|---|"]
-    req_total = req_ok = 0
-    failed_required = []
+    d = Data(conn, as_of, save_env=env if save else None)
+    rows, kinds = [], {k: [] for k in KINDS}
+    req_total = 0
     for c in list(spec.get("cases", [])) + list(spec.get("rules", [])):
         ok, val = run_case(d, c)
         status = c.get("status", "required")
+        kind = classify(status, ok, c.get("decision"))
+        kinds[kind].append(c["id"])
+        req_total += status in ("required", "known_fail")
         mark = "확인 못함" if ok is None else "통과" if ok else "실패"
-        if status == "known_fail" and not ok:
+        if status == "known_fail" and ok is False:
             mark = f"실패(감수 {c.get('decision', '결정 없음')})"
-        lines.append(f"| {c['id']} | {status} | {mark} | {str(val).replace('|', '/')} |")
-        if status in ("required", "known_fail"):
-            req_total += 1
-            passed = bool(ok) or (status == "known_fail" and bool(c.get("decision")))
-            req_ok += passed
-            if not passed:
-                failed_required.append(c["id"])
-    lines[1:1] = ["", f"required(known_fail 포함) 통과 **{req_ok}/{req_total}**"
-                  + (f" — 실패: {', '.join(failed_required)}" if failed_required else "")]
-    return "\n".join(lines), not failed_required
+        rows.append({"id": c["id"], "status": status, "kind": kind, "result": mark, "value": str(val)})
+    n = {k: len(v) for k, v in kinds.items()}
+    req_unverified = [r["id"] for r in rows if r["kind"] == "unverified" and r["status"] in ("required", "known_fail")]
+    lines = [f"## sanity 결과 — 점수 계산일 {d.as_of} · 모델 {d.cfg['model_version']}", "",
+             f"**통과 {n['passed']} · 감수한 실패 {n['known_fail']} · target 실패 {n['target_fail']} · 미검증 {n['unverified']}**"
+             + (f" · **required 실패 {n['required_fail']}** — {', '.join(kinds['required_fail'])}" if n["required_fail"] else ""),
+             "",
+             f"required(known_fail 포함) {req_total}개: 통과 {req_total - n['required_fail'] - len(req_unverified) - n['known_fail']}"
+             f" + 감수한 실패 {n['known_fail']}" + (f" · 미검증 {len(req_unverified)} ({', '.join(req_unverified)})" if req_unverified else "")
+             + (f" · 실패 {n['required_fail']}" if n["required_fail"] else ""),
+             "",
+             "| id | status | 결과 | 실제 값 |", "|---|---|---|---|"]
+    lines += [f"| {r['id']} | {r['status']} | {r['result']} | {r['value'].replace('|', '/')} |" for r in rows]
+    report, ok = "\n".join(lines), not kinds["required_fail"]
+    if save:
+        conn.execute(text("""
+            INSERT INTO sanity_runs (as_of, model_version, environment, passed, known_fail, target_fail, unverified,
+                                     required_fail, ok, results, report)
+            VALUES (:as_of, :v, :env, :passed, :known_fail, :target_fail, :unverified, :required_fail, :ok,
+                    CAST(:results AS jsonb), :report)"""),
+            {"as_of": d.as_of, "v": d.cfg["model_version"], "env": env, **n, "ok": ok,
+             "results": json.dumps(rows, ensure_ascii=False), "report": report})
+    return report, ok

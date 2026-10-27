@@ -1,7 +1,7 @@
 """매력도 회귀 테스트 실행기(app/services/sanity.py) — check 식 계산과 픽스처에서 끝까지 실행."""
 from __future__ import annotations
 
-from app.services.sanity import Data, Stock, case_theme, eval_check, run
+from app.services.sanity import Data, Stock, case_theme, classify, eval_check, run
 from app.services.scoring import compute_scores
 from tests.conftest import D
 from tests.test_scoring import universe  # noqa: F401 — 픽스처 재사용
@@ -42,7 +42,9 @@ rules:
 """, encoding="utf-8")
     with engine.connect() as conn:
         report, ok = run(conn, cases)
-    assert not ok and "통과 **5/6**" in report and "KAKAO-scored" in report.split("실패:")[1]
+    # 네 칸(D-030): 통과 / 감수한 실패 / target 실패 / 미검증 + required 실패는 따로 — 감수한 실패를 통과에 합치지 않는다
+    assert not ok and "**통과 5 · 감수한 실패 1 · target 실패 1 · 미검증 0** · **required 실패 1** — KAKAO-scored" in report
+    assert "required(known_fail 포함) 6개: 통과 4 + 감수한 실패 1 · 실패 1" in report
     assert "| KAKAO-known | known_fail | 실패(감수 D-999) |" in report
     assert "| R6-score-honesty | required | 통과 |" in report
     assert "| TRAP-penalty-only | required | 통과 |" in report and "양수 0" in report     # 중립화하지 않아 감점만(D-018)
@@ -116,3 +118,33 @@ rules:
     assert "| FIN-pb-roe-view | required | 통과 | KR 자동차 1개 median" in report
     assert "| INSURER-oci-roe | target | 확인 못함 |" in report
     assert "| GROWTH-label | required | 통과 |" in report and "미래 성장 예측이 아닙니다" in report
+
+
+def test_classify_four_columns():
+    """D-030: 결정 번호 없는 known_fail은 감수한 실패가 아니라 required 실패, 판정 못함은 상태와 관계없이 미검증."""
+    assert classify("required", True, None) == "passed" and classify("target", None, None) == "unverified"
+    assert classify("known_fail", False, "D-001") == "known_fail" and classify("known_fail", False, None) == "required_fail"
+    assert classify("target", False, None) == "target_fail" and classify("required", False, "D-024") == "required_fail"
+
+
+def test_save_records_run_and_deploy_rule(engine, universe, tmp_path):  # noqa: F811
+    """--save --env deploy면 sanity_runs에 네 칸을 남기고 DEPLOY-sanity-ran이 통과. 저장하지 않는 실행은 미검증(종료 코드에는 안 넣음)."""
+    from sqlalchemy import text
+    compute_scores(engine, as_of=D)
+    cases = tmp_path / "cases.yaml"
+    cases.write_text("""
+rules:
+  - {id: DEPLOY-sanity-ran, check: 배포 sanity 기록, status: required, decision: D-030}
+  - {id: R6-score-honesty, check: 구간 라벨, status: required}
+  - {id: CLIP-order, check: 원값 상위 7% 안 순서, status: target}
+""", encoding="utf-8")
+    with engine.begin() as conn:
+        report, ok = run(conn, cases, save=True, env="deploy")
+    assert ok and "| DEPLOY-sanity-ran | required | 통과 | 이번 실행을 배포 DB sanity_runs에 기록" in report
+    with engine.connect() as conn:
+        row = conn.execute(text("""SELECT as_of, environment, passed, known_fail, target_fail, unverified, required_fail, ok,
+                                          jsonb_array_length(results) FROM sanity_runs""")).one()
+        report, ok = run(conn, cases)
+    assert tuple(row) == (D, "deploy", 2, 0, 1, 0, 0, True, 3)
+    assert ok and "| DEPLOY-sanity-ran | required | 확인 못함 | 배포 DB Job(--save --env deploy)에서만 확인" in report
+    assert f"마지막 배포 기록 {D}" in report and "미검증 1 (DEPLOY-sanity-ran)" in report
