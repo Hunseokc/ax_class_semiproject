@@ -237,7 +237,7 @@ const FACTORS = [
   { key: "quality", label: "수익성", desc: "가진 자산과 매출로 돈을 잘 버는가 (최근 연간 기준)" },
   { key: "growth", label: "성장성", desc: "최근 2년 매출과 이익이 늘었나 (성장 정도일 뿐 기대수익이 아님)" },
   { key: "safety", label: "안정성", desc: "주가가 덜 출렁이는가, 자산에 비해 빚이 적은가" },
-  { key: "momentum", label: "주가 흐름", desc: "최근 1년 주가가 오르는 추세인가" },
+  { key: "momentum", label: "주가 흐름", desc: "최근 1년 주가가 오르는 추세인가 (같은 테마 종목 대비 — 테마 전체의 흐름은 레이더 아래 소속 테마 위치)" },
 ];
 const FACTOR_LABEL = Object.fromEntries(FACTORS.map((f) => [f.key, f.label]));
 const SIGNED_METRICS = ["revenue_cagr2", "profit_growth2", "momentum"];
@@ -249,7 +249,7 @@ const zFmt = (v) => {
   return r === 0 ? "0.00" : `${r > 0 ? "+" : ""}${num(r, 2)}`;
 };
 // 레이더·요소 카드의 0~100 = 그 팩터의 같은 시장 안 백분위(API factors[k].percentile, 50 = 시장 중앙)
-const THEME_FACTORS = ["value", "quality", "growth"];   // 소속 테마 위치에 보여 주는 요소(D-003)
+const THEME_FACTORS = ["value", "quality", "growth", "momentum"];   // 소속 테마 위치에 보여 주는 요소(D-003·D-020 — 주가 흐름 포함)
 // 요소별 '날씨': 같은 시장 안 위치 60 이상 맑음(강함) · 40~60 구름(보통) · 40 미만 비(약함)
 const WEATHER = [
   { min: 60, icon: icons.sun, word: "강함", cls: "wx--sun" },
@@ -394,9 +394,10 @@ function renderScore(a) {
   const rankText = !s.rank ? "순위 없음"
     : `${peerWord} ${s.rank.total}개 중 <strong>${s.rank.position}위</strong> <span class="subtle">(상위 ${topPercent(s.rank)}%)</span>`;
   const tp = s.theme_position;
-  const themeText = !tp ? "" : `<p class="score-theme subtle">소속 테마 <strong>${esc(tp.group_name)}</strong>는 같은 시장 테마 ${tp.themes}개 중 ${
+  // 테마 위치는 중립화 전 값의 테마 평균 순위(D-020) — 요소 카드(같은 테마 대비 값)와 기준이 달라 문구로 구분한다
+  const themeText = !tp ? "" : `<p class="score-theme subtle">소속 테마 <strong>${esc(tp.group_name)}</strong>는 같은 시장 테마 ${tp.themes}개 중 (테마 평균, 중립화 전) ${
     THEME_FACTORS.filter((k) => tp.factors[k]).map((k) => `${FACTOR_LABEL[k]} ${tp.factors[k].position}위(상위 ${tp.factors[k].top_percent}%)`).join(" · ")
-  } — 테마 안 순위가 높아도 테마 자체가 약할 수 있습니다.</p>`;
+  } — 요소 카드는 같은 테마 종목 대비 값이라, 테마 안 순위가 높아도 테마 자체가 약할 수 있습니다.</p>`;
   const el = h(`<div class="score-panel">
       <div class="score-panel__gauge score-panel__left">
         <div class="score-row">

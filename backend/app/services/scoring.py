@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -191,6 +192,21 @@ def aggregate_params(as_of: date, history: dict[int, int] | None = None) -> dict
     return {"as_of": as_of, "w_metrics": list(weighted), "w_values": list(weighted.values()),
             "h_stocks": list(history), "h_counts": list(history.values()),
             "required": list(REQUIRED_FACTORS), "min_factors": MIN_FACTORS}
+
+
+def theme_positions(conn, as_of: date, country: str, family: str) -> dict[int, dict]:
+    """소속 테마의 위치(D-020) — 주 테마(group_id)별 {group_name, themes, factors: {팩터: {position, total, top_percent}}}.
+    중립화 전 값(z_raw)으로 만든 팩터 F의 테마 평균 순위(queries/theme_positions.sql). 상세 화면과 sanity가 함께 쓴다."""
+    w = aggregate_params(as_of)
+    out: dict[int, dict] = {}
+    for r in conn.execute(sql("theme_positions"), {"as_of": as_of, "country": country, "family": family,
+                                                   "w_metrics": w["w_metrics"], "w_values": w["w_values"]}).mappings():
+        t = out.setdefault(r["group_id"], {"group_name": r["group_name"], "factors": {}})
+        t["factors"][r["factor"]] = {"position": r["position"], "total": r["total"],
+                                     "top_percent": math.ceil(100 * r["position"] / r["total"])}
+    for t in out.values():
+        t["themes"] = max(v["total"] for v in t["factors"].values())
+    return out
 
 
 NO_FINANCIALS = "재무 정보가 없어 표기할 수 없습니다"

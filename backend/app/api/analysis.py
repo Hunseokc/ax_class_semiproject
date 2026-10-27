@@ -4,7 +4,6 @@ Stage 6-B: 응답의 reference·reference_note(listed 참고 점수), metrics의
 """
 from __future__ import annotations
 
-import math
 
 from datetime import date, datetime
 from decimal import Decimal
@@ -23,7 +22,7 @@ from app.schemas.common import INT_MAX, MARKET_PATTERN, TICKER_PATTERN, Num, Sch
 from app.core.config import get_settings
 from app.services.data_quality import data_quality, fiscal_year_mix
 from app.services.reference_score import reference_score, unscored_reason
-from app.services.scoring import FACTORS, METRICS, default_preset
+from app.services.scoring import FACTORS, METRICS, default_preset, theme_positions
 
 router = APIRouter(prefix="/stocks", tags=["analysis"])
 stats_router = APIRouter(prefix="/statistics", tags=["statistics"])
@@ -94,7 +93,8 @@ class ThemeFactorPosition(Schema):
 
 
 class ThemePositionOut(Schema):
-    """소속 테마(주 테마)가 같은 시장 테마들 사이에서 어디쯤인지 — 약한 테마의 1등을 구분하게 한다(D-003, U-1 표시 쪽)."""
+    """소속 테마(주 테마)가 같은 시장 테마들 사이에서 어디쯤인지 — 약한 테마의 1등을 구분하게 한다(D-003, U-1 표시 쪽).
+    중립화 전 값(z_raw)으로 만든 팩터의 테마 평균 순위이고 주가 흐름도 포함한다(D-020, scoring.theme_positions)."""
     group_name: str
     themes: int                       # 비교한 테마 수(점수가 있는 구성원 2개 이상)
     factors: dict[str, ThemeFactorPosition]
@@ -118,7 +118,7 @@ class ScoreOut(Schema):
     data_quality: dict = {}
     method: str = SCORE_METHOD
     peer_average: PeerAverageOut | None = None   # 레이더 비교용 주 그룹 평균
-    theme_position: ThemePositionOut | None = None   # 소속 테마의 같은 시장 내 위치(테마 평균 팩터의 순위)
+    theme_position: ThemePositionOut | None = None   # 소속 테마의 같은 시장 내 위치(중립화 전 테마 평균 팩터의 순위, D-020)
     reference: bool = False                      # 상장 목록 종목의 참고 점수(유니버스 밖)
     reference_note: str | None = None
     fin_basis: list[FinBasisOut] = []            # 같은 시장 비교 표본의 재무 기준 연도별 종목 수(연도 내림차순)
@@ -250,31 +250,10 @@ def _attractiveness(db: Session, stock_id: int, country: str, preset: dict, row)
     return {**out, "as_of": row["score_as_of"], "score": row["score"], "composite": row["composite"],
             "factor_coverage": row["factor_coverage"], "rank": rank, "factors": factors, "metrics": metrics,
             "data_quality": row["data_quality"] or {},
-            "peer_average": peer, "theme_position": _theme_position(positions, my_group),
+            "peer_average": peer,
+            "theme_position": (theme_positions(db, row["score_as_of"], country, family).get(my_group)
+                               if my_group is not None else None),
             "fin_basis": fiscal_year_mix(db.connection(), country, row["score_as_of"])}
-
-
-def _theme_position(positions, group_id: int | None) -> dict | None:
-    """테마마다 구성원(점수 있는 종목 2개 이상) 팩터 점수 평균을 내 같은 시장 테마 사이 순위를 매긴다."""
-    if group_id is None:
-        return None
-    sums: dict[tuple[str, int], list] = {}
-    names: dict[int, str] = {}
-    for r in positions:
-        if r["group_id"] is None:
-            continue
-        sums.setdefault((r["factor"], r["group_id"]), []).append(float(r["score"]))
-        names[r["group_id"]] = r["group_name"]
-    out: dict[str, dict] = {}
-    for f in FACTORS:
-        avgs = {g: sum(v) / len(v) for (fac, g), v in sums.items() if fac == f and len(v) >= 2}
-        if group_id not in avgs:
-            continue
-        position = 1 + sum(1 for a in avgs.values() if a > avgs[group_id])
-        out[f] = {"position": position, "total": len(avgs), "top_percent": math.ceil(100 * position / len(avgs))}
-    if not out:
-        return None
-    return {"group_name": names[group_id], "themes": max(v["total"] for v in out.values()), "factors": out}
 
 
 def _peer_average(db: Session, stock_id: int, country: str, preset_id: int, as_of) -> dict | None:
