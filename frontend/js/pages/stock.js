@@ -385,7 +385,7 @@ function renderScore(a) {
     $("#score").replaceChildren(box);
     return;
   }
-  const badges = dq.badges || [];   // 경고 배지(일회성 이익·결산 시점·재무 이력) — 설명은 계산 근거에도 적는다
+  const badges = dq.badges || [];   // 경고 배지(순이익 > 영업이익·결산 시점·재무 이력) — 설명은 계산 근거에도 적는다
   const market = s.rank?.country === "US" ? "미국" : "국내";
   const factors = Object.entries(s.factors);
   const pos = Object.fromEntries(FACTORS.map((f) => [f.key, s.factors[f.key]?.available ? (s.factors[f.key].percentile ?? null) : null]));

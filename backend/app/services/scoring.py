@@ -31,7 +31,7 @@ SEOUL = ZoneInfo("Asia/Seoul")
 FACTORS = ("value", "quality", "growth", "safety", "momentum")
 MIN_FACTORS = 3
 REQUIRED_FACTORS = ("value", "quality")                  # 이 둘이 없으면 점수를 내지 않는다(D-004 — 재무 없는 종목·신탁)
-ONEOFF_RATIO = 1.2                                       # 순이익 > 1.2 × 영업이익이면 일회성 이익 배지(D-003)
+ONEOFF_RATIO = 1.2                                       # 순이익 > 1.2 × 영업이익이면 '순이익 > 영업이익' 배지(D-003·D-029)
 FISCAL_GAP_DAYS = 182                                    # 최빈 결산일과 6개월 넘게 다르면 결산 시점 배지(D-008)
 FAMILY_LABEL = {"general": None, "financial": "금융"}     # data_quality.partition 표시(KR·금융)
 
@@ -125,14 +125,28 @@ def metric_params(cfg: dict | None = None, stock_id: int | None = None) -> dict:
     return {"stock_id": stock_id, "after_tax": float(cfg["after_tax"])}
 
 
+BADGE_FACTS = ("fy_end", "ni0", "oi0", "ni1", "oi1", "ni2", "oi2", "fy_count")   # score_metrics.sql이 주는 배지 재료
+
+
+def _net_over_operating(ni: float | None, oi: float | None) -> bool:
+    """순이익 > 0이고 영업적자이거나 순이익 > 1.2 × 영업이익인 해 — 저평가 이익 e가 0.78 × 영업이익으로 잘리는 해."""
+    return ni is not None and oi is not None and ni > 0 and (oi <= 0 or ni > ONEOFF_RATIO * oi)
+
+
 def score_badges(fact: dict, family: str, fiscal_mode: date | None) -> list[dict]:
-    """경고 배지(D-003): 일회성 이익 · 결산 시점 다름 · 재무 이력 짧음. fact = 최신 FY 결산일·순이익·영업이익·이어지는 FY 수."""
+    """경고 배지(D-003): 순이익 > 영업이익 · 결산 시점 다름 · 재무 이력 짧음.
+    fact = FY t·t−1·t−2 순이익(ni0~2)·영업이익(oi0~2)과 최신 FY 결산일·이어지는 FY 수(BADGE_FACTS).
+    순이익 > 영업이익 배지는 사실만 적는다(D-029) — 해마다 반복되는 지분법·이자 이익도 있어 '일회성'으로 단정하지 않는다."""
     out = []
-    ni, oi = (None if fact.get(k) is None else float(fact[k]) for k in ("ni0", "oi0"))
-    if family != "financial" and ni is not None and oi is not None and ni > 0 and (oi <= 0 or ni > ONEOFF_RATIO * oi):
+    years = [tuple(None if fact.get(f"{k}{i}") is None else float(fact[f"{k}{i}"]) for k in ("ni", "oi")) for i in range(3)]
+    ni, oi = years[0]
+    if family != "financial" and _net_over_operating(ni, oi):
         what = f"순이익이 영업이익의 {ni / oi:.1f}배" if oi > 0 else "영업적자인데 순이익 흑자"
-        out.append({"code": "oneoff", "label": "일회성 이익",
-                    "detail": f"{what} — 일회성 이익으로 보고 저평가 이익은 0.78 × 영업이익으로 계산했습니다. 순이익 기준 PER과 다를 수 있습니다."})
+        n = sum(1 for y in years if None not in y)
+        k = sum(1 for y in years if _net_over_operating(*y))
+        out.append({"code": "oneoff", "label": "순이익 > 영업이익",
+                    "detail": f"{what}(최근 {n}년 중 {k}년). 일회성·지분법·금융수익일 수 있어 저평가 이익은 "
+                              "0.78 × 영업이익으로 계산했습니다."})
     end = fact.get("fy_end")
     if end and fiscal_mode and abs((end - fiscal_mode).days) > FISCAL_GAP_DAYS:
         months = round(abs((end - fiscal_mode).days) / 30.44)
@@ -170,7 +184,7 @@ def insert_metric_values(conn: Connection, as_of: date, cfg: dict | None = None,
     for r in rows:
         history[r["stock_id"]] = r["fy_count"]
         if facts is not None:
-            facts[r["stock_id"]] = {k: r[k] for k in ("fy_end", "ni0", "oi0", "fy_count")}
+            facts[r["stock_id"]] = {k: r[k] for k in BADGE_FACTS}
         if r["note"]:
             notes.setdefault(r["stock_id"], []).append(f"{r['metric']}: {r['note']}")
         if r["null_note"]:

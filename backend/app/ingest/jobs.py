@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
@@ -18,7 +20,7 @@ from app.ingest.store import (DART_LOCK_KEY, LOCK_WAIT_NOTE_SECONDS, BatchWriter
                               error_text, job_log, provider_lock_key, upsert)
 from app.ingest.sectors import assign_themes, primary_theme, sync_themes
 from app.ingest.universe import index_refs, load_universe, stock_refs
-from app.providers.base import Financial, ProviderError, StockRef
+from app.providers.base import Financial, FxProvider, ProviderError, StockRef
 from app.providers.factory import Providers
 from app.services import freshness
 from app.services.scoring import sync_presets
@@ -559,6 +561,43 @@ FIN_YEARS = 5
 FIN_FIELDS = ["revenue", "operating_income", "net_income", "total_assets", "total_equity", "total_debt"]
 
 
+MARKET_CURRENCY = {"KR": "KRW", "US": "USD"}     # 재무 금액을 저장하는 통화(시장 통화)
+
+
+def to_krw(fins: list[Financial], rate_on: Callable[[date], Decimal | None]) -> list[Financial]:
+    """DART 재무의 표시통화가 원화가 아니면 결산일 USD/KRW로 원화 환산한다(D-026 — 두산밥캣 USD 공시가 원화 칸에 그대로
+    들어가 세후 보수 이익/시총이 1/1,422로 계산됐다). 원래 통화와 환율은 currency·fx_rate로 남긴다.
+    손익 항목에도 기말 환율을 쓰는 근사다(비율 지표에는 영향 없음). USD 밖 통화는 환율을 수집하지 않아 ProviderError —
+    잘못된 단위로 저장하느니 그 회사 재무를 넣지 않는다."""
+    out = []
+    for f in fins:
+        cur = (f.currency or "KRW").upper()
+        if cur == "KRW":
+            out.append(replace(f, currency="KRW"))
+            continue
+        if cur != "USD":
+            raise ProviderError(f"{f.period_end.year} 표시통화 {cur} — 원화 환산 환율 없음(USD/KRW만 수집)")
+        rate = rate_on(f.period_end)
+        if rate is None:
+            raise ProviderError(f"{f.period_end} USD/KRW 환율 없음 — 원화로 환산하지 못함")
+        out.append(replace(f, currency=cur, fx_rate=rate, notes=[*f.notes, f"{cur}→KRW {rate}(결산일)"],
+                           **{k: None if getattr(f, k) is None else (getattr(f, k) * rate).quantize(Decimal("0.01"))
+                              for k in FIN_FIELDS}))
+    return out
+
+
+def fx_rate_on(fx: FxProvider) -> Callable[[date], Decimal | None]:
+    """결산일(또는 그 전 가장 가까운 거래일) USD/KRW — 외화 공시 종목에서만 부른다(날짜별 1번)."""
+    cache: dict[date, Decimal | None] = {}
+
+    def rate_on(day: date) -> Decimal | None:
+        if day not in cache:
+            pts = [p for p in fx.get_daily_rates(day - timedelta(days=10), day) if p.usd_krw and p.rate_at.date() <= day]
+            cache[day] = max(pts, key=lambda p: p.rate_at).usd_krw if pts else None
+        return cache[day]
+    return rate_on
+
+
 def merge_supplement(primary: list[Financial], supplement: list[Financial], tolerance_days: int = 7) -> list[Financial]:
     """주 소스(SEC)의 빈 값을 보완 소스(yfinance)의 같은 결산기 값으로 채운다.
     주 소스에 없는 결산기는 보완 소스 행을 그대로 추가한다(data_source=YFINANCE)."""
@@ -629,6 +668,8 @@ def _fetch_financials(providers: Providers, locks: LockSession, ref: StockRef, y
                     u.notes.append(f"기초값 실패: {e}")
         if waited >= LOCK_WAIT_NOTE_SECONDS:
             u.notes.append(f"잠금 대기 {waited:.1f}초")
+        if ref.country == "KR":                                          # 외화 공시는 원화로(D-026), 환율 조회는 잠금 밖
+            fins = to_krw(fins, fx_rate_on(providers.fx))
         if ref.country == "US" and providers.us_financial_supplement:     # yfinance 보완은 잠금 밖
             try:
                 fins = merge_supplement(fins, providers.us_financial_supplement.get_annual_financials(ref, years))
@@ -637,7 +678,8 @@ def _fetch_financials(providers: Providers, locks: LockSession, ref: StockRef, y
             fins = fins[-years:]
         rows = [{"stock_id": ref.stock_id, "period_end": f.period_end, "period_type": f.period_type,
                  **{k: getattr(f, k) for k in FIN_FIELDS},
-                 "data_source": f.data_source, "accounting_std": f.accounting_std} for f in fins]
+                 "data_source": f.data_source, "accounting_std": f.accounting_std,
+                 "currency": f.currency or MARKET_CURRENCY[ref.country], "fx_rate": f.fx_rate} for f in fins]
         u.writes.append(("financial_statements", rows, ["stock_id", "period_end", "period_type"]))
         u.rows = len(rows)
         for f in fins:

@@ -11,6 +11,9 @@ from decimal import Decimal
 import pytest
 
 from app.ingest.dart_bulk import load_bulk, parse_file, to_financials
+from app.ingest.jobs import to_krw
+from app.providers.base import Financial, ProviderError
+from app.providers.dart import DartClient
 from tests.conftest import scalar
 
 BS_HEADER = ["재무제표종류", "종목코드", "회사명", "시장구분", "업종", "업종명", "결산월", "결산기준일", "보고서종류", "통화",
@@ -19,12 +22,12 @@ PL_HEADER = ["재무제표종류", "종목코드", "회사명", "시장구분", 
              "항목코드", "항목명", "", "당기", "", "", "전기", "전전기", ""]
 
 
-def _bs(kind, code, end, aid, nm, amount):
-    return [kind, f"[{code}]", "회사", "유가증권시장상장법인", "264", "업종", "12", end, "사업보고서", "KRW", aid, nm, amount, "1", "1", ""]
+def _bs(kind, code, end, aid, nm, amount, cur="KRW"):
+    return [kind, f"[{code}]", "회사", "유가증권시장상장법인", "264", "업종", "12", end, "사업보고서", cur, aid, nm, amount, "1", "1", ""]
 
 
-def _pl(kind, code, end, aid, nm, amount):
-    return [kind, f"[{code}]", "회사", "유가증권시장상장법인", "264", "업종", "12", end, "사업보고서", "KRW", aid, nm, "", amount, "", "", "1", "1", ""]
+def _pl(kind, code, end, aid, nm, amount, cur="KRW"):
+    return [kind, f"[{code}]", "회사", "유가증권시장상장법인", "264", "업종", "12", end, "사업보고서", cur, aid, nm, "", amount, "", "", "1", "1", ""]
 
 
 def _write(path, header, rows):
@@ -96,3 +99,36 @@ def test_load_bulk_does_not_move_newer_cursor_back(engine, files):
         conn.execute(text("INSERT INTO ingest_cursor (source, last_rcept_no, last_rcept_dt) VALUES ('DART_A001', '20261015000123', '2026-10-15')"))
     load_bulk(engine, files, as_of=date(2026, 10, 8))
     assert scalar(engine, "SELECT last_rcept_no FROM ingest_cursor") == "20261015000123"
+
+
+# ------------------------------------------------------------------ 표시통화 (D-026)
+def test_to_krw_converts_foreign_statements_at_period_end_rate():
+    """원화가 아닌 표시통화(두산밥캣 USD)는 결산일 환율로 원화 환산하고 원래 통화·환율을 남긴다. USD 밖 통화·환율 없음은 넣지 않는다."""
+    f = Financial(period_end=date(2025, 12, 31), period_type="FY", revenue=Decimal("10"), net_income=Decimal("-2"), currency="USD")
+    out = to_krw([f], lambda d: Decimal("1400.5"))[0]
+    assert (out.revenue, out.net_income, out.total_assets) == (Decimal("14005.00"), Decimal("-2801.00"), None)
+    assert (out.currency, out.fx_rate) == ("USD", Decimal("1400.5")) and "USD→KRW 1400.5(결산일)" in out.notes
+    kr = to_krw([Financial(period_end=date(2025, 12, 31), period_type="FY", revenue=Decimal("10"))], lambda d: None)[0]
+    assert (kr.revenue, kr.currency, kr.fx_rate) == (Decimal("10"), "KRW", None)       # 원화 공시는 그대로(환율 조회 안 함)
+    with pytest.raises(ProviderError, match="CNY"):
+        to_krw([Financial(period_end=date(2025, 12, 31), period_type="FY", currency="CNY")], lambda d: Decimal(1))
+    with pytest.raises(ProviderError, match="환율 없음"):
+        to_krw([f], lambda d: None)
+    assert DartClient._currency([{"currency": ""}, {"currency": "usd"}]) == "USD" and DartClient._currency([]) is None
+
+
+def test_load_bulk_converts_usd_statements_with_stored_fx(engine, tmp_path):
+    """일괄 파일의 '통화' 열이 USD면 DB의 결산일 USD/KRW로 환산한다. 그날 환율이 없는 회사는 넣지 않고 건너뛴다."""
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("""INSERT INTO fx_rates (rate_at, usd_krw, granularity) VALUES ('2025-12-30 15:00+09', 1440, 'DAILY')"""))
+    bs = _write(tmp_path / "bs.txt", BS_HEADER, [
+        _bs("재무상태표, 유동/비유동법 - 연결", "005930", "2025-12-31", "ifrs-full_Assets", "자산총계", "1,000", cur="USD"),
+        _bs("재무상태표, 유동/비유동법 - 연결", "000660", "2024-12-31", "ifrs-full_Assets", "자산총계", "1,000", cur="USD"),
+    ])
+    assert parse_file(bs)[0].currency == "USD"
+    out = load_bulk(engine, [bs], as_of=date(2026, 10, 8))
+    assert out["companies"] == 1 and out["skipped"] == 1                               # 000660: 2024-12-31 환율 없음
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT total_assets, currency, fx_rate FROM financial_statements")).one()
+    assert tuple(row) == (Decimal("1440000.00"), "USD", Decimal("1440.0000"))
