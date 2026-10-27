@@ -717,3 +717,41 @@ def test_reference_score_neutralizes_with_primary_theme(engine, universe):
     assert out["data_quality"]["fy_history"] == 2
     assert sum(float(f["contribution"]) for f in out["factors"].values() if f["contribution"] is not None) == \
         pytest.approx(float(out["composite"]), abs=1e-3)
+
+
+# ------------------------------------------------------------------ 경고 배지·최신 계산일 (D-003)
+def test_score_badges_oneoff_fiscal_gap_and_short_history():
+    from datetime import date
+
+    from app.services.scoring import score_badges
+    mode = date(2025, 12, 31)
+    kcc = score_badges({"ni0": Dec(1538), "oi0": Dec(428), "fy_end": mode, "fy_count": 3}, "general", mode)
+    assert [b["code"] for b in kcc] == ["oneoff"] and "3.6배" in kcc[0]["detail"]
+    assert score_badges({"ni0": Dec(5), "oi0": Dec(-1), "fy_end": mode, "fy_count": 3}, "general", mode)[0]["code"] == "oneoff"
+    assert score_badges({"ni0": Dec(30), "oi0": Dec(9), "fy_end": mode, "fy_count": 3}, "financial", mode) == []   # 금융은 순이익 기준
+    mu = score_badges({"ni0": Dec(1), "oi0": Dec(2), "fy_end": date(2026, 9, 3), "fy_count": 3}, "general", mode)
+    assert [b["code"] for b in mu] == ["fiscal_gap"] and "8개월" in mu[0]["detail"]
+    new = score_badges({"ni0": Dec(1), "oi0": Dec(2), "fy_end": mode, "fy_count": 1}, "general", mode)
+    assert [b["code"] for b in new] == ["short_history"] and "1/3" in new[0]["detail"]
+
+
+def test_badges_are_stored_with_scores(engine, universe):
+    compute_scores(engine, as_of=D)
+    with engine.connect() as conn:
+        sc = scores_by(conn)
+    assert [b["code"] for b in sc[6]["data_quality"]["badges"]] == ["oneoff"]              # 현대차 순이익 30 > 1.2 × 9
+    assert [b["code"] for b in sc[7]["data_quality"]["badges"]] == ["short_history"]       # 기아 FY 1개
+    assert sc[1]["data_quality"]["badges"] == [] and sc[1]["data_quality"]["fiscal_mode"] == "2024-12-31"
+
+
+def test_screens_read_only_the_latest_scoring_date(client, engine, universe):
+    """오늘 계산에서 빠진 종목(점수 없음 테마로 바뀜)은 어제 점수가 남아 있어도 보이지 않는다."""
+    compute_scores(engine, as_of=D - timedelta(days=1))
+    assert client.get(f"{API}/stocks/KOSPI/005380/analysis").json()["attractiveness"]["score"] is not None
+    _theme_rule(engine, 3, scoring="none", name="리츠·부동산")
+    compute_scores(engine, as_of=D)
+    a = client.get(f"{API}/stocks/KOSPI/005380/analysis").json()["attractiveness"]
+    assert a["score"] is None and "리츠" in a["unscored_reason"]
+    assert client.get(f"{API}/stocks/KOSPI/005380").json()["score"] is None
+    items = {x["ticker"]: x["score"] for x in client.get(f"{API}/stocks?country=KR").json()["items"]}
+    assert items["005380"] is None and items["005930"] is not None

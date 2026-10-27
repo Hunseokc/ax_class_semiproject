@@ -372,6 +372,7 @@ function renderScore(a) {
     return;
   }
   const dq = s.data_quality || {};
+  const badges = dq.badges || [];   // 경고 배지(일회성 이익·결산 시점·재무 이력) — 설명은 계산 근거에도 적는다
   const market = s.rank?.country === "US" ? "미국" : "국내";
   const factors = Object.entries(s.factors);
   const pos = Object.fromEntries(FACTORS.map((f) => [f.key, s.factors[f.key]?.available ? (s.factors[f.key].percentile ?? null) : null]));
@@ -392,7 +393,8 @@ function renderScore(a) {
             ${band ? `<p class="score-band"><i style="background:var(--gauge-${band.index})"></i>${band.label}</p>` : ""}</div>
           <div class="score-row__text">
             <p class="score-panel__rank">${rankText}</p>
-            <p class="subtle">${esc(s.preset.name)} 성향 · ${date(s.as_of)} 기준</p></div>
+            <p class="subtle">${esc(s.preset.name)} 성향 · ${date(s.as_of)} 기준</p>
+            ${badges.length ? `<p class="score-badges">${badges.map((b) => `<span class="badge badge--commodity" title="${esc(b.detail)}">${esc(b.label)}</span>`).join(" ")}</p>` : ""}</div>
         </div>
         ${mc ? conditionRow(mc) : ""}
         ${stock?.commodity ? commodityRow(stock.commodity) : ""}
@@ -418,7 +420,7 @@ function renderScore(a) {
 
   // 계산 근거(팩터 기여도·지표 원값/Z·메모·방법)는 접어 둔다
   const maxAbs = Math.max(0.5, ...factors.map(([, f]) => Math.abs(f.contribution ?? 0)));
-  const notes = [dq.score_null_reason, ...(dq.notes || [])].filter(Boolean);
+  const notes = [dq.score_null_reason, ...badges.map((b) => `${b.label}: ${b.detail}`), ...(dq.notes || [])].filter(Boolean);
   const basis = h(`<details class="score-method"><summary>계산 근거 보기 <span class="subtle">팩터 기여도 · 지표 원값과 표준점수(Z)</span></summary>
       <div class="score-basis">
         <p class="subtle">데이터 충족도 ${s.factor_coverage}/${s.factor_total} 요소${s.rank ? ` · 백분위 ${num(s.rank.percentile, 0)}` : ""}</p>

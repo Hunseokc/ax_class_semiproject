@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import statistics
 from collections import defaultdict
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import Connection, text
@@ -24,7 +25,7 @@ from app.ingest.sectors import theme_by_name
 from app.queries import sql
 from app.services.data_quality import fiscal_year_mix
 from app.services.scoring import (FACTORS, METRICS, MIN_FACTORS, REQUIRED_FACTORS, load_config, metric_params, null_reason,
-                                  partition_label)
+                                  partition_label, score_badges)
 
 MAD_SCALE = 1.4826
 MIN_ROBUST_N = 5
@@ -191,6 +192,12 @@ def reference_score(conn: Connection, stock_id: int, country: str, preset: dict)
                       "percentile": _q(pct, "0.01")}
     dq: dict = {"partition": partition_label(country, family), "family": family, "reference": True,
                 "fy_history": fy_count, "model_version": cfg["model_version"]}
+    mode = conn.execute(text("""SELECT st.data_quality->>'fiscal_mode' FROM stock_scores st
+                                JOIN stocks s ON s.stock_id = st.stock_id JOIN markets mk ON mk.market_id = s.market_id
+                                WHERE st.as_of = :d AND mk.country = :c AND st.data_quality ? 'fiscal_mode' LIMIT 1"""),
+                        {"d": as_of, "c": country}).scalar()
+    dq["badges"] = score_badges({k: mine[0][k] for k in ("fy_end", "ni0", "oi0", "fy_count")}, family,
+                                date.fromisoformat(mode) if mode else None)
     if missing:
         dq["missing_metrics"] = missing
     if notes:

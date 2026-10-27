@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -27,6 +28,8 @@ SEOUL = ZoneInfo("Asia/Seoul")
 FACTORS = ("value", "quality", "growth", "safety", "momentum")
 MIN_FACTORS = 3
 REQUIRED_FACTORS = ("value", "quality")                  # 이 둘이 없으면 점수를 내지 않는다(D-004 — 재무 없는 종목·신탁)
+ONEOFF_RATIO = 1.2                                       # 순이익 > 1.2 × 영업이익이면 일회성 이익 배지(D-003)
+FISCAL_GAP_DAYS = 182                                    # 최빈 결산일과 6개월 넘게 다르면 결산 시점 배지(D-008)
 FAMILY_LABEL = {"general": None, "financial": "금융"}     # data_quality.partition 표시(KR·금융)
 
 
@@ -119,9 +122,40 @@ def metric_params(cfg: dict | None = None, stock_id: int | None = None) -> dict:
     return {"stock_id": stock_id, "after_tax": float(cfg["after_tax"])}
 
 
-def insert_metric_values(conn: Connection, as_of: date, cfg: dict | None = None
+def score_badges(fact: dict, family: str, fiscal_mode: date | None) -> list[dict]:
+    """경고 배지(D-003): 일회성 이익 · 결산 시점 다름 · 재무 이력 짧음. fact = 최신 FY 결산일·순이익·영업이익·이어지는 FY 수."""
+    out = []
+    ni, oi = (None if fact.get(k) is None else float(fact[k]) for k in ("ni0", "oi0"))
+    if family != "financial" and ni is not None and oi is not None and ni > 0 and (oi <= 0 or ni > ONEOFF_RATIO * oi):
+        what = f"순이익이 영업이익의 {ni / oi:.1f}배" if oi > 0 else "영업적자인데 순이익 흑자"
+        out.append({"code": "oneoff", "label": "일회성 이익",
+                    "detail": f"{what} — 일회성 이익으로 보고 저평가 이익은 0.78 × 영업이익으로 계산했습니다. 순이익 기준 PER과 다를 수 있습니다."})
+    end = fact.get("fy_end")
+    if end and fiscal_mode and abs((end - fiscal_mode).days) > FISCAL_GAP_DAYS:
+        months = round(abs((end - fiscal_mode).days) / 30.44)
+        out.append({"code": "fiscal_gap", "label": "결산 시점 다름",
+                     "detail": f"최신 연간 재무 결산 {end:%Y-%m} — 같은 시장 대부분({fiscal_mode:%Y-%m})과 약 {months}개월 차이라 "
+                               f"업황 변화가 먼저(또는 늦게) 반영됩니다."})
+    n = fact.get("fy_count")
+    if n is not None and n < 3:
+        out.append({"code": "short_history", "label": "재무 이력 짧음",
+                    "detail": f"이어지는 연간 재무 {n}년 — 3년 평균·가치 함정 신호를 쓸 수 없어 저평가 점수를 {n}/3로 줄였습니다."})
+    return out
+
+
+def fiscal_modes(facts: dict[int, dict], countries: dict[int, str]) -> dict[str, date]:
+    """국가별 최빈 최신 FY 결산일."""
+    by: dict[str, Counter] = {}
+    for sid, f in facts.items():
+        if f.get("fy_end") and sid in countries:
+            by.setdefault(countries[sid], Counter())[f["fy_end"]] += 1
+    return {c: cnt.most_common(1)[0][0] for c, cnt in by.items()}
+
+
+def insert_metric_values(conn: Connection, as_of: date, cfg: dict | None = None, facts: dict[int, dict] | None = None
                          ) -> tuple[dict[int, list[str]], dict[int, dict[str, str]], dict[int, int]]:
-    """1단계. 반환: (종목별 메모 — 대체 계산, 종목별 규칙으로 비운 지표 {metric: 사유}, 종목별 이어지는 FY 수)."""
+    """1단계. 반환: (종목별 메모 — 대체 계산, 종목별 규칙으로 비운 지표 {metric: 사유}, 종목별 이어지는 FY 수).
+    facts를 주면 종목별 배지 재료(최신 FY 결산일·순이익·영업이익·FY 수)를 채운다."""
     rows = conn.execute(sql("score_metrics"), metric_params(cfg)).mappings().all()
     if rows:
         conn.execute(text("""INSERT INTO stock_metric_values (stock_id, as_of, metric, factor, raw_value)
@@ -132,6 +166,8 @@ def insert_metric_values(conn: Connection, as_of: date, cfg: dict | None = None
     history: dict[int, int] = {}
     for r in rows:
         history[r["stock_id"]] = r["fy_count"]
+        if facts is not None:
+            facts[r["stock_id"]] = {k: r[k] for k in ("fy_end", "ni0", "oi0", "fy_count")}
         if r["note"]:
             notes.setdefault(r["stock_id"], []).append(f"{r['metric']}: {r['note']}")
         if r["null_note"]:
@@ -162,7 +198,7 @@ def null_reason(coverage: int, has_required: bool) -> str:
 
 def aggregate(conn: Connection, as_of: date, notes: dict[int, list[str]] | None = None,
               excluded: dict[int, dict[str, str]] | None = None, history: dict[int, int] | None = None,
-              model_version: str | None = None) -> int:
+              model_version: str | None = None, facts: dict[int, dict] | None = None) -> int:
     """3단계. 프리셋별 점수 → stock_scores. 반환: 생성 행 수."""
     if history is None:                                   # 단계별 테스트처럼 1단계를 건너뛰면 축소하지 않는다
         history = {sid: 3 for sid in conn.execute(text("SELECT DISTINCT stock_id FROM stock_metric_values "
@@ -174,10 +210,16 @@ def aggregate(conn: Connection, as_of: date, notes: dict[int, list[str]] | None 
                           {"d": as_of}):
         missing.setdefault(r.stock_id, {})[r.metric] = (excluded.get(r.stock_id, {}).get(r.metric)
                                                         or METRICS[r.metric].null_reason)
+    facts = facts or {}
+    modes = fiscal_modes(facts, {r["stock_id"]: r["country"] for r in rows})
     out = []
     for r in rows:
         dq: dict = {"partition": partition_label(r["country"], r["family"]), "family": r["family"],
                     "fy_history": history.get(r["stock_id"])}
+        if r["stock_id"] in facts:
+            mode = modes.get(r["country"])
+            dq["badges"] = score_badges(facts[r["stock_id"]], r["family"], mode)
+            dq["fiscal_mode"] = mode.isoformat() if mode else None
         if model_version:
             dq["model_version"] = model_version
         if r["stock_id"] in missing:
@@ -208,9 +250,10 @@ def compute_scores(engine: Engine, as_of: date | None = None) -> int:
             sync_presets(conn, cfg)
             conn.execute(text("DELETE FROM stock_scores WHERE as_of = :d"), {"d": as_of})
             conn.execute(text("DELETE FROM stock_metric_values WHERE as_of = :d"), {"d": as_of})
-            notes, excluded, history = insert_metric_values(conn, as_of, cfg)
+            facts: dict[int, dict] = {}
+            notes, excluded, history = insert_metric_values(conn, as_of, cfg, facts)
             normalize(conn, as_of, cfg["shrinkage_k"])
-            res.rows = aggregate(conn, as_of, notes, excluded, history, cfg["model_version"])
+            res.rows = aggregate(conn, as_of, notes, excluded, history, cfg["model_version"], facts)
         res.notes.append(f"model={cfg['model_version']}, presets={len(cfg['presets'])}, k={cfg['shrinkage_k']}")
     if res.status != "SUCCESS":
         raise RuntimeError("점수 계산 실패 — ingestion_logs 참고")

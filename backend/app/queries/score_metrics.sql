@@ -4,6 +4,7 @@
 -- 지표 정의·NULL 사유는 개발산출물/09 2절(D-002). 한 종목당 10행(값이 없으면 raw_value NULL)
 -- note: 대체 계산 메모, null_note: 규칙으로 일부러 비운 지표의 사유(missing_metrics에 기본 사유 대신 쓴다)
 -- fy_count: 이어지는 FY 수(최대 3) — 3 미만이면 저평가 팩터를 그 비율만큼 줄인다(D-010, score_aggregate.sql)
+-- fy_end·ni0·oi0: 최신 FY 결산일·순이익·영업이익 — 경고 배지(일회성 이익·결산 시점, D-003)를 scoring.py가 만든다
 -- 재무 FY: 자산과 이익(순이익 또는 영업이익)이 있는 FY만 쓴다(일부 칸만 들어온 최신 FY는 건너뜀).
 --   t = 그중 최신, t−1·t−2 = 바로 뒤 FY 결산일보다 330~400일 앞선 FY(결산월 변경으로 끼어든 행은 건너뜀)
 -- 묶음(family, v_stock_theme): general / financial(순이익 기준, 매출·부채 지표 없음) / none(행을 만들지 않음)
@@ -33,7 +34,7 @@ t0 AS (
     SELECT DISTINCT ON (fy.stock_id) fy.* FROM fy ORDER BY fy.stock_id, fy.period_end DESC
 ),
 chain AS (                            -- t, t−1, t−2 (결산일 간격 330~400일로 이어지는 FY)
-    SELECT t0.stock_id,
+    SELECT t0.stock_id, t0.period_end AS end0,
            t0.revenue AS rev0, t0.operating_income AS oi0, t0.net_income AS ni0, t0.total_assets AS ta0, t0.total_debt AS debt0,
            p1.period_end AS end1, p1.operating_income AS oi1, p1.net_income AS ni1,
            p2.period_end AS end2, p2.revenue AS rev2, p2.operating_income AS oi2, p2.net_income AS ni2,
@@ -61,7 +62,7 @@ mom AS (                              -- t−21, t−126, t−252 거래일 종�
     GROUP BY px.stock_id
 ),
 inp AS (
-    SELECT b.*, c.rev0, c.oi0, c.ni0, c.ta0, c.debt0, c.end1, c.oi1, c.ni1, c.end2, c.rev2, c.oi2, c.ni2, c.ta2, c.debt2,
+    SELECT b.*, c.end0, c.rev0, c.oi0, c.ni0, c.ta0, c.debt0, c.end1, c.oi1, c.ni1, c.end2, c.rev2, c.oi2, c.ni2, c.ta2, c.debt2,
            m.c_21, m.c_126, m.c_252, (b.family = 'financial') AS fin,
            CASE WHEN c.stock_id IS NULL THEN 0 WHEN c.end1 IS NULL THEN 1 WHEN c.end2 IS NULL THEN 2 ELSE 3 END AS fy_count
     FROM base b
@@ -101,7 +102,7 @@ calc AS (
          + CASE WHEN e.la0 < e.la2 THEN 1 ELSE 0 END AS sig_yes
     FROM earn e
 )
-SELECT c.stock_id, c.fy_count, v.metric, v.factor, v.raw_value, v.note, v.null_note
+SELECT c.stock_id, c.fy_count, c.end0 AS fy_end, c.ni0, c.oi0, v.metric, v.factor, v.raw_value, v.note, v.null_note
 FROM calc c
 CROSS JOIN LATERAL (VALUES
     ('conservative_yield', 'value',
