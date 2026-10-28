@@ -207,7 +207,7 @@ done
 2. `migrate,016_fin_collection` → `migrate,017_us_cap`
 3. `master,--offline` — 결제·핀테크 테마·HON·비에이치아이·NEU 직접 지정이 peer_groups·주 테마에 들어간다
 4. **재무 한 경로 재수집**(D-039): `financials,--scope,sample,--country,US`(SEC — 약 10분) → `financials,--scope,sample,--country,KR,--part,1/2`와 `--part,2/2`를 **차례로**(DART — 한 회사 보고서 약 20~25개, 분당 45회라 각각 약 1.5시간. 한 Job 실행 시간 상한 안에 들어가게 나눈다). 다시 받은 종목의 옛 결산기 행(수정 1 이전 미국 영업이익, 20-F 재무)은 이때 지워진다
-5. 미국 시가총액 순위(yfinance 시총·ADR 비율): `python,-c,from app.core.db import get_engine; from app.ingest.background import rank_us; from app.providers.factory import default_providers; print(rank_us(get_engine(), default_providers(), force=True))` (약 20~30분)
+5. 미국 시가총액 순위(yfinance 시총·ADR 비율): `python,-c,from app.core.db import get_engine; from app.ingest.background import rank_us; from app.providers.factory import default_providers; print(rank_us(get_engine(), default_providers(), force=True))` (개발 DB 실측 34분 — yfinance가 401이면 60초 쉬고 남은 종목을 한 번 더 부른다. 로그 '시가총액 끝내 실패'가 있으면 다시 실행)
 6. `benchmark,--reselect` — V·MA 등 결제사가 표본에 들어오고 거래정지 종목이 빠진다. 새로 뽑힌 종목은 재무를 API로 받는다(일괄 경로 값은 만료)
 7. `scores` → `stockmind-sanity` 실행 → 결과 `sanity_runs`. 매시 `stockmind-refresh`는 이제 점수를 다시 계산하지 않는다(SCORES SKIPPED)
 8. 다음 날 07:00 `stockmind-benchmark` 완료 ~ 07:40 `stockmind-sanity` 사이에 배포 DB 덤프 → **S1**(이름을 장부 '기준 스냅샷' 행에). 2주 이상 뒤 같은 시각 덤프 → S2
