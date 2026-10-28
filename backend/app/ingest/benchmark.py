@@ -102,9 +102,45 @@ def selection_order(engine: Engine, providers: Providers) -> dict[int, tuple[int
     return order
 
 
+# 거래정지(R4-7, 09 2절): 마지막 일봉이 같은 국가 비교 표본의 최근 21번째 거래일보다 앞선 종목 — score_metrics.sql과 같은 기준
+HALTED_SQL = """
+WITH cal AS (
+    SELECT x.country, x.trade_date, ROW_NUMBER() OVER (PARTITION BY x.country ORDER BY x.trade_date DESC) AS rk
+    FROM (SELECT DISTINCT m.country, d.trade_date
+          FROM daily_prices d
+          JOIN stocks s  ON s.stock_id = d.stock_id AND s.is_active AND s.coverage <> 'listed'
+          JOIN markets m ON m.market_id = s.market_id
+          WHERE d.trade_date >= CURRENT_DATE - 120) x
+)
+SELECT lp.stock_id FROM v_latest_price lp
+JOIN cal c ON c.country = lp.country AND c.rk = 21
+WHERE lp.trade_date < c.trade_date"""
+
+
+def halted_ids(engine: Engine, providers: Providers) -> set[int]:
+    """비교군에서 뺄 거래정지 종목: DB 마지막 일봉이 20거래일 넘게 앞섬 + 국내는 최근 거래일 전 종목 일봉의 거래량 0."""
+    with engine.connect() as conn:
+        out = set(conn.execute(text(HALTED_SQL)).scalars())
+        kr = dict(conn.execute(text("""SELECT s.ticker, s.stock_id FROM stocks s JOIN markets m ON m.market_id = s.market_id
+                                       WHERE m.country = 'KR' AND s.is_active""")).all())
+    if providers.kr_bulk is not None:
+        day = jobs.last_closed_day("KR")
+        for back in range(8):                         # 휴장일이면 결과가 비어 하루씩 앞으로
+            try:
+                bars = providers.kr_bulk.get_bars_by_date(day - timedelta(days=back))
+            except ProviderError as e:
+                log.warning("국내 일봉 조회 실패 %s: %s", day - timedelta(days=back), e)
+                continue
+            if bars:
+                out |= {kr[t] for t, b in bars.items() if t in kr and not b.volume}
+                break
+    return out
+
+
 def select_benchmark(engine: Engine, providers: Providers, *, per_sector: int | None = None) -> dict:
     """업종 코드 확인 → 주 테마·보조 테마 지정 → 국가·테마별 시가총액 상위로 비교군 선정.
-    점수를 내지 않는 테마(scoring none — 리츠)는 고르지 않는다. 재무·공시를 받으려면 고유번호(국내)·CIK(미국)가 있어야 한다.
+    점수를 내지 않는 테마(scoring none — 리츠)와 거래정지 종목(halted_ids, R4-7)은 고르지 않는다.
+    재무·공시를 받으려면 고유번호(국내)·CIK(미국)가 있어야 한다.
     회사(고유번호·CIK)당 1종목만 — 같은 회사의 다른 주식 종류·채권형 상장(GOOG, TMUSI 등)이 표본을 겹치지 않게."""
     per_sector = per_sector or config()["per_sector"]
     out: dict = {"selected": [], "by_group": {}}
@@ -123,8 +159,12 @@ def select_benchmark(engine: Engine, providers: Providers, *, per_sector: int | 
                   AND (s.coverage = 'featured' OR CASE WHEN m.country = 'KR' THEN s.corp_code ELSE s.cik END IS NOT NULL)
                 ORDER BY t.theme, m.country""")).all()
         order = selection_order(engine, providers)
+        halted = halted_ids(engine, providers)
+        res.notes.append(f"거래정지 제외 {len(halted)}")
         groups: dict[tuple[str, str], list] = {}
         for r in pool:
+            if r.stock_id in halted:
+                continue
             groups.setdefault((r.theme, r.country), []).append(r)
         chosen = []
         taken = {(r.country, r.company) for r in pool if r.coverage == "featured" and r.company}

@@ -888,6 +888,70 @@ def rule_lp_equity(d: Data):
     return not bad, f"자본 0 · 자산−부채 ≠ 0: {len(bad)} {bad} · 파트너 자본·자산−부채로 채운 종목 {lp[:10]}"
 
 
+# ── 라운드 4 데이터 (수정 4 PR B, D-039·D-036) — 표본·시가총액 ──
+def rule_adr_mcap(d: Data):
+    """미국 시가총액 순위 상위 300 중 재무가 있는 종목은 최신 FY 매출 ≥ 1억 달러이고 순위에 쓴 시가총액 ÷ 총자산 ≤ 200
+    (AKTX — 매출 0인데 SEC 원주 수 × ADS 종가로 1.19조 달러·cap_rank 16, R4-3). 재무가 없는 상장 목록 종목은 셀 수 없어 따로 적는다."""
+    rows = d.conn.execute(text("""
+        SELECT s.ticker, s.cap_rank, s.cap_usd, f.revenue, f.total_assets
+        FROM stocks s JOIN markets m ON m.market_id = s.market_id
+        LEFT JOIN LATERAL (SELECT x.revenue, x.total_assets FROM financial_statements x
+                           WHERE x.stock_id = s.stock_id AND x.period_type = 'FY' AND x.total_assets > 0
+                           ORDER BY x.period_end DESC LIMIT 1) f ON true
+        WHERE m.country = 'US' AND s.cap_rank <= 300 ORDER BY s.cap_rank""")).all()
+    if not rows or all(r.cap_usd is None for r in rows):
+        return None, "시가총액 순위(cap_usd)가 아직 없음 — background 순위 뒤 확인"
+    checked = [r for r in rows if r.total_assets is not None and r.cap_usd is not None]
+    bad = [f"{r.ticker}(#{r.cap_rank} 매출 {0 if r.revenue is None else float(r.revenue) / 1e8:.1f}억·시총/자산 "
+           f"{float(r.cap_usd / r.total_assets):.0f})" for r in checked
+           if r.revenue is None or r.revenue < 1e8 or r.cap_usd > 200 * r.total_assets]
+    return not bad, f"상위 300 중 재무 있는 {len(checked)}종목 확인 · 위반 {len(bad)} {bad[:8]} · 재무 없어 못 봄 {len(rows) - len(checked)}"
+
+
+def rule_multiclass_ranked(d: Data, c: dict):
+    """주식 종류가 여럿인 회사(SEC frames 발행주식수가 비는 회사)도 시가총액 순위에 들어옴(R4-4 — V·MA가 표본 밖이었다)."""
+    rows = dict(d.conn.execute(text("""SELECT s.ticker, s.cap_rank FROM stocks s JOIN markets m ON m.market_id = s.market_id
+                                       WHERE m.country = 'US' AND s.ticker = ANY(:t)"""), {"t": [str(t) for t in c["ticker"]]}).all())
+    miss = [t for t in c["ticker"] if rows.get(str(t)) is None]
+    return not miss, " · ".join(f"{t} {rows.get(str(t)) or '순위 없음'}" for t in c["ticker"])
+
+
+def rule_halted(d: Data):
+    """거래정지(마지막 일봉이 같은 국가 표본의 최근 21번째 거래일보다 앞섬)는 점수 없음·비교군 아님(R4-7 — 버킷스튜디오)."""
+    from app.ingest.benchmark import HALTED_SQL                  # 선정과 같은 기준
+    ids = list(d.conn.execute(text(HALTED_SQL)).scalars())
+    rows = d.conn.execute(text("""
+        SELECT s.ticker, s.name, s.coverage, lp.trade_date,
+               EXISTS (SELECT 1 FROM stock_scores x WHERE x.stock_id = s.stock_id AND x.as_of = :d AND x.score IS NOT NULL) AS scored
+        FROM stocks s JOIN v_latest_price lp ON lp.stock_id = s.stock_id WHERE s.stock_id = ANY(:ids)"""),
+        {"ids": ids, "d": d.as_of}).all()
+    bad = [f"{r.ticker} {r.name}({r.trade_date}, {'점수' if r.scored else ''}{' 비교군' if r.coverage == 'benchmark' else ''})"
+           for r in rows if r.scored or r.coverage == "benchmark"]
+    return not bad, (f"거래정지 {len(rows)}종목 — 점수 있거나 비교군 {len(bad)} {bad[:8]} · "
+                     + ", ".join(f"{r.ticker} {r.name} {r.trade_date} {r.coverage}" for r in rows[:6]))
+
+
+def case_spinoff(d: Data, c: dict):
+    """분할(config corporate_actions) 완료일이 최신 FY 결산일보다 뒤면 저평가 지표 없음 + 사유(R4-8 — HON)."""
+    from app.ingest.universe import load_universe
+    out, res = [], []
+    for a in load_universe().corporate_actions:
+        s = d.by_ticker(str(a["ticker"]), a["market"])
+        if s is None:
+            out.append(f"{a['ticker']} 표본에 없음")
+            continue
+        end = s.fins[-1]["period_end"] if s.fins else None
+        if end is not None and end >= a["date"]:
+            out.append(f"{s.ticker} 최신 FY {end} ≥ 분할 {a['date']} — 해당 없음")
+            continue
+        value = [m for m in ("conservative_yield", "book_yield", "trap_signal") if m in s.raw]
+        reason = (s.dq.get("missing_metrics") or {}).get("conservative_yield", "")
+        ok = not value and "분할" in reason and s.dq.get("score_null_code") == "corporate_action"
+        res.append(ok)
+        out.append(f"{s.ticker} 최신 FY {end} · 분할 {a['date']} · 저평가 지표 {value or '없음'} · {s.dq.get('score_null_code')}")
+    return (all(res) if res else None), " · ".join(out) or "분할 목록 없음"
+
+
 SPECIAL = {
     "KCC-oneoff-cut": lambda d, c: _with_stock(d, c, oneoff_cut),
     "MICHANG-oneoff-cut": lambda d, c: _with_stock(d, c, oneoff_cut),
@@ -933,6 +997,10 @@ SPECIAL = {
     "DATA-dart-fy-path": lambda d, c: rule_dart_fy_path(d, c),
     "DATA-sec-op-path": lambda d, c: rule_sec_op_path(d),
     "LP-equity-not-zero": lambda d, c: rule_lp_equity(d),
+    "ADR-mcap-sane": lambda d, c: rule_adr_mcap(d),
+    "MULTICLASS-ranked": rule_multiclass_ranked,
+    "HALTED-not-scored": lambda d, c: rule_halted(d),
+    "SPINOFF-basis": case_spinoff,
 }
 
 

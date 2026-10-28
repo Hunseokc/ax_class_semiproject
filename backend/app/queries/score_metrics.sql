@@ -13,13 +13,30 @@
 --   순이익이 없으면 after_tax × 영업이익, 영업이익이 없으면 순이익. 금융은 순이익
 -- 국내 우선주(D-029): e는 보통주·우선주 전체 주주 몫, 시총은 보통주만이다. KRX BPS의 주식수(= 최신 FY 지배 자본 ÷ BPS)가
 --   보통주보다 3% 넘게 많으면 e × 보통주 수 ÷ BPS 주식수로 보통주 몫만 쓴다(B/P와 같은 주식수 기준). 3% 이하는 기준일·반올림 차이로 본다
+-- 표본에서 빼는 종목(D-039, 09 2절): 지표 행은 만들고 값을 비워 사유를 적는다(순위·중립화 평균에 들어가지 않음)
+--   거래정지(R4-7): 마지막 일봉이 같은 국가 비교 표본의 최근 21번째 거래일보다 앞섬 → 모든 지표
+--   분할(R4-8): 파라미터 ca_*(config universe.yaml corporate_actions)의 완료일이 최신 FY 결산일보다 뒤 → 저평가 지표
 -- 자본 ≤ 0(최신 FY 지배 자본 또는 BPS)이면 B/P를 비운다(D-027 — 자사주 매입 우량 기업을 '가장 비싼 종목'으로 세지 않음)
 --   자본과 BPS가 모두 없으면(신고값 0을 채우지 못한 파트너십 등 — 수정 4 R4-9) 사유 '자본 정보 없음'
-WITH base AS (
+WITH cal AS (                         -- 국가별 비교 표본의 거래일(최근부터 번호) — 거래정지 판정
+    SELECT x.country, x.trade_date, ROW_NUMBER() OVER (PARTITION BY x.country ORDER BY x.trade_date DESC) AS rk
+    FROM (SELECT DISTINCT m.country, d.trade_date
+          FROM daily_prices d
+          JOIN stocks s  ON s.stock_id = d.stock_id AND s.is_active AND s.coverage <> 'listed'
+          JOIN markets m ON m.market_id = s.market_id
+          WHERE d.trade_date >= CURRENT_DATE - 120) x
+),
+ca AS (
+    SELECT * FROM unnest(CAST(:ca_tickers AS text[]), CAST(:ca_countries AS text[]), CAST(:ca_dates AS date[]),
+                         CAST(:ca_whats AS text[])) AS x(ticker, country, done, what)
+),
+base AS (
     SELECT vm.stock_id, vm.country, vm.close, vm.bps, vm.volatility_1y,
            COALESCE(vm.market_cap, CAST(vs.shares_outstanding AS numeric) * vm.close) AS mcap,
            CAST(vs.shares_outstanding AS numeric) AS shares,
-           COALESCE(t.family, 'general') AS family
+           COALESCE(t.family, 'general') AS family,
+           vm.as_of AS last_trade, COALESCE(vm.as_of < cut.trade_date, false) AS halted,
+           ca.done AS ca_done, ca.what AS ca_what
     FROM v_stock_metrics vm
     JOIN stocks st ON st.stock_id = vm.stock_id
      AND CASE WHEN CAST(:stock_id AS int) IS NULL THEN st.is_active AND st.coverage <> 'listed'
@@ -27,6 +44,8 @@ WITH base AS (
     LEFT JOIN v_stock_theme t ON t.stock_id = vm.stock_id
     LEFT JOIN LATERAL (SELECT x.shares_outstanding FROM valuation_snapshots x
                        WHERE x.stock_id = vm.stock_id ORDER BY x.as_of DESC LIMIT 1) vs ON true
+    LEFT JOIN cal cut ON cut.country = vm.country AND cut.rk = 21
+    LEFT JOIN ca      ON ca.ticker = st.ticker AND ca.country = vm.country
     WHERE COALESCE(t.family, 'general') <> 'none'
 ),
 fy AS (                               -- 쓸 수 있는 FY
@@ -114,7 +133,13 @@ calc AS (
     FROM earn e
 )
 SELECT c.stock_id, c.fy_count, c.end0 AS fy_end, c.ni0, c.oi0, c.ni1, c.oi1, c.ni2, c.oi2,
-       v.metric, v.factor, v.raw_value, v.note, v.null_note
+       v.metric, v.factor,
+       CASE WHEN c.halted OR (c.ca_done > c.end0 AND v.factor = 'value') THEN NULL ELSE v.raw_value END AS raw_value,
+       CASE WHEN c.halted OR (c.ca_done > c.end0 AND v.factor = 'value') THEN NULL ELSE v.note END AS note,
+       CASE WHEN c.halted THEN '거래 정지 — 마지막 거래일 ' || c.last_trade || '(20거래일 넘게 거래 없음)'
+            WHEN c.ca_done > c.end0 AND v.factor = 'value'
+            THEN '최신 FY 결산(' || c.end0 || ') 뒤 ' || c.ca_what || '(' || c.ca_done || ') — 분할 전 재무를 분할 뒤 시총·주가와 나누지 않음'
+            ELSE v.null_note END AS null_note
 FROM calc c
 CROSS JOIN LATERAL (VALUES
     ('conservative_yield', 'value',

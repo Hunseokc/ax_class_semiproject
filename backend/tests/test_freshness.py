@@ -167,7 +167,11 @@ def test_theme_tickers_override_codes_and_secondary_themes():
     assert _theme("KR", "007340", ksic="28202")[0] == "기계·로봇"       # DN오토모티브: 공작기계 53%, 코드는 축전지
     assert _theme("US", "MMM", sic=3841)[0] == "기계·로봇"              # 3M: 2024 헬스케어 분사 뒤에도 코드는 의료기기
     assert _theme("US", "CCL", sic=4400)[0] == "레저·의류·소비서비스"  # 크루즈는 수운이 아니라 여행·휴양
-    assert _theme("US", "FISV", sic=7389)[0] == "인터넷 플랫폼"         # 판정 못한 종목은 업종 코드 그대로(09 11절)
+    assert _theme("US", "CTAS", sic=7200)[0] != "결제·핀테크"            # 판정 못한 종목은 업종 코드 그대로(09 11절)
+    # D-036(수정 4): 미국 결제사 7종목은 SIC 7389(인터넷 플랫폼)가 아니라 결제·핀테크, 같은 SIC의 다른 회사는 그대로
+    assert {_theme("US", t, sic=7389)[0] for t in ("V", "MA", "FISV", "PYPL")} == {"결제·핀테크"}
+    assert _theme("US", "XYZ", sic=7389)[0] == "인터넷 플랫폼"
+    assert _theme("US", "HON", sic=3724)[0] == "기계·로봇" and _theme("KR", "083650", ksic="25")[0] == "전력 인프라"
 
 
 def test_unscored_themes_trusts_holdings_and_financial_consolidation():

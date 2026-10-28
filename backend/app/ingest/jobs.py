@@ -405,16 +405,21 @@ ON CONFLICT (stock_id, as_of) DO UPDATE SET
 
 # ── [S5-D] 미국 밸류에이션 = 기초값(SEC 발행주식수·FY 순이익·자본) × 최신 종가 — 외부 호출 없음(A-123) ──
 # (배당 dps는 SEC 기초값의 최근 FY 주당배당금을 그대로 옮긴다)
+# 수정 4(R4-3): SEC 발행주식수는 원주 기준이라 ADR은 stocks.share_ratio(원주 ÷ 상장 단위, 순위를 매길 때 yfinance 시총으로 잼)로
+# 나눠 상장 단위 주식수로 바꾼다 — 시가총액·EPS·BPS는 나누고 주당 배당은 곱한다. 비율이 없으면 1
 DERIVED_US_SQL = """
 INSERT INTO valuation_snapshots (stock_id, as_of, per, pbr, eps, bps, market_cap, shares_outstanding, dps, source)
 SELECT lp.stock_id, lp.trade_date,
-       CASE WHEN f.net_income > 0 THEN ROUND(lp.close / (f.net_income / b.shares_outstanding), 4) END,
-       CASE WHEN f.total_equity > 0 THEN ROUND(lp.close / (f.total_equity / b.shares_outstanding), 4) END,
-       ROUND(f.net_income / b.shares_outstanding, 4),
-       ROUND(f.total_equity / b.shares_outstanding, 4),
-       ROUND(lp.close * b.shares_outstanding, 0),
-       b.shares_outstanding, b.dps, 'DERIVED'
+       CASE WHEN f.net_income > 0 THEN ROUND(lp.close / (f.net_income / x.shares), 4) END,
+       CASE WHEN f.total_equity > 0 THEN ROUND(lp.close / (f.total_equity / x.shares), 4) END,
+       ROUND(f.net_income / x.shares, 4),
+       ROUND(f.total_equity / x.shares, 4),
+       ROUND(lp.close * x.shares, 0),
+       ROUND(x.shares), ROUND(b.dps * x.ratio, 4), 'DERIVED'
 FROM fundamental_bases b
+JOIN stocks st ON st.stock_id = b.stock_id
+CROSS JOIN LATERAL (SELECT COALESCE(st.share_ratio, 1) AS ratio,
+                           b.shares_outstanding / COALESCE(st.share_ratio, 1) AS shares) x
 JOIN v_latest_price lp ON lp.stock_id = b.stock_id
 LEFT JOIN LATERAL (SELECT fs.net_income, fs.total_equity FROM financial_statements fs
                    WHERE fs.stock_id = b.stock_id AND fs.period_type = 'FY'

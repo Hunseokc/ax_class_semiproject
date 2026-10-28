@@ -2,8 +2,9 @@
 
 - 순서: 노출 종목·비교군은 4시간 갱신·07:00 비교군 갱신이 맡고, 여기서는 재무 기록(data_freshness)이 아예 없는 listed 종목만.
   국내는 최근 거래일 거래대금(종가 × 거래량) 순, 같으면 시가총액 순 — 날짜별 전 종목 조회 2회로 구한다.
-  미국은 시가총액(SEC 발행주식수 × 종가) 상위 us_rank_pool개 안에서 순위대로(D11). 순위는 us_rank_days마다
-  stocks.cap_rank에 저장한다(전 종목 종가 묶음 조회 약 2분). ADR은 발행주식수가 원주 기준이라 순위가 부풀 수 있다 — 받는 순서에만 쓴다.
+  미국은 시가총액 상위 us_rank_pool개 안에서 순위대로(D11). 순위는 us_rank_days마다 stocks.cap_rank에 저장하고,
+  비교군 선정 순서에도 쓴다(benchmark.selection_order). 시가총액은 yfinance 시총이다(수정 4 R4-3·R4-4 — SEC 발행주식수는
+  원주 기준이라 ADR이 수백~수천 배 부풀고, 주식 종류가 여럿인 회사는 frames 값이 비어 순위에서 빠졌다).
 - 하루 예산: 오늘(서울 0시부터) 남긴 ingestion_logs 행 수(source='DART'·'SEC'의 재무·공시)가 universe.yaml background
   *_calls_per_day에 닿으면 멈춘다. 상세 화면·07:00 갱신이 쓴 만큼 줄어든다. 일괄 적재(DART_BULK)는 세지 않는다.
 - 한 번 받은 종목은 freshness 기록이 생겨 큐에서 빠지고, 이후에는 공시 목록 증분(jobs.load_dart_feed)이 만료시킬 때만 다시 받는다.
@@ -83,8 +84,16 @@ def priority_queue(conn: Connection, country: str, limit: int, ranking: dict[str
     return [r.stock_id for r in rows[:limit]]
 
 
+RATIO_TOLERANCE = Decimal("1.2")    # SEC 원주 수 × 종가가 yfinance 시총과 이 배수 넘게 다르면 ADR·주식 종류 여럿으로 본다
+INFLATED_CAP_TO_ASSETS = 200         # yfinance 값이 없을 때 SEC 기준 시총이 최신 FY 총자산의 이 배수를 넘으면 순위에서 뺀다
+
+
 def rank_us(engine: Engine, providers: Providers, now: datetime | None = None, *, force: bool = False) -> int | None:
-    """미국 활성 종목(CIK 있음)의 시가총액 순위 → stocks.cap_rank(상위 us_rank_pool개, 나머지 NULL).
+    """미국 활성 종목(CIK 있음)의 시가총액 순위 → stocks.cap_rank(상위 us_rank_pool개, 나머지 NULL)·cap_usd·share_ratio.
+    1) SEC 발행주식수 × 종가로 후보를 고른다(상위 pool × 4/3개 + 발행주식수가 비는 회사).
+    2) 후보는 yfinance 시총으로 바꾸고, SEC 기준과 20% 넘게 다르면 그 비율(share_ratio = SEC 원주 수 ÷ 상장 단위 주식수)을
+       남긴다 — 미국 밸류에이션(jobs.DERIVED_US_SQL)이 이 비율로 상장 단위 주식수를 쓴다(ADR, R4-3).
+    3) yfinance 값이 없으면 SEC 기준을 쓰되 최신 FY 총자산의 200배를 넘으면 뺀다(부푼 ADR).
     마지막으로 매긴 지 us_rank_days가 안 지났으면 하지 않고 None. 반환: 순위를 매긴 종목 수."""
     cfg, now = config(), now or datetime.now(timezone.utc)
     ref, batch = providers.us_reference, providers.us_batch_price
@@ -103,8 +112,9 @@ def rank_us(engine: Engine, providers: Providers, now: datetime | None = None, *
             WHERE m.country = 'US' AND s.is_active AND s.cik IS NOT NULL"""),
             {"since": now.date() - timedelta(days=10)}).all()
     shares = ref.get_shares_frame(now.date())
+    mc, pool = providers.us_market_cap, int(cfg.get("us_rank_pool", 1500))
     closes = {r.stock_id: r.close for r in rows if r.close}
-    missing = [r.stock_id for r in rows if not r.close and r.cik in shares]
+    missing = [r.stock_id for r in rows if not r.close and (r.cik in shares or mc is not None)]
     if missing:                                         # listed 종목은 일봉이 없어 묶음으로 최근 종가만
         with engine.connect() as conn:
             refs = stock_refs(conn, stock_ids=missing)
@@ -113,14 +123,43 @@ def rank_us(engine: Engine, providers: Providers, now: datetime | None = None, *
             bars = [b for b in got.get(r.ticker, []) if b.close]
             if bars:
                 closes[r.stock_id] = bars[-1].close
-    caps = {r.stock_id: Decimal(shares[r.cik]) * closes[r.stock_id] for r in rows if r.cik in shares and r.stock_id in closes}
-    ranked = sorted(caps, key=lambda s: (-caps[s], s))[:int(cfg.get("us_rank_pool", 1500))]
+    sec_caps = {r.stock_id: Decimal(shares[r.cik]) * closes[r.stock_id] for r in rows
+                if r.cik in shares and r.stock_id in closes}
+    caps, ratios = dict(sec_caps), {}
+    if mc is not None:
+        cand = sorted(sec_caps, key=lambda s: (-sec_caps[s], s))[:pool + pool // 3]
+        cand += [r.stock_id for r in rows if r.cik not in shares and r.stock_id in closes]   # 주식 종류 여럿(V·MA·BRK)
+        with engine.connect() as conn:
+            refs = stock_refs(conn, stock_ids=cand)
+            assets = dict(conn.execute(text("""
+                SELECT DISTINCT ON (f.stock_id) f.stock_id, f.total_assets FROM financial_statements f
+                WHERE f.stock_id = ANY(:ids) AND f.period_type = 'FY' AND f.total_assets > 0
+                ORDER BY f.stock_id, f.period_end DESC"""), {"ids": cand}).all())
+        got = mc.get_market_caps(refs)
+        yf = {r.stock_id: got[r.ticker] for r in refs if r.ticker in got}
+        for sid in cand:
+            if sid in yf:
+                caps[sid] = yf[sid]
+                if sid in sec_caps and not 1 / RATIO_TOLERANCE <= sec_caps[sid] / yf[sid] <= RATIO_TOLERANCE:
+                    ratios[sid] = (sec_caps[sid] / yf[sid]).quantize(Decimal("0.000001"))
+            elif sid in assets and sec_caps.get(sid, 0) > INFLATED_CAP_TO_ASSETS * assets[sid]:
+                caps.pop(sid, None)
+        log.info("미국 시가총액: 후보 %d · yfinance %d · 비율 %d · 부풀어 뺀 종목 %d", len(cand), len(yf), len(ratios),
+                 sum(1 for s in cand if s not in caps))
+    ranked = sorted(caps, key=lambda s: (-caps[s], s))[:pool]
     with engine.begin() as conn:
-        conn.execute(text("""UPDATE stocks s SET cap_rank = NULL, cap_ranked_at = :now FROM markets m
-                             WHERE m.market_id = s.market_id AND m.country = 'US'"""), {"now": now})
+        conn.execute(text("""UPDATE stocks s SET cap_rank = NULL, cap_usd = NULL, share_ratio = NULL, cap_ranked_at = :now
+                             FROM markets m WHERE m.market_id = s.market_id AND m.country = 'US'"""), {"now": now})
         if ranked:
-            conn.execute(text("UPDATE stocks SET cap_rank = :r WHERE stock_id = :s"),
-                         [{"r": i, "s": s} for i, s in enumerate(ranked, 1)])
+            conn.execute(text("UPDATE stocks SET cap_rank = :r, cap_usd = :c WHERE stock_id = :s"),
+                         [{"r": i, "c": caps[s].quantize(Decimal(1)), "s": s} for i, s in enumerate(ranked, 1)])
+        if ratios:
+            conn.execute(text("UPDATE stocks SET share_ratio = :r WHERE stock_id = :s"),
+                         [{"r": r, "s": s} for s, r in ratios.items()])
+        sample = conn.execute(text("""SELECT s.stock_id FROM stocks s JOIN markets m ON m.market_id = s.market_id
+                                      WHERE m.country = 'US' AND s.is_active AND s.coverage IN ('featured', 'benchmark')""")
+                              ).scalars().all()
+    jobs.derive_us_valuations(engine, list(sample))     # 비율이 바뀐 비교 표본의 시가총액·EPS·BPS를 바로 다시 계산
     return len(ranked)
 
 

@@ -59,6 +59,8 @@ erDiagram
         timestamptz industry_checked_at
         int cap_rank
         timestamptz cap_ranked_at
+        numeric cap_usd
+        numeric share_ratio
     }
     peer_groups {
         int group_id PK
@@ -344,7 +346,7 @@ FK가 없는 독립 테이블은 4개다.
 
 #### `stocks`
 
-`coverage`·`detail_synced_at`은 migration 003, 업종 4칸은 006, `listed` 허용은 005, `cap_rank`·`cap_ranked_at`은 009에서 추가했다.
+`coverage`·`detail_synced_at`은 migration 003, 업종 4칸은 006, `listed` 허용은 005, `cap_rank`·`cap_ranked_at`은 009, `cap_usd`·`share_ratio`는 017에서 추가했다.
 
 | 컬럼 | 타입 | NULL | 기본값/생성식 | 키 | 설명 |
 |---|---|---|---|---|---|
@@ -365,6 +367,8 @@ FK가 없는 독립 테이블은 4개다.
 | industry_checked_at | timestamp with time zone | Y |  |  | 업종 코드(KSIC·SIC)를 마지막으로 확인한 시각(1년마다 다시 확인) |
 | cap_rank | integer | Y |  |  | 국가 안 시가총액 순위(1 = 가장 큼). 미국 상위 1,500개만 값이 있다 — 백그라운드 재무 적재 우선순위용, 화면에는 쓰지 않음 (migration 009) |
 | cap_ranked_at | timestamp with time zone | Y |  |  | 순위를 매긴 시각(30일마다 다시 매김) |
+| cap_usd | numeric(20,0) | Y |  |  | 순위에 쓴 미국 시가총액(달러, yfinance — 없으면 SEC 발행주식수 × 종가, migration 017) |
+| share_ratio | numeric(14,6) | Y |  |  | SEC 발행주식수 ÷ 상장 단위 주식수(ADR·주식 종류 여럿, 1에서 20% 넘게 벗어날 때만). `CHECK (share_ratio > 0)` |
 
 제약: `CHECK ((cap_rank > 0))` / `CHECK (((coverage)::text = ANY ((ARRAY['featured'::character varying, 'benchmark'::character varying, 'listed'::character varying])::text[])))` / `UNIQUE (market_id, ticker)`
 
@@ -923,6 +927,7 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | `014_fin_currency.sql` | `financial_statements.currency`·`fx_rate`(재무 표시통화와 원화 환산 환율 — 09 2절, D-026) | 외화 공시 종목 `financials --tickers 241560` → `scores` |
 | `015_sanity_runs.sql` | `sanity_runs`(매력도 sanity 실행 기록 — 통과·감수한 실패·target 실패·미검증·required 실패, 결과 JSON·보고, D-030) | `sanity --save --env deploy`(배포 Job) |
 | `016_fin_collection.sql` | `financial_statements.filed_at`·`consolidated`·`notes`와 추가 계정 9개(영업현금흐름·총포괄이익·지분법손익·차입금·현금·영업권·무형자산·이자비용·비지배 순이익 — 09 2절, D-033·D-039) | `financials --scope sample`(비교 표본 한 경로 재수집 — FY 5·분기 20) → `scores` |
+| `017_us_cap.sql` | `stocks.cap_usd`(순위에 쓴 미국 시가총액 — yfinance)·`share_ratio`(SEC 발행주식수 ÷ 상장 단위 주식수, ADR·주식 종류 여럿 — 미국 밸류에이션이 나눠 씀, 09 2절, R4-3·R4-4) | 미국 순위(`background` 또는 `rank_us` force) → `benchmark --reselect` |
 
 **적용 순서 주의 (011·012)**: `migrate`는 마이그레이션 파일 뒤에 `views.sql` 전체를 다시 적용한다. `views.sql`의 `v_stock_theme`이 012에서 생기는 `peer_groups.sector`·`scoring`·`commodity_linked`를 읽기 때문에, **010 이하인 DB에서 011을 먼저 돌리면 뷰 단계에서 실패하고 011 전체가 롤백된다**(파일과 뷰가 한 트랜잭션). 그런 DB는 **012 → 011 순서**로 적용한다(둘 다 멱등이라 다시 돌려도 결과가 같다). 2026-10-26 배포 DB 적용 때 실제로 겪었다(troubleshooting 3).
 - 012 직후 `master`가 테마 38개를 맞춘다. `benchmark --reselect`가 업종 코드(국내 DART KSIC 약 2,500개 — 분당 45회라 약 1시간, 미국 SIC 약 6분)를 받은 뒤 비교군을 고른다. 이미 업종 코드를 받은 DB가 있으면 `stocks.ksic·sic·industry·industry_checked_at`을 시장+티커로 복사해 이 시간을 건너뛸 수 있다(2026-10-26 배포에서 로컬 값 4,089행 복사).

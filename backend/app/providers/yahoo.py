@@ -6,6 +6,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from app.providers.base import Bar, Financial, FxPoint, IndexRef, ProviderError, StockRef, Valuation
@@ -174,6 +175,24 @@ class YahooProvider:
             dps=to_dec(info.get("dividendRate") if info.get("dividendRate") is not None
                        else info.get("trailingAnnualDividendRate"), 4),
         )]
+
+    # --- 시가총액 (미국 순위·ADR 비율, 수정 4 R4-3·R4-4)
+    def get_market_caps(self, stocks: list[StockRef]) -> dict[str, Decimal]:
+        """티커 → yfinance 시가총액(달러, 상장 단위 기준 — ADR도 ADS 기준). 받지 못한 종목은 빠진다.
+        종목마다 요청 1번(약 0.5초)이라 순위를 매기는 30일마다 후보만 부른다."""
+        yf = _yf()
+        out: dict[str, Decimal] = {}
+        for st in stocks:
+            try:
+                info = call_with_retry(lambda: yf.Ticker(st.yf_symbol).info, throttle=_throttle,
+                                       what=f"yfinance info {st.yf_symbol}", retry_if=lambda i: not i)
+            except ProviderError as e:
+                log.warning("시가총액 실패 %s: %s", st.ticker, e)
+                continue
+            cap = to_dec(info.get("marketCap"), 0)
+            if cap and cap > 0 and (info.get("currency") or "USD") == "USD":
+                out[st.ticker] = cap
+        return out
 
     # --- 재무 보완 (연간 4개 기간)
     def get_annual_financials(self, stock: StockRef, years: int) -> list[Financial]:
