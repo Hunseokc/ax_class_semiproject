@@ -149,7 +149,34 @@ cases:
     assert "| NODB-scored | required | 확인 못함 | ZZZZ: 표본 밖(상장 종목 DB에 없음) |" in report
     assert "| CJ-LOGISTICS-history | required | 확인 못함 | 표본 밖(자동차 KR 상위 10 밖, cap_rank 808) |" in report
     assert not ok and ("⚠ required 표본 밖 미검증 4개 > 3 (OUT-growth, MIX-scored, NODB-scored, CJ-LOGISTICS-history)"
-                       " — 표본 안 종목으로 케이스를 바꿀 것(D-043)") in report
+                       " — 케이스를 다시 정할 것(D-043·D-044)") in report
+
+
+def test_sample_wide_rules_sec_tags_and_spinoff_no_target(engine, universe, tmp_path):  # noqa: F811
+    """D-044: SEC-tags-scored는 표본 전체 규칙(최신 FY 영업이익·순이익이 비어 점수 잃은 미국 종목 0개), SPINOFF-basis는 표본 안
+    대상이 0개면 '대상 없음' — 미검증이지만 표본 밖 경고에는 넣지 않고 '그 밖'으로 따로 적는다."""
+    from sqlalchemy import text
+    compute_scores(engine, as_of=D)
+    cases = tmp_path / "cases.yaml"
+    cases.write_text("""
+rules:
+  - {id: SEC-tags-scored, check: 표본 전체, status: required}
+  - {id: SPINOFF-basis, check: 분할 저평가 없음, status: required}
+""", encoding="utf-8")
+    with engine.connect() as conn:
+        report, ok = run(conn, cases)
+    assert ok and "| SEC-tags-scored | required | 통과 | 미국 표본 중 FY 재무가 있는 " in report and "점수 없음 0 []" in report
+    assert "| SPINOFF-basis | required | 확인 못함 | 대상 없음 — HON 비교군 아님(상장 종목 DB에 없음) |" in report
+    assert "required 미검증 구분: 표본 밖 0 [] · 그 밖(실행 환경·대상 없음 등) 1 ['SPINOFF-basis']" in report
+    with engine.begin() as conn:                   # 미국 종목 하나의 영업이익·순이익을 비우면 점수를 잃고 규칙이 잡는다
+        sid = conn.execute(text("""SELECT s.stock_id FROM stocks s JOIN markets m USING (market_id)
+                                   WHERE m.country = 'US' ORDER BY s.stock_id LIMIT 1""")).scalar()
+        conn.execute(text("UPDATE financial_statements SET operating_income = NULL, net_income = NULL WHERE stock_id = :s"),
+                     {"s": sid})
+    compute_scores(engine, as_of=D)
+    with engine.connect() as conn:
+        report, ok = run(conn, cases)
+    assert not ok and "| SEC-tags-scored | required | 실패 |" in report
 
 
 def test_classify_four_columns():

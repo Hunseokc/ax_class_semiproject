@@ -952,6 +952,15 @@ def rule_sec_op_path(d: Data):
                      f" · yfinance 보완 결산기가 있는 종목 {len(yf)} {yf[:10]}")
 
 
+def rule_sec_tags_scored(d: Data):
+    """표본 안 미국 일반 종목 중 FY 재무가 있는데 최신 FY 영업이익·순이익이 모두 비어 점수가 없는 종목 0개(R1-6, D-044).
+    미국 표본 재무는 SEC 한 경로다(D-039). 7종목 목록(SEC-tags-scored-list)은 표본이 바뀌면 밖으로 밀려 규칙으로 옮겼다."""
+    us = [s for s in d.general("US") if s.fins]
+    lost = sorted(s.ticker for s in us if not s.scored
+                  and s.fins[-1]["operating_income"] is None and s.fins[-1]["net_income"] is None)
+    return not lost, f"미국 표본 중 FY 재무가 있는 {len(us)}종목 · 최신 FY 영업이익·순이익이 비어 점수 없음 {len(lost)} {lost[:15]}"
+
+
 def rule_lp_equity(d: Data):
     """자본이 정확히 0인데 자산 − 부채가 0이 아니면 신고값 0(파트너십)을 그대로 쓴 것 — 0개여야 함(R4-9)."""
     bad = sorted({r.ticker for r in _sample_fy(d) if r.total_equity is not None and r.total_equity == 0
@@ -1009,13 +1018,15 @@ def rule_halted(d: Data):
 
 
 def case_spinoff(d: Data, c: dict):
-    """분할(config corporate_actions) 완료일이 최신 FY 결산일보다 뒤면 저평가 지표 없음 + 사유(R4-8 — HON)."""
+    """분할(config corporate_actions) 완료일이 최신 FY 결산일보다 뒤면 저평가 지표 없음 + 사유(R4-8 — HON).
+    표본 안 종목만 본다(D-044). 표본 안 대상이 0개면 '대상 없음'(미검증) — 종목이 표본 밖이어도 '표본 밖' 경고에는 넣지 않는다
+    (로직은 pytest가 검사한다)."""
     from app.ingest.universe import load_universe
     out, res = [], []
     for a in load_universe().corporate_actions:
         s = d.by_ticker(str(a["ticker"]), a["market"])
-        if s is None:
-            out.append(f"{a['ticker']} {d.outside(str(a['ticker']), a['market'])[1]}")
+        if s is None:          # '표본 밖(' 문구를 쓰지 않는다 — 경고는 종목 케이스의 표본 밖만 센다
+            out.append(f"{a['ticker']} 비교군 아님{d.outside(str(a['ticker']), a['market'])[1].removeprefix('표본 밖')}")
             continue
         end = s.fins[-1]["period_end"] if s.fins else None
         if end is not None and end >= a["date"]:
@@ -1026,7 +1037,9 @@ def case_spinoff(d: Data, c: dict):
         ok = not value and "분할" in reason and s.dq.get("score_null_code") == "corporate_action"
         res.append(ok)
         out.append(f"{s.ticker} 최신 FY {end} · 분할 {a['date']} · 저평가 지표 {value or '없음'} · {s.dq.get('score_null_code')}")
-    return (all(res) if res else None), " · ".join(out) or "분할 목록 없음"
+    if not res:
+        return None, "대상 없음" + (f" — {' · '.join(out)}" if out else " — 분할 목록 없음")
+    return all(res), " · ".join(out)
 
 
 SPECIAL = {
@@ -1078,6 +1091,7 @@ SPECIAL = {
     "MULTICLASS-ranked": rule_multiclass_ranked,
     "HALTED-not-scored": lambda d, c: rule_halted(d),
     "SPINOFF-basis": case_spinoff,
+    "SEC-tags-scored": lambda d, c: rule_sec_tags_scored(d),
     "PRICE-same-date": lambda d, c: rule_price_same_date(d),
     "R10-I1-consistent": lambda d, c: rule_r10_i1_consistent(d),
 }
@@ -1161,12 +1175,16 @@ def run(conn: Connection, cases_path: Path | None = None, as_of: date | None = N
              f" + 감수한 실패 {n['known_fail']}" + (f" · 미검증 {len(req_unverified)} ({', '.join(req_unverified)})" if req_unverified else "")
              + (f" · 실패 {n['required_fail']}" if n["required_fail"] else ""),
              ""]
-    # 종료 조건 2는 미검증을 실패로 보지 않지만, 표본 밖 미검증이 3개를 넘으면 표본 안 종목으로 케이스를 바꾼다(D-043).
-    # 실행 환경 때문에 못 본 것(DEPLOY-sanity-ran 등)은 종목을 바꿔 풀 수 없어 세지 않는다
-    req_outside = [r["id"] for r in rows if r["id"] in req_unverified and "표본 밖" in r["value"]]
+    # 종료 조건 2는 미검증을 실패로 보지 않지만, 표본 밖 미검증이 3개를 넘으면 케이스를 다시 정한다(D-043·D-044).
+    # 실행 환경 때문에 못 본 것(DEPLOY-sanity-ran 등)·대상 없음은 종목을 바꿔 풀 수 없어 따로 적고 경고에서 뺀다
+    req_outside = [r["id"] for r in rows if r["id"] in req_unverified and "표본 밖(" in r["value"]]
+    req_other = [i for i in req_unverified if i not in req_outside]
+    if req_unverified:
+        lines += [f"required 미검증 구분: 표본 밖 {len(req_outside)} {req_outside} · 그 밖(실행 환경·대상 없음 등) "
+                  f"{len(req_other)} {req_other}", ""]
     if len(req_outside) > 3:
         lines += [f"⚠ required 표본 밖 미검증 {len(req_outside)}개 > 3 ({', '.join(req_outside)}) — "
-                  "표본 안 종목으로 케이스를 바꿀 것(D-043)", ""]
+                  "케이스를 다시 정할 것(D-043·D-044)", ""]
     lines += ["| id | status | 결과 | 실제 값 |", "|---|---|---|---|"]
     lines += [f"| {r['id']} | {r['status']} | {r['result']} | {r['value'].replace('|', '/')} |" for r in rows]
     report, ok = "\n".join(lines), not kinds["required_fail"]
