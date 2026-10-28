@@ -34,27 +34,30 @@ class _Caps(CallLog):
 
 
 def test_rank_us_uses_yfinance_caps_records_adr_ratio_and_drops_inflated(engine, monkeypatch):
-    ids = list(range(201, 206))
+    ids = list(range(201, 207))
     with engine.begin() as conn:
         conn.execute(text("""INSERT INTO stocks (stock_id, market_id, ticker, name, coverage, cik)
                              VALUES (:i, 2, :t, :t, 'listed', :c)"""), [{"i": i, "t": f"U{i}", "c": f"{i:010d}"} for i in ids])
         conn.execute(text("""INSERT INTO financial_statements (stock_id, period_end, period_type, total_assets, data_source)
                              VALUES (205, '2025-12-31', 'FY', 10, 'SEC')"""))
-    monkeypatch.setattr(background, "config", lambda: {"us_rank_pool": 3, "us_rank_days": 30})
+    monkeypatch.setattr(background, "config", lambda: {"us_rank_pool": 6, "us_rank_days": 30})
     batch = FakeUsBatch()
-    batch.closes = {"U201": Decimal(50), "U202": Decimal(1), "U203": Decimal(20), "U204": Decimal(30), "U205": Decimal(100)}
-    ref = FakeReference(shares={"0000000201": 10, "0000000202": 1000, "0000000203": 100, "0000000205": 100})   # 204: 주식수 없음
-    caps = _Caps({"U201": 50, "U202": 1000, "U204": 3000})          # 203·205: yfinance 값 없음
+    batch.closes = {"U201": Decimal(50), "U202": Decimal(1), "U203": Decimal(20), "U204": Decimal(30), "U205": Decimal(100),
+                    "U206": Decimal(40)}
+    ref = FakeReference(shares={"0000000201": 10, "0000000202": 1000, "0000000203": 100, "0000000205": 100})   # 204·206: 주식수 없음
+    ref.files_us_reports = lambda cik: cik != "0000000206"          # 206: 20-F만 내는 해외 기업
+    caps = _Caps({"U201": 50, "U202": 1000, "U204": 3000, "U206": 5000})   # 203·205: yfinance 값 없음
     pv = replace(make_providers(), us_reference=ref, us_batch_price=batch, us_market_cap=caps)
-    assert background.rank_us(engine, pv) == 3
+    assert background.rank_us(engine, pv) == 4
     with engine.connect() as conn:
         got = {r.stock_id: (r.cap_rank, r.cap_usd, r.share_ratio) for r in conn.execute(text(
             "SELECT stock_id, cap_rank, cap_usd, share_ratio FROM stocks WHERE stock_id >= 201"))}
     assert got[204][:2] == (1, 3000)               # 주식 종류 여럿(SEC 발행주식수 없음)도 yfinance 시총으로 순위(R4-4)
     assert got[203][:2] == (2, 2000)               # yfinance 값이 없으면 SEC 원주 수 × 종가
     assert got[202] == (3, 1000, None)             # SEC 기준과 같으면 비율 없음
-    assert got[201] == (None, None, Decimal("10.000000"))   # ADR: SEC 500 ÷ yfinance 50 = 원주 10주 = 1 ADS(R4-3)
+    assert got[201] == (4, 50, Decimal("10.000000"))   # ADR: SEC 500 ÷ yfinance 50 = 원주 10주 = 1 ADS(R4-3)
     assert got[205][0] is None                     # SEC 기준 10,000이 총자산 10의 200배 초과 → 부푼 값으로 보고 뺌
+    assert got[206][0] is None                     # 시총 5,000이라도 20-F만 내면 순위에서 뺌(점수 없는 종목이 비교군 자리를 차지하지 않게)
 
 
 def test_derived_us_valuation_uses_listed_unit_shares(engine):
