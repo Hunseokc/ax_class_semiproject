@@ -198,14 +198,13 @@ def main(argv: list[str] | None = None) -> int:
         jobs.load_disclosures(engine, providers(), days=args.days, tickers=args.tickers)
     # ── [S3-D] 갱신 ──
     elif args.cmd == "refresh":
-        # 갱신 정책은 API(POST /market/refresh)와 같다: 작업별 TTL 이내면 SKIPPED
-        from app.api.deps import get_scorer
+        # 갱신 정책은 API(POST /market/refresh)와 같다: 작업별 TTL 이내면 SKIPPED. 점수는 07:00 benchmark에서만(R4-5)
         from app.services.fx import FxService
         from app.services.refresh import RefreshService
         from app.services.sectors import load_sectors
         pv = providers()
         ttl, fast = get_settings().refresh_ttl_hours, get_settings().refresh_fast_ttl_hours
-        result = RefreshService(engine, pv, FxService(engine, pv.fx, fast), ttl, scorer=get_scorer(),
+        result = RefreshService(engine, pv, FxService(engine, pv.fx, fast), ttl,
                                 sector_loader=load_sectors, fast_ttl_hours=fast).refresh()
         for j in result.jobs:
             print(f"{j.job_type:<10} {j.status:<8} {j.detail or ''}")

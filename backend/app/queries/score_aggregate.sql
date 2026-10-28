@@ -1,8 +1,9 @@
 -- 매력도 3단계(모델 v2): 프리셋별 팩터 점수·종합 점수·같은 시장 백분위 (stock_metric_values의 z_adj 사용)
--- 파라미터: as_of, w_metrics·w_values(팩터 안 지표 가중치 — 없으면 1), h_stocks·h_counts(종목별 이어지는 FY 수),
+-- 파라미터: as_of, w_metrics·w_values(팩터 안 지표 가중치 — 없으면 1), h_stocks·h_counts(종목별 쓸 수 있는 저평가 보수 규칙 수 0~2),
 --           required(필수 팩터), min_factors(유효 팩터 최소 수)
 --   팩터 F = 그 팩터 유효 지표 z_adj의 가중 평균 (안정성 = 변동성 2 · 부채/자산 1)
---   재무 FY가 3개 미만이면 저평가 F × (FY 수 / 3) — 이력이 짧아 보수 규칙(3년 평균·함정 신호)을 못 쓴 만큼 중립 쪽으로(D-010)
+--   저평가 보수 규칙(3년 평균 이익·가치 함정 신호)을 못 쓴 만큼 저평가 F를 중립 쪽으로: 0개 × 1/3, 1개 × 2/3(D-040 — D-010의
+--   'FY 수 / 3'은 FY 1·2개가 보수 규칙 면에서 같은데 축소율만 달랐다)
 --   국가·점수 묶음(family) 안에서 팩터마다 F를 평균 0·표본표준편차 1로 다시 표준화(Fs)
 --   종합 = Σ(w × Fs), 빠진 팩터는 0(중립). 필수 팩터(저평가·수익성)가 없거나 유효 팩터 < min_factors면 NULL
 --   점수 = 같은 국가·묶음·프리셋 안 백분위 100 × (n − 순위) / n — "상위 p%"(= 100 × 순위 / n)와 정확히 맞물린다(D-003).
@@ -14,7 +15,7 @@ WITH mw AS (
     SELECT * FROM unnest(CAST(:w_metrics AS text[]), CAST(:w_values AS numeric[])) AS x(metric, w)
 ),
 hist AS (
-    SELECT * FROM unnest(CAST(:h_stocks AS int[]), CAST(:h_counts AS int[])) AS x(stock_id, fy_count)
+    SELECT * FROM unnest(CAST(:h_stocks AS int[]), CAST(:h_counts AS int[])) AS x(stock_id, rules)
 ),
 f0 AS (
     SELECT mv.stock_id, mv.factor, SUM(COALESCE(mw.w, 1) * mv.z_adj) / SUM(COALESCE(mw.w, 1)) AS score
@@ -32,8 +33,8 @@ st AS (                               -- 지표 행이 있는 종목 = 점수 �
 ),
 f1 AS (
     SELECT f0.stock_id, f0.factor, st.country, st.family,
-           CASE WHEN f0.factor = 'value' AND COALESCE(h.fy_count, 0) < 3
-                THEN f0.score * COALESCE(h.fy_count, 0) / 3.0 ELSE f0.score END AS score
+           CASE WHEN f0.factor = 'value' AND COALESCE(h.rules, 0) < 2
+                THEN f0.score * (COALESCE(h.rules, 0) + 1) / 3.0 ELSE f0.score END AS score
     FROM f0
     JOIN st ON st.stock_id = f0.stock_id
     LEFT JOIN hist h ON h.stock_id = f0.stock_id

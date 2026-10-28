@@ -129,7 +129,13 @@ def metric_params(cfg: dict | None = None, stock_id: int | None = None) -> dict:
             "ca_dates": [a["date"] for a in acts], "ca_whats": [a["what"] for a in acts]}
 
 
-BADGE_FACTS = ("fy_end", "ni0", "oi0", "ni1", "oi1", "ni2", "oi2", "fy_count")   # score_metrics.sql이 주는 배지 재료
+BADGE_FACTS = ("fy_end", "ni0", "oi0", "ni1", "oi1", "ni2", "oi2", "fy_count", "value_rules")   # score_metrics.sql이 주는 배지 재료
+
+
+def value_shrink(rules: int | None) -> float:
+    """저평가 F 축소율(D-040): 보수 규칙(3년 평균 이익·가치 함정 신호) 중 쓸 수 있는 수 0 → 1/3, 1 → 2/3, 2 → 1."""
+    n = rules if rules is not None else 0
+    return 1.0 if n >= 2 else (n + 1) / 3
 
 
 def _net_over_operating(ni: float | None, oi: float | None) -> bool:
@@ -157,10 +163,12 @@ def score_badges(fact: dict, family: str, fiscal_mode: date | None) -> list[dict
         out.append({"code": "fiscal_gap", "label": "결산 시점 다름",
                      "detail": f"최신 연간 재무 결산 {end:%Y-%m} — 같은 시장 대부분({fiscal_mode:%Y-%m})과 약 {months}개월 차이라 "
                                f"업황 변화가 먼저(또는 늦게) 반영됩니다."})
-    n = fact.get("fy_count")
-    if n is not None and n < 3:
+    n, rules = fact.get("fy_count"), fact.get("value_rules")
+    if n is not None and (n < 3 or (rules is not None and rules < 2)):
+        k = 2 if rules is None else 2 - rules
         out.append({"code": "short_history", "label": "재무 이력 짧음",
-                    "detail": f"이어지는 연간 재무 {n}년 — 3년 평균·가치 함정 신호를 쓸 수 없어 저평가 점수를 {n}/3로 줄였습니다."})
+                    "detail": f"이어지는 연간 재무 {n}년 — 3년 평균 이익·가치 함정 신호 중 {k}개를 쓸 수 없어 "
+                              f"저평가 점수를 {round(3 * value_shrink(rules))}/3로 줄였습니다(D-040)."})
     return out
 
 
@@ -175,7 +183,8 @@ def fiscal_modes(facts: dict[int, dict], countries: dict[int, str]) -> dict[str,
 
 def insert_metric_values(conn: Connection, as_of: date, cfg: dict | None = None, facts: dict[int, dict] | None = None
                          ) -> tuple[dict[int, list[str]], dict[int, dict[str, str]], dict[int, int]]:
-    """1단계. 반환: (종목별 메모 — 대체 계산, 종목별 규칙으로 비운 지표 {metric: 사유}, 종목별 이어지는 FY 수).
+    """1단계. 반환: (종목별 메모 — 대체 계산, 종목별 규칙으로 비운 지표 {metric: 사유}, 종목별 쓸 수 있는 저평가 보수 규칙 수).
+    history 이름은 그대로 둔다 — D-040(수정 4) 전에는 이어지는 FY 수였다.
     facts를 주면 종목별 배지 재료(최신 FY 결산일·순이익·영업이익·FY 수)를 채운다."""
     rows = conn.execute(sql("score_metrics"), metric_params(cfg)).mappings().all()
     if rows:
@@ -186,9 +195,9 @@ def insert_metric_values(conn: Connection, as_of: date, cfg: dict | None = None,
     excluded: dict[int, dict[str, str]] = {}
     history: dict[int, int] = {}
     for r in rows:
-        history[r["stock_id"]] = r["fy_count"]
+        history[r["stock_id"]] = r["value_rules"]
         if facts is not None:
-            facts[r["stock_id"]] = {k: r[k] for k in BADGE_FACTS}
+            facts[r["stock_id"]] = {**{k: r[k] for k in BADGE_FACTS}, "price_date": r["price_date"]}
         if r["note"]:
             notes.setdefault(r["stock_id"], []).append(f"{r['metric']}: {r['note']}")
         if r["null_note"]:
@@ -217,7 +226,7 @@ def normalize(conn: Connection, as_of: date, k: float) -> None:
 
 
 def aggregate_params(as_of: date, history: dict[int, int] | None = None) -> dict:
-    """score_aggregate.sql 파라미터. history가 없으면 모든 종목을 이력 3년으로 본다(축소 없음)."""
+    """score_aggregate.sql 파라미터. history(종목 → 쓸 수 있는 저평가 보수 규칙 수)가 없으면 축소하지 않는다."""
     history = history or {}
     weighted = {k: m.weight for k, m in METRICS.items() if m.weight != 1}
     return {"as_of": as_of, "w_metrics": list(weighted), "w_values": list(weighted.values()),
@@ -276,7 +285,7 @@ def aggregate(conn: Connection, as_of: date, notes: dict[int, list[str]] | None 
               model_version: str | None = None, facts: dict[int, dict] | None = None) -> int:
     """3단계. 프리셋별 점수 → stock_scores. 반환: 생성 행 수."""
     if history is None:                                   # 단계별 테스트처럼 1단계를 건너뛰면 축소하지 않는다
-        history = {sid: 3 for sid in conn.execute(text("SELECT DISTINCT stock_id FROM stock_metric_values "
+        history = {sid: 2 for sid in conn.execute(text("SELECT DISTINCT stock_id FROM stock_metric_values "
                                                         "WHERE as_of = :d"), {"d": as_of}).scalars()}
     rows = conn.execute(sql("score_aggregate"), aggregate_params(as_of, history)).mappings().all()
     excluded = excluded or {}
@@ -290,8 +299,11 @@ def aggregate(conn: Connection, as_of: date, notes: dict[int, list[str]] | None 
     out = []
     for r in rows:
         dq: dict = {"partition": partition_label(r["country"], r["family"]), "family": r["family"],
-                    "fy_history": history.get(r["stock_id"])}
+                    "value_rules": history.get(r["stock_id"])}
         if r["stock_id"] in facts:
+            dq["fy_history"] = facts[r["stock_id"]].get("fy_count")
+            if facts[r["stock_id"]].get("price_date"):
+                dq["price_date"] = facts[r["stock_id"]]["price_date"].isoformat()
             mode = modes.get(r["country"])
             dq["badges"] = score_badges(facts[r["stock_id"]], r["family"], mode)
             dq["fiscal_mode"] = mode.isoformat() if mode else None

@@ -610,3 +610,20 @@ rules:
     issue: R4-8
     decision: D-039
     why: 분할 전 FY2025 이익 ÷ 분할 뒤 시총 — 분할 전 시총 기준이면 가치 45 → 106. HON 분할 완료 2026-06-29(8-K Item 2.01)
+
+  # ── 라운드 4 — 데이터 (수정 4 PR C 계산 규칙, D-039·D-040·D-041·D-042) ──
+  - id: PRICE-same-date
+    check: 같은 점수 계산일, 국가별 일반 묶음 점수 종목(거래정지 제외 — 점수 없음)이 쓴 최신 일봉 날짜(data_quality.price_date)가 하나
+    status: required
+    independent: true
+    issue: R4-5
+    decision: D-039
+    why: 배포 2026-10-28 점수 — 국내 노출 16종목 10-27, 비교군 280종목 10-26. 매시 갱신 Job이 4시간마다 점수를 다시 계산했다
+
+  - id: R10-I1-consistent
+    check: (기록만) R10 이상 중 I1이 이름 규칙으로만 잡혔을 칸 수(옛 정의)와 I3에서 3년 창 가장 오래된 해만 적자인 칸 수
+    status: target
+    independent: false
+    issue: R4-6
+    decision: D-041
+    why: 배포 19칸 중 이름 I1 3·오래된 해 I3 6, 개발 23칸 중 2·9. I1은 D-025 판정 목록으로 바꿨고(D-041), I3 처리는 S1·S2에서 정한다
