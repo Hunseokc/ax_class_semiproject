@@ -214,7 +214,8 @@ def test_select_benchmark_by_theme_and_market_cap(engine):
     kref = FakeKrReference({"C1": "2611", "C2": "26112", "C3": "64121", "C4": "68"})   # 반도체·반도체·은행·리츠
     uref = FakeReference(sic={"11": 3674, "12": 3674, "13": 3674})
     caps = {"100001": Decimal(10), "100002": Decimal(20), "100003": Decimal(5), "100004": Decimal(50)}
-    pv = replace(make_providers(), kr_reference=kref, us_reference=uref, kr_bulk=FakeKrBulk(caps=caps))
+    bulk = FakeKrBulk(tickers=set(caps) | {"005930", "000660"}, caps=caps)   # 그날 일봉에 없으면 거래정지(R4-7)
+    pv = replace(make_providers(), kr_reference=kref, us_reference=uref, kr_bulk=bulk)
 
     out = benchmark.select_benchmark(engine, pv, per_sector=3)
     with engine.connect() as conn:

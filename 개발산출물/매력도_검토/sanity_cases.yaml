@@ -27,10 +27,11 @@ cases:
   - id: SIRI-growth
     ticker: SIRI
     market: US
-    check: growth_rank > 50
+    check: growth_rank > 50 or not_scored
     status: required
     issue: P1
     why: 매출 3년 연속 감소, EPS 변화의 대부분이 전년 손실 항
+    # 수정 4 PR B: yfinance 시총 순위로 게임·엔터·미디어 US 상위 10 밖(cap_rank 808)이면 표본에 없음 — 순위가 부풀 위험이 없어 통과(LOTTE-HOLDINGS와 같은 방식)
 
   - id: RIVN-growth
     ticker: RIVN
@@ -235,10 +236,11 @@ cases:
   - id: SIRI-value
     ticker: SIRI
     market: US
-    check: value_rank > 20 and balanced_rank > 20
+    check: (value_rank > 20 and balanced_rank > 20) or not_scored
     status: required
     issue: P6, P8
     why: 합병 장부가 B/P 1.25, 매출 감소 가치 함정
+    # 수정 4 PR B: yfinance 시총 순위로 게임·엔터·미디어 US 상위 10 밖(cap_rank 808)이면 표본에 없음 — 순위가 부풀 위험이 없어 통과(LOTTE-HOLDINGS와 같은 방식)
 
   - id: KGSTEEL-value
     ticker: "016380"   # KG스틸
@@ -578,12 +580,13 @@ rules:
 
   # ── 라운드 4 — 데이터 (수정 4 PR B 표본·시총·분류, D-039·D-036·D-042) ──
   - id: ADR-mcap-sane
-    check: 미국 cap_rank 상위 300 안 종목(재무가 있는 종목)은 최신 FY 매출 ≥ 1억 달러이고 순위에 쓴 시가총액 ÷ 총자산 ≤ 200
+    check: 미국 cap_rank 상위 300 안 종목(재무가 있는 종목)은 순위에 쓴 시가총액 ÷ 총자산 ≤ 200 (최신 FY 매출 1억 달러 미만은 기록만)
     status: required
     independent: true
     issue: R4-3
     decision: D-039
     why: AKTX(매출 0) 시총 1.19조 달러로 cap_rank 16 → 미국 제약 비교군. 동료 7종목 5~36계단 위로
+    # 라운드 4 제안의 '매출 ≥ 1억 달러'는 매출 없는 바이오(RVMD — yfinance 시총 399억·총자산의 17배, cap_rank 294)를 잡아 기록만으로(수정 4 측정)
 
   - id: MULTICLASS-ranked
     ticker: [V, MA, BRK-B, CMCSA, NKE, UPS, ACN]
