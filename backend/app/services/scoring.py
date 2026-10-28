@@ -120,9 +120,13 @@ def partition_label(country: str, family: str) -> str:
 
 
 def metric_params(cfg: dict | None = None, stock_id: int | None = None) -> dict:
-    """score_metrics.sql 파라미터."""
+    """score_metrics.sql 파라미터. ca_*: 최신 FY 결산 뒤 분할·대규모 매각(config/universe.yaml corporate_actions, R4-8)."""
+    from app.ingest.universe import load_universe      # 순환 import 방지
     cfg = cfg or load_config()
-    return {"stock_id": stock_id, "after_tax": float(cfg["after_tax"])}
+    acts = load_universe().corporate_actions
+    return {"stock_id": stock_id, "after_tax": float(cfg["after_tax"]),
+            "ca_tickers": [str(a["ticker"]) for a in acts], "ca_countries": [a["market"] for a in acts],
+            "ca_dates": [a["date"] for a in acts], "ca_whats": [a["what"] for a in acts]}
 
 
 BADGE_FACTS = ("fy_end", "ni0", "oi0", "ni1", "oi1", "ni2", "oi2", "fy_count")   # score_metrics.sql이 주는 배지 재료
@@ -237,6 +241,19 @@ def theme_positions(conn, as_of: date, country: str, family: str) -> dict[int, d
 
 
 NO_FINANCIALS = "재무 정보가 없어 표기할 수 없습니다"
+HALTED_NOTE, ACTION_NOTE = "거래 정지 — ", "— 분할 전 재무를"     # score_metrics.sql null_note — 표본에서 빼는 종목(D-039)
+
+
+def excluded_reason(notes: dict[str, str]) -> tuple[str, str] | None:
+    """규칙으로 비운 지표 사유에서 '표본에서 빼는 종목'의 코드와 문구(09 2절). 해당 없으면 None."""
+    halted = next((n for n in notes.values() if n.startswith(HALTED_NOTE)), None)
+    if halted:
+        return "halted", f"{halted.removeprefix(HALTED_NOTE)} — 거래가 멈춰 매력도를 계산하지 않습니다"
+    action = next((n for n in notes.values() if ACTION_NOTE in n), None)
+    if action:
+        return "corporate_action", (f"{action.split(' — ')[0]} — 분할 전 재무를 분할 뒤 시총과 나눌 수 없어 "
+                                    "다음 연차 재무까지 매력도를 계산하지 않습니다")
+    return None
 
 
 FINANCIAL_PROFILE = ("금융 업종(은행·보험·증권)은 회계 구조가 서로 달라 종합 매력도 점수·순위를 내지 않습니다 — "
@@ -286,7 +303,9 @@ def aggregate(conn: Connection, as_of: date, notes: dict[int, list[str]] | None 
         if unavailable:
             dq["unavailable_factors"] = unavailable
         if r["composite"] is None:
-            dq["score_null_code"], dq["score_null_reason"] = null_reason(r["factor_coverage"], r["has_required"], r["family"])
+            dq["score_null_code"], dq["score_null_reason"] = (
+                excluded_reason(excluded.get(r["stock_id"], {}))
+                or null_reason(r["factor_coverage"], r["has_required"], r["family"]))
         if notes and r["stock_id"] in notes:
             dq["notes"] = notes[r["stock_id"]]
         out.append({**r, "as_of": as_of, "dq": json.dumps(dq, ensure_ascii=False)})

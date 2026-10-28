@@ -6,6 +6,8 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
+from time import sleep
 from zoneinfo import ZoneInfo
 
 from app.providers.base import Bar, Financial, FxPoint, IndexRef, ProviderError, StockRef, Valuation
@@ -17,6 +19,7 @@ _throttle = Throttle(0.7)
 SEOUL = ZoneInfo("Asia/Seoul")
 FX_SYMBOL = "KRW=X"
 BATCH = 100                      # 묶음 다운로드 한 번의 종목 수
+CAP_RETRY_PASS_WAIT = 60         # 시가총액 실패 종목을 다시 부르기 전 쉬는 초
 
 
 def _yf():
@@ -174,6 +177,37 @@ class YahooProvider:
             dps=to_dec(info.get("dividendRate") if info.get("dividendRate") is not None
                        else info.get("trailingAnnualDividendRate"), 4),
         )]
+
+    # --- 시가총액 (미국 순위·ADR 비율, 수정 4 R4-3·R4-4)
+    def get_market_caps(self, stocks: list[StockRef]) -> dict[str, Decimal]:
+        """티커 → yfinance 시가총액(달러, 상장 단위 기준 — ADR도 ADS 기준). 받지 못한 종목은 빠진다.
+        종목마다 요청 1번(약 0.5초)이라 순위를 매기는 30일마다 후보만 부른다.
+        Yahoo가 401(Invalid Crumb)이면 yfinance는 예외 대신 {'trailingPegRatio': None}을 돌려준다 — 정상 응답에는 늘 있는
+        quoteType이 없으면 실패로 보고 재시도하고, 그래도 실패한 종목은 잠시 쉰 뒤 한 번 더 부른다(차단이 몇 분 이어짐)."""
+        yf = _yf()
+        out: dict[str, Decimal] = {}
+        todo = list(stocks)
+        for wait in (0, CAP_RETRY_PASS_WAIT):
+            if not todo:
+                break
+            if wait:
+                log.warning("시가총액 %d종목 실패 — %ds 뒤 한 번 더", len(todo), wait)
+                sleep(wait)
+            failed = []
+            for st in todo:
+                try:
+                    info = call_with_retry(lambda: yf.Ticker(st.yf_symbol).info, throttle=_throttle,
+                                           what=f"yfinance info {st.yf_symbol}", retry_if=lambda i: "quoteType" not in i)
+                except ProviderError:
+                    failed.append(st)
+                    continue
+                cap = to_dec(info.get("marketCap"), 0)
+                if cap and cap > 0 and (info.get("currency") or "USD") == "USD":
+                    out[st.ticker] = cap
+            todo = failed
+        if todo:
+            log.warning("시가총액 끝내 실패 %d종목: %s", len(todo), ", ".join(st.ticker for st in todo[:30]))
+        return out
 
     # --- 재무 보완 (연간 4개 기간)
     def get_annual_financials(self, stock: StockRef, years: int) -> list[Financial]:
