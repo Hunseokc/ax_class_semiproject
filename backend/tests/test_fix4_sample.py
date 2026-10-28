@@ -60,6 +60,35 @@ def test_rank_us_uses_yfinance_caps_records_adr_ratio_and_drops_inflated(engine,
     assert got[206][0] is None                     # 시총 5,000이라도 20-F만 내면 순위에서 뺌(점수 없는 종목이 비교군 자리를 차지하지 않게)
 
 
+def test_yahoo_market_caps_retry_crumb_failure(monkeypatch):
+    """401(Invalid Crumb)이면 yfinance가 {'trailingPegRatio': None}을 돌려준다 — 실패로 보고 다시 불러 V·META가 순위에서 빠지지 않게."""
+    from types import SimpleNamespace
+
+    from app.providers import http, yahoo
+    from app.providers.http import Throttle
+    calls: dict[str, int] = {}
+    blocked = {"V": 5, "META": 1}                  # V: 첫 바퀴 재시도 4번이 모두 막힘 → 둘째 바퀴에서 받음
+
+    class Ticker:
+        def __init__(self, sym):
+            self.sym = sym
+
+        @property
+        def info(self):
+            calls[self.sym] = calls.get(self.sym, 0) + 1
+            if calls[self.sym] <= blocked.get(self.sym, 0):
+                return {"trailingPegRatio": None}
+            return {"quoteType": "EQUITY", "marketCap": 1000, "currency": "USD"}
+
+    monkeypatch.setattr(yahoo, "_yf", lambda: SimpleNamespace(Ticker=Ticker))
+    monkeypatch.setattr(yahoo, "_throttle", Throttle(0))
+    monkeypatch.setattr(yahoo, "CAP_RETRY_PASS_WAIT", 0)
+    monkeypatch.setattr(http, "BACKOFF_BASE", 0)
+    refs = [SimpleNamespace(ticker=t, yf_symbol=t) for t in ("V", "META", "MA")]
+    assert yahoo.YahooProvider().get_market_caps(refs) == {"V": Decimal(1000), "META": Decimal(1000), "MA": Decimal(1000)}
+    assert calls == {"V": 6, "META": 2, "MA": 1}
+
+
 def test_derived_us_valuation_uses_listed_unit_shares(engine):
     with engine.begin() as conn:
         conn.execute(text("UPDATE stocks SET share_ratio = 10 WHERE stock_id = 3"))
@@ -103,12 +132,15 @@ def test_select_benchmark_skips_halted_and_zero_volume(engine, universe):  # noq
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM daily_prices WHERE stock_id = 8 AND trade_date > :d"), {"d": D - timedelta(days=40)})
 
+        kr = conn.execute(text("SELECT s.ticker FROM stocks s JOIN markets m USING (market_id) WHERE m.country = 'KR'")).scalars().all()
+
     class Bulk(CallLog):
         source = "FAKE"
 
         def get_bars_by_date(self, day):
             from app.providers.base import Bar
-            return {"000660": Bar(day, 1, 1, 1, 1, 0), "005930": Bar(day, 1, 1, 1, 1, 10)}   # SK하이닉스 거래량 0
+            # 실제 kr_bulk는 거래정지 행(시가 0·거래량 0)을 빼고 돌려준다 — SK하이닉스는 그날 일봉에 없음
+            return {t: Bar(day, 1, 1, 1, 1, 10) for t in kr if t != "000660"}
 
     halted = benchmark.halted_ids(engine, replace(make_providers(), kr_bulk=Bulk()))
     assert halted == {8, 2}

@@ -118,7 +118,9 @@ WHERE lp.trade_date < c.trade_date"""
 
 
 def halted_ids(engine: Engine, providers: Providers) -> set[int]:
-    """비교군에서 뺄 거래정지 종목: DB 마지막 일봉이 20거래일 넘게 앞섬 + 국내는 최근 거래일 전 종목 일봉의 거래량 0."""
+    """비교군에서 뺄 거래정지 종목: DB 마지막 일봉이 20거래일 넘게 앞섬 + 국내는 최근 거래일 전 종목 일봉에 없음.
+    거래정지 행(시가 0·거래량 0)은 kr_bulk가 빼고 돌려주므로 '없음'으로 본다(유니슨 — 10-15부터 정지, 20거래일 전이라
+    DB 기준으로는 아직 안 잡힘). 선정 후보(KRX 시가총액이 있는 주식)에만 쓰여 ETF 등이 섞여도 영향 없다."""
     with engine.connect() as conn:
         out = set(conn.execute(text(HALTED_SQL)).scalars())
         kr = dict(conn.execute(text("""SELECT s.ticker, s.stock_id FROM stocks s JOIN markets m ON m.market_id = s.market_id
@@ -132,7 +134,7 @@ def halted_ids(engine: Engine, providers: Providers) -> set[int]:
                 log.warning("국내 일봉 조회 실패 %s: %s", day - timedelta(days=back), e)
                 continue
             if bars:
-                out |= {kr[t] for t, b in bars.items() if t in kr and not b.volume}
+                out |= {sid for t, sid in kr.items() if t not in bars or not bars[t].volume}
                 break
     return out
 

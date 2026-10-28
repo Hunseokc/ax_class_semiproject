@@ -890,8 +890,9 @@ def rule_lp_equity(d: Data):
 
 # ── 라운드 4 데이터 (수정 4 PR B, D-039·D-036) — 표본·시가총액 ──
 def rule_adr_mcap(d: Data):
-    """미국 시가총액 순위 상위 300 중 재무가 있는 종목은 최신 FY 매출 ≥ 1억 달러이고 순위에 쓴 시가총액 ÷ 총자산 ≤ 200
-    (AKTX — 매출 0인데 SEC 원주 수 × ADS 종가로 1.19조 달러·cap_rank 16, R4-3). 재무가 없는 상장 목록 종목은 셀 수 없어 따로 적는다."""
+    """미국 시가총액 순위 상위 300 중 재무가 있는 종목은 순위에 쓴 시가총액 ÷ 총자산 ≤ 200
+    (AKTX — 매출 0인데 SEC 원주 수 × ADS 종가로 1.19조 달러·cap_rank 16, R4-3). 매출 1억 달러 미만은 기록만 — 매출 없는
+    바이오(RVMD: yfinance 시총 399억·총자산의 17배)는 부푼 값이 아니다. 재무가 없는 상장 목록 종목은 셀 수 없어 따로 적는다."""
     rows = d.conn.execute(text("""
         SELECT s.ticker, s.cap_rank, s.cap_usd, f.revenue, f.total_assets
         FROM stocks s JOIN markets m ON m.market_id = s.market_id
@@ -902,10 +903,13 @@ def rule_adr_mcap(d: Data):
     if not rows or all(r.cap_usd is None for r in rows):
         return None, "시가총액 순위(cap_usd)가 아직 없음 — background 순위 뒤 확인"
     checked = [r for r in rows if r.total_assets is not None and r.cap_usd is not None]
-    bad = [f"{r.ticker}(#{r.cap_rank} 매출 {0 if r.revenue is None else float(r.revenue) / 1e8:.1f}억·시총/자산 "
-           f"{float(r.cap_usd / r.total_assets):.0f})" for r in checked
-           if r.revenue is None or r.revenue < 1e8 or r.cap_usd > 200 * r.total_assets]
-    return not bad, f"상위 300 중 재무 있는 {len(checked)}종목 확인 · 위반 {len(bad)} {bad[:8]} · 재무 없어 못 봄 {len(rows) - len(checked)}"
+    def show(r):
+        return (f"{r.ticker}(#{r.cap_rank} 매출 {0 if r.revenue is None else float(r.revenue) / 1e8:.1f}억·시총/자산 "
+                f"{float(r.cap_usd / r.total_assets):.0f})")
+    bad = [show(r) for r in checked if r.cap_usd > 200 * r.total_assets]
+    low = [show(r) for r in checked if r.revenue is None or r.revenue < 1e8]
+    return not bad, (f"상위 300 중 재무 있는 {len(checked)}종목 확인 · 위반 {len(bad)} {bad[:8]} · 매출 1억 달러 미만(기록만) "
+                     f"{len(low)} {low[:8]} · 재무 없어 못 봄 {len(rows) - len(checked)}")
 
 
 def rule_multiclass_ranked(d: Data, c: dict):
