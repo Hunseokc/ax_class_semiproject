@@ -18,6 +18,7 @@
 --   추가 기능 4-3: stocks.cap_rank·cap_ranked_at(미국 시가총액 순위) — 기존 DB는 009_cap_rank
 --   2차 로그인: users.email·password_hash·google_sub·last_login_at·last_seen_at, user_preferences — 기존 DB는 011_auth
 --   2차 테마 분류: stocks.ksic, peer_groups.sector·scoring·commodity_linked, indices.category·unit — 기존 DB는 012_themes
+--   수정 4 재무 수집: financial_statements.filed_at·consolidated·notes + 추가 계정 9개 — 기존 DB는 016_fin_collection
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -277,6 +278,19 @@ CREATE TABLE financial_statements (
   accounting_std   VARCHAR(20),                                  -- K-IFRS / US-GAAP
   currency         VARCHAR(3),                                   -- 공시 표시통화(KRW·USD). 금액은 시장 통화로 환산해 저장(migration 014, D-026)
   fx_rate          NUMERIC(12,4) CONSTRAINT ck_fin_fx_rate CHECK (fx_rate > 0),   -- 환산에 쓴 결산일 환율(원화 공시면 NULL)
+  -- 수정 4(migration 016, D-033·D-039): 제출일·연결 구분·수집 경로와 추가 계정(점수에는 아직 쓰지 않음 — M1 측정용)
+  filed_at             DATE,                                     -- 그 결산기 값이 처음 공시된 보고서 제출일
+  consolidated         BOOLEAN,                                  -- 연결 true / 별도 false
+  notes                TEXT,                                     -- path=DART_API·SEC_API·YFINANCE…, 대체 계정·전기값
+  operating_cf         NUMERIC(24,2),                            -- 영업활동 현금흐름
+  comprehensive_income NUMERIC(24,2),                            -- 총포괄이익(지배 우선)
+  equity_method_income NUMERIC(24,2),                            -- 지분법손익
+  borrowings           NUMERIC(24,2),                            -- 차입금·사채 합계(리스부채 제외)
+  cash                 NUMERIC(24,2),                            -- 현금및현금성자산
+  goodwill             NUMERIC(24,2),                            -- 영업권(따로 표시할 때만)
+  intangibles          NUMERIC(24,2),                            -- 무형자산(영업권 포함 합계)
+  interest_expense     NUMERIC(24,2),                            -- 이자비용(국내는 없으면 현금흐름표 이자 지급액)
+  nci_net_income       NUMERIC(24,2),                            -- 비지배지분 순이익
   UNIQUE (stock_id, period_end, period_type)
 );
 

@@ -544,3 +544,30 @@ rules:
     issue: U-2
     decision: D-024
     why: 새로 상위에 오른 종목의 분류를 라운드마다 사람이 확인하게 함
+
+  # ── 라운드 4 — 데이터 (수정 4 PR A 수집, D-039·D-042) ──
+  - id: DATA-dart-fy-path
+    ticker: ["462870", "439260", "139480"]      # 시프트업·대한조선·이마트 — 라운드 4에서 DB마다 FY 수가 갈린 종목
+    market: KR
+    check: 국내 비교 표본 FY 행이 모두 API 한 경로(notes path=DART_API)이고, 최근 5년 창 안에서 빠진 해는 '직전 연도 없음'(보고서·전기값 모두 없음) 사유가 있을 때만
+    status: required        # 라운드 4 제안은 target — D-042가 PR A에서 required로
+    independent: true
+    issue: R4-1
+    decision: D-039
+    why: 같은 날 개발(API, 전기값 채움)·배포(벌크, 당기만) DB의 FY 수가 15종목에서 달라 대한조선 가치 14 ↔ 42, 시프트업 위험 5 ↔ 87
+
+  - id: DATA-sec-op-path
+    check: 미국 비교 표본 FY 행이 모두 현재 코드 경로(notes path=SEC_API, 보완 행은 YFINANCE)로 쓴 값 — 경로 기록이 없는 옛 행 0개
+    status: required        # 라운드 4 제안은 target — D-042가 PR A에서 required로
+    independent: true
+    issue: R4-2
+    decision: D-039
+    why: 배포 DB 27/288종목이 이전 경로 값(JNJ 2025 255.96억 vs 335.52억, NEM 2023 +7.08억 vs −20.31억 달러). 실행기는 외부를 부르지 않으므로 '다시 받은 값과 5% 안'을 '현재 코드가 쓴 행'으로 확인한다
+
+  - id: LP-equity-not-zero
+    check: 비교 표본 FY 자본이 정확히 0이면서 자산 − 부채가 0이 아닌 종목 0개
+    status: required        # 라운드 4 제안은 target — D-042가 PR A에서 required로
+    independent: true
+    issue: R4-9
+    decision: D-039
+    why: EPD 자본 0.00(자산 − 부채 306억 달러) → '자본 음수(자사주 매입 등)' 사유

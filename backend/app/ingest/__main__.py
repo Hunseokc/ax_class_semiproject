@@ -8,7 +8,8 @@
     python -m app.ingest indices [--full]
     python -m app.ingest fx [--full]         # USD/KRW DAILY
     python -m app.ingest valuation [--full] [--tickers 005930 AAPL]   # 국내 pykrx 일별, 미국 yfinance 스냅샷
-    python -m app.ingest financials [--years 5] [--tickers 005930 AAPL]   # FY 재무 (국내 DART, 미국 SEC)
+    python -m app.ingest financials [--years 5] [--tickers 005930 AAPL]   # FY 재무 (국내 DART, 미국 SEC) + 비교 표본은 분기 20개
+    python -m app.ingest financials --scope sample [--part 1/2]   # 비교 표본 전체를 한 경로로 다시 받기(D-039, 수정 4)
     python -m app.ingest disclosures [--days 365] [--tickers 005930]      # 최근 공시
     python -m app.ingest all                 # master → prices → indices → fx → financials → valuation → disclosures
     python -m app.ingest scores              # 매력도 점수 재생성 (오늘 as_of, DELETE 후 INSERT)
@@ -106,6 +107,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("financials")
     p.add_argument("--years", type=int, default=jobs.FIN_YEARS)
     p.add_argument("--tickers", nargs="*")
+    p.add_argument("--scope", choices=["sample"], help="sample: 활성 노출 종목 + 비교군 전체(재수집)")
+    p.add_argument("--country", choices=["KR", "US"], help="--scope와 함께: 한 국가만")
+    p.add_argument("--part", help="--scope와 함께: i/n — 종목 id 순서로 n등분한 i번째(국내 DART 호출을 프로세스 n개로 나눔)")
     p = sub.add_parser("disclosures")
     p.add_argument("--days", type=int, default=jobs.DISCLOSURE_DAYS)
     p.add_argument("--tickers", nargs="*")
@@ -175,7 +179,21 @@ def main(argv: list[str] | None = None) -> int:
         print(seed_demo(engine, providers()))
     # ── [S3-B] 재무·공시 ──
     elif args.cmd == "financials":
-        jobs.load_financials(engine, providers(), years=args.years, tickers=args.tickers)
+        ids = None
+        if args.scope == "sample":
+            with engine.connect() as conn:
+                ids = conn.execute(text("""
+                    SELECT s.stock_id FROM stocks s JOIN markets m ON m.market_id = s.market_id
+                    WHERE s.is_active AND s.coverage IN ('featured', 'benchmark') AND (CAST(:c AS text) IS NULL OR m.country = :c)
+                    ORDER BY s.stock_id"""), {"c": args.country}).scalars().all()
+            if args.part:
+                i, n = (int(x) for x in args.part.split("/"))
+                ids = ids[i - 1::n]
+        if ids is not None and not ids:
+            raise SystemExit("대상 종목 없음")
+        st = jobs.load_financials(engine, providers(), years=args.years, tickers=args.tickers, stock_ids=ids)
+        print(f"성공 {sum(v == 'SUCCESS' for v in st.values())} / {len(st)}",
+              "실패:", [k for k, v in st.items() if v != "SUCCESS"][:30])
     elif args.cmd == "disclosures":
         jobs.load_disclosures(engine, providers(), days=args.days, tickers=args.tickers)
     # ── [S3-D] 갱신 ──

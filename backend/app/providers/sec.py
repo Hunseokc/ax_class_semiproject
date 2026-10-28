@@ -7,13 +7,15 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime
+from collections.abc import Callable
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import httpx
 
 from app.core.config import get_settings
-from app.providers.base import Disclosure, Financial, Listing, ProviderError, StockRef, ValuationBase
+from app.providers.base import (Disclosure, Financial, ForeignFilerError, Listing, ProviderError, StockRef,
+                                ValuationBase)
 from app.providers.convert import to_dec
 from app.providers.http import Throttle, call_with_retry
 
@@ -31,8 +33,10 @@ CONCEPTS: list[tuple[str, tuple[str, ...], bool]] = [
     # 지배주주 순이익 우선. 비지배 포함 순이익(ProfitLoss)은 지배주주 값을 신고하지 않는 해만(OSK·AEIS — D-010)
     ("net_income", ("NetIncomeLoss", "NetIncomeLossAvailableToCommonStockholdersBasic", "ProfitLoss"), True),
     ("total_assets", ("Assets",), False),
-    ("total_equity", ("StockholdersEquity",
-                      "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"), False),
+    # 파트너십(EPD)은 StockholdersEquity 대신 PartnersCapital로 신고한다(R4-9). 비지배 포함 값은 지배 값이 없을 때만
+    ("total_equity", ("StockholdersEquity", "PartnersCapital",
+                      "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+                      "PartnersCapitalIncludingPortionAttributableToNoncontrollingInterest"), False),
     ("total_debt", ("Liabilities",), False),
 ]
 # 기본 개념이 없을 때 계산으로 채우는 데 쓰는 보조 개념 (derive_missing, D-010 — CLX·EMN·GTX는 영업이익 태그가 없다)
@@ -41,9 +45,35 @@ AUX_CONCEPTS: list[tuple[str, tuple[str, ...], bool]] = [
                 "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"), True),
     ("interest", ("InterestExpense", "InterestExpenseNonoperating", "InterestExpenseDebt", "InterestAndDebtExpense"), True),
     ("liabilities_and_equity", ("LiabilitiesAndStockholdersEquity",), False),
-    ("equity_with_nci", ("StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",), False),
+    ("equity_with_nci", ("StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+                         "PartnersCapitalIncludingPortionAttributableToNoncontrollingInterest"), False),
+]
+# 수정 4(D-033) 추가 계정 — 점수에는 아직 쓰지 않는다(측정 라운드 M1 입력). 대체 개념 순서는 CONCEPTS와 같은 방식
+EXTRA_CONCEPTS: list[tuple[str, tuple[str, ...], bool]] = [
+    ("operating_cf", ("NetCashProvidedByUsedInOperatingActivities",
+                      "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"), True),
+    ("comprehensive_income", ("ComprehensiveIncomeNetOfTax",
+                              "ComprehensiveIncomeNetOfTaxIncludingPortionAttributableToNoncontrollingInterest"), True),
+    ("equity_method_income", ("IncomeLossFromEquityMethodInvestments",), True),
+    ("cash", ("CashAndCashEquivalentsAtCarryingValue",
+              "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"), False),
+    ("goodwill", ("Goodwill",), False),
+    ("interest_expense", ("InterestExpense", "InterestExpenseNonoperating", "InterestExpenseDebt",
+                          "InterestAndDebtExpense"), True),
+    ("nci_net_income", ("NetIncomeLossAttributableToNoncontrollingInterest",), True),
+]
+# 합계로 만드는 추가 계정의 재료(derive_extra): 무형자산(영업권 포함), 차입금·사채(리스부채 제외)
+PART_CONCEPTS: list[tuple[str, tuple[str, ...], bool]] = [
+    ("intangibles_total", ("IntangibleAssetsNetIncludingGoodwill",), False),
+    ("intangibles_other", ("IntangibleAssetsNetExcludingGoodwill", "FiniteLivedIntangibleAssetsNet"), False),
+    ("ltd_total", ("LongTermDebt",), False),
+    ("ltd_noncurrent", ("LongTermDebtNoncurrent",), False),
+    ("ltd_current", ("LongTermDebtCurrent",), False),
+    ("short_debt", ("ShortTermBorrowings", "CommercialPaper"), False),
 ]
 ANNUAL_FORMS = {"10-K", "10-K/A"}
+QUARTER_FORMS = {"10-Q", "10-Q/A", "10-K", "10-K/A"}
+FOREIGN_FORMS = {"20-F", "20-F/A", "40-F", "40-F/A"}     # 해외 기업 연차 보고서 — 재무를 받지 않는다(D-014)
 
 
 def derive_missing(vals: dict, aux: dict, notes: list[str]) -> None:
@@ -57,6 +87,25 @@ def derive_missing(vals: dict, aux: dict, notes: list[str]) -> None:
     if vals.get("total_debt") is None and aux.get("liabilities_and_equity") is not None and equity is not None:
         vals["total_debt"] = aux["liabilities_and_equity"] - equity
         notes.append("total_debt←부채와자본총계−자본")
+
+
+def derive_extra(vals: dict, parts: dict, notes: list[str]) -> None:
+    """추가 계정 합계(제자리 수정). 무형자산 = 영업권 포함 합계(없으면 영업권 + 영업권 외 무형자산),
+    차입금·사채 = 장기부채(유동 포함 — 없으면 비유동 + 유동) + 단기차입금(없으면 기업어음)."""
+    if parts.get("intangibles_total") is not None:
+        vals["intangibles"] = parts["intangibles_total"]
+    elif parts.get("intangibles_other") is not None or vals.get("goodwill") is not None:
+        vals["intangibles"] = (parts.get("intangibles_other") or 0) + (vals.get("goodwill") or 0)
+        notes.append("intangibles←영업권+영업권 외 무형자산")
+    long, how = parts.get("ltd_total"), ["LongTermDebt"]
+    if long is None and (parts.get("ltd_noncurrent") is not None or parts.get("ltd_current") is not None):
+        long = (parts.get("ltd_noncurrent") or 0) + (parts.get("ltd_current") or 0)
+        how = [c for c in ("LongTermDebtNoncurrent", "LongTermDebtCurrent")
+               if parts.get("ltd_" + c.removeprefix("LongTermDebt").lower()) is not None]
+    short = parts.get("short_debt")
+    if long is not None or short is not None:
+        vals["borrowings"] = (long or 0) + (short or 0)
+        notes.append("borrowings=" + "+".join((how if long is not None else []) + (["단기차입금"] if short is not None else [])))
 
 
 def predecessor_cik(ticker: str) -> str | None:
@@ -232,58 +281,169 @@ class SecClient:
         return ValuationBase(shares_outstanding=shares if shares and shares > 0 else None, shares_as_of=shares_as_of,
                              dps=dps if dps is None or dps >= 0 else None, dps_period_end=dps_end)
 
-    def get_annual_financials(self, stock: StockRef, years: int) -> list[Financial]:
-        gaaps = self._gaaps(stock)
-
-        def series(concept: str, duration: bool) -> dict[date, tuple[Decimal, str]]:
-            """결산일 → (값, 제출일). 이전 CIK(gaaps[1:])는 앞 묶음에 없는 결산일만 채운다."""
-            out: dict[date, tuple[Decimal, str]] = {}
-            for gaap in gaaps:
-                for end, v in _series(gaap, concept, duration).items():
-                    out.setdefault(end, v)
-            return out
-
-        def _series(gaap: dict, concept: str, duration: bool) -> dict[date, tuple[Decimal, str]]:
-            """결산일 → (값, 제출일). 같은 결산일은 가장 최근 제출값(재작성 반영)."""
-            out: dict[date, tuple[Decimal, str]] = {}
+    def _collect(self, gaaps: list[dict], concept: str, forms: set[str]) -> dict[tuple[str | None, str], tuple[Decimal, str, str]]:
+        """(start, end) → (값, 최근 제출일, 처음 제출일). 같은 기간은 가장 최근 제출값(재작성 반영)이고, 처음 제출일은 그 기간
+        값이 처음 공시된 날이다(D-033 — 신호 유효 시점). 이전 CIK(gaaps[1:])는 앞 묶음에 없는 기간만 채운다."""
+        out: dict[tuple[str | None, str], tuple[Decimal, str, str]] = {}
+        for gaap in gaaps:
+            mine: dict[tuple[str | None, str], tuple[Decimal, str, str]] = {}
             for e in gaap.get(concept, {}).get("units", {}).get("USD", []):
-                if e.get("form") not in ANNUAL_FORMS:
+                if e.get("form") not in forms or "end" not in e:
                     continue
-                end = date.fromisoformat(e["end"])
-                if duration:
-                    if "start" not in e:
-                        continue
-                    days = (end - date.fromisoformat(e["start"])).days
-                    if not 350 <= days <= 380:      # 52/53주 회계연도 허용
-                        continue
                 v = to_dec(e.get("val"), 2)
                 if v is None:
                     continue
-                if end not in out or e.get("filed", "") > out[end][1]:
-                    out[end] = (v, e.get("filed", ""))
-            return out
+                key, filed = (e.get("start"), e["end"]), e.get("filed", "")
+                old = mine.get(key)
+                if old is None:
+                    mine[key] = (v, filed, filed)
+                else:
+                    mine[key] = (v if filed > old[1] else old[0], max(filed, old[1]), min(filed, old[2]))
+            for key, val in mine.items():
+                out.setdefault(key, val)
+        return out
 
-        merged: dict[str, dict[date, tuple[Decimal, str]]] = {}
-        for col, concepts, duration in CONCEPTS + AUX_CONCEPTS:
-            merged[col] = {}
-            for c in concepts:                      # 우선순위 높은 개념이 먼저 채움
-                for end, val in series(c, duration).items():
-                    merged[col].setdefault(end, (val[0], c))
+    def _foreign(self, stock: StockRef) -> bool:
+        """10-K·10-Q 없이 20-F·40-F만 낸 회사(SEC 표지 dei 포함 모든 사실의 서식으로 판정)."""
+        forms: set[str] = set()
+        for tax in self._facts(stock.cik).get("facts", {}).values():
+            for c in tax.values():
+                for rows in c.get("units", {}).values():
+                    forms.update(e.get("form") for e in rows)
+        return bool(forms & FOREIGN_FORMS) and not forms & (ANNUAL_FORMS | QUARTER_FORMS)
+
+    def _by_period(self, gaaps: list[dict], forms: set[str]) -> dict[str, dict]:
+        """컬럼마다 기간형은 {(start, end): 값}, 순간형은 {end: 값} — 개념 우선순위 순서로 채움(먼저 나온 개념이 이김).
+        자본이 정확히 0인 값은 신고하지 않은 것으로 본다(파트너십 — R4-9). '처음 제출일'은 매출·순이익 기준(결산일별)."""
+        vals: dict[str, dict] = {}
+        first: dict[str, str] = {}
+        for col, concepts, duration in CONCEPTS + EXTRA_CONCEPTS + AUX_CONCEPTS + PART_CONCEPTS:
+            vals[col] = {}
+            for c in concepts:
+                for (start, end), (v, _, f0) in self._collect(gaaps, c, forms).items():
+                    if duration != (start is not None) or (col == "total_equity" and v == 0):
+                        continue
+                    vals[col].setdefault((start, end) if duration else end, (v, c))
+                    if col in ("revenue", "net_income") and f0:
+                        first[end] = min(first.get(end, f0), f0)
+        vals["_first"] = first
+        return vals
+
+    @staticmethod
+    def _row(get: Callable[[str], tuple[Decimal, str] | None], notes: list[str]) -> dict:
+        """컬럼별 (값, 개념) 조회 함수 → Financial 칸. 기본 개념이 아니면 notes에 남기고 비어 있는 칸은 파생 계산."""
+        vals: dict = {}
+        for col, concepts, _ in CONCEPTS + EXTRA_CONCEPTS:
+            hit = get(col)
+            vals[col] = hit[0] if hit else None
+            if hit and hit[1] != concepts[0]:
+                notes.append(f"{col}←{hit[1]}")
+        aux = {col: (get(col) or (None,))[0] for col, _, _ in AUX_CONCEPTS + PART_CONCEPTS}
+        derive_missing(vals, aux, notes)
+        derive_extra(vals, aux, notes)
+        return vals
+
+    def get_annual_financials(self, stock: StockRef, years: int) -> list[Financial]:
+        """10-K FY years개(기간형은 350~380일 — 52/53주 회계연도 허용). 20-F·40-F만 내는 회사는 ForeignFilerError(D-014)."""
+        p = self._by_period(self._gaaps(stock), ANNUAL_FORMS)
+        fy: dict[str, dict[date, tuple[Decimal, str]]] = {}
+        for col, _, duration in CONCEPTS + EXTRA_CONCEPTS + AUX_CONCEPTS + PART_CONCEPTS:
+            fy[col] = {}
+            for key, hit in p[col].items():
+                if duration:
+                    start, end = key
+                    if not 350 <= (date.fromisoformat(end) - date.fromisoformat(start)).days <= 380:
+                        continue
+                else:
+                    end = key
+                fy[col].setdefault(date.fromisoformat(end), hit)
         # 회계연도 결산일 = 연간 순이익/매출이 있는 결산일
-        fy_ends = sorted(set(merged["net_income"]) | set(merged["revenue"]))[-years:]
+        fy_ends = sorted(set(fy["net_income"]) | set(fy["revenue"]))[-years:]
+        if not fy_ends and self._foreign(stock):
+            raise ForeignFilerError("20-F·40-F 제출 기업 — SEC 10-K 재무 없음(D-014)")
         out = []
         for end in fy_ends:
-            vals, notes = {}, []
-            for col, concepts, _ in CONCEPTS:
-                hit = merged[col].get(end)
-                vals[col] = hit[0] if hit else None
-                if hit and hit[1] != concepts[0]:
-                    notes.append(f"{col}←{hit[1]}")
-            derive_missing(vals, {col: merged[col][end][0] if end in merged[col] else None
-                                  for col, _, _ in AUX_CONCEPTS}, notes)
-            out.append(Financial(period_end=end, period_type="FY", data_source="SEC",
-                                 accounting_std="US-GAAP", notes=notes, **vals))
+            notes = ["path=SEC_API"]
+            vals = self._row(lambda col: fy[col].get(end), notes)
+            filed = p["_first"].get(end.isoformat())
+            out.append(Financial(period_end=end, period_type="FY", data_source="SEC", accounting_std="US-GAAP",
+                                 notes=notes, filed_at=date.fromisoformat(filed) if filed else None, consolidated=True,
+                                 **vals))
         return out
+
+    def get_quarterly_financials(self, stock: StockRef, quarters: int) -> list[Financial]:
+        """최근 quarters개 분기(3개월치, D-033). 10-Q의 3개월 값(85~100일), 없으면 회계연도 시작부터의 누적 차이,
+        4분기 = 10-K 연간 − 3분기 누적. 재무상태표 값은 분기 말. 회계연도 경계는 10-K 결산일로 정한다."""
+        p = self._by_period(self._gaaps(stock), QUARTER_FORMS)
+        cols = CONCEPTS + EXTRA_CONCEPTS + AUX_CONCEPTS + PART_CONCEPTS
+        d = date.fromisoformat
+        annual: dict[str, dict[date, tuple[Decimal, str]]] = {}
+        three: dict[str, dict[date, tuple[Decimal, str]]] = {}
+        ytd: dict[str, dict[tuple[date, date], tuple[Decimal, str]]] = {}
+        inst: dict[str, dict[date, tuple[Decimal, str]]] = {}
+        for col, _, duration in cols:
+            annual[col], three[col], ytd[col], inst[col] = {}, {}, {}, {}
+            for key, hit in p[col].items():
+                if not duration:
+                    inst[col].setdefault(d(key), hit)
+                    continue
+                s, e = d(key[0]), d(key[1])
+                days = (e - s).days
+                if 350 <= days <= 380:
+                    annual[col].setdefault(e, hit)
+                elif 85 <= days <= 100:
+                    three[col].setdefault(e, hit)
+                elif 150 <= days < 350:
+                    ytd[col].setdefault((s, e), hit)
+        fy_ends = sorted(set(annual["net_income"]) | set(annual["revenue"]))
+        if not fy_ends:
+            return []
+        spans = []                                       # (회계연도 시작, 결산일, 결산일이 확정된 해인가)
+        for i, end in enumerate(fy_ends):
+            prev = fy_ends[i - 1] if i else None
+            start = prev + timedelta(days=1) if prev and 350 <= (end - prev).days <= 380 else end - timedelta(days=364)
+            spans.append((start, end, True))
+        spans.append((fy_ends[-1] + timedelta(days=1), fy_ends[-1] + timedelta(days=371), False))   # 진행 중인 회계연도
+        out: list[Financial] = []
+        for start, end, closed in spans:
+            ends = {e for c in ("revenue", "net_income") for e in three[c] if start < e < end - timedelta(days=20)}
+            ends |= {e for c in ("revenue", "net_income") for (s, e) in ytd[c]
+                     if abs((s - start).days) <= 7 and start < e < end - timedelta(days=20)}
+            qs = {min(3, max(1, round((e - start).days / 91.3))): e for e in sorted(ends)}
+            if closed:
+                qs[4] = end
+            cum_prev: dict[str, Decimal | None] = {c: Decimal(0) for c, _, _ in cols}
+            for k in sorted(qs):
+                e = qs[k]
+                got: dict[str, tuple[Decimal, str] | None] = {}
+                cum: dict[str, Decimal | None] = {}
+                for col, _, duration in cols:
+                    if not duration:
+                        got[col] = inst[col].get(e)
+                        continue
+                    run = annual[col].get(e) if k == 4 else next(
+                        (h for (s, x), h in ytd[col].items() if x == e and abs((s - start).days) <= 7), None)
+                    q = three[col].get(e)                     # 4분기는 10-K에 3개월 값이 있어도 연간 − 누적을 먼저 쓴다
+                    prev = cum_prev.get(col) if k - 1 in qs or k == 1 else None
+                    if k == 1:
+                        run = run or q
+                    if q is not None and k < 4:
+                        got[col] = q
+                    elif run is not None and prev is not None:
+                        got[col] = (run[0] - prev, run[1])
+                    else:
+                        got[col] = q
+                    cum[col] = run[0] if run is not None else (prev + q[0] if prev is not None and q is not None else None)
+                cum_prev = cum
+                notes = ["path=SEC_API"] + (["Q4=연간−3분기 누적"] if k == 4 else [])
+                vals = self._row(lambda col: got.get(col), notes)
+                if all(vals[c] is None for c in ("revenue", "operating_income", "net_income")):
+                    continue                             # 재무상태표 값만 있는 결산기(앞 회계연도 4분기 등)는 분기 행이 아니다
+                filed = p["_first"].get(e.isoformat())
+                out.append(Financial(period_end=e, period_type=f"Q{k}", data_source="SEC", accounting_std="US-GAAP",
+                                     notes=notes, filed_at=date.fromisoformat(filed) if filed else None,
+                                     consolidated=True, **vals))
+        return sorted(out, key=lambda f: f.period_end)[-quarters:]
 
     # ------------------------------------------------------------ 공시
     def get_disclosures(self, stock: StockRef, start: date, end: date) -> list[Disclosure]:

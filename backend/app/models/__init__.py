@@ -235,6 +235,19 @@ class FinancialStatement(Base):
     accounting_std: Mapped[str | None] = mapped_column(String(20))
     currency: Mapped[str | None] = mapped_column(String(3))          # 공시 표시통화 — 금액은 환산 후(D-026)
     fx_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))  # 환산 환율(원화 공시면 NULL)
+    # 수정 4(migration 016, D-033·D-039) — 제출일·연결 구분·수집 경로·추가 계정
+    filed_at: Mapped[date | None] = mapped_column(Date)
+    consolidated: Mapped[bool | None] = mapped_column(Boolean)
+    notes: Mapped[str | None] = mapped_column(Text)
+    operating_cf: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    comprehensive_income: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    equity_method_income: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    borrowings: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    cash: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    goodwill: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    intangibles: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    interest_expense: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    nci_net_income: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
     __table_args__ = (UniqueConstraint("stock_id", "period_end", "period_type"),)
 
 

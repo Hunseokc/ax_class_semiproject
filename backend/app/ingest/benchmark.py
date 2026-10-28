@@ -144,6 +144,14 @@ def select_benchmark(engine: Engine, providers: Providers, *, per_sector: int | 
         with engine.begin() as conn:
             conn.execute(text("UPDATE stocks SET coverage = 'benchmark' WHERE stock_id = ANY(:ids) AND coverage = 'listed'"),
                          {"ids": chosen_ids})
+            # 비교 표본의 재무는 한 경로(API)로만(D-039): 일괄 경로 임시 값·경로 기록이 없는 옛 재무는 만료시켜 아래
+            # 재무 갱신이 다시 받게 한다(분기·추가 계정도 이때 들어온다)
+            res.notes.append("재무 경로 만료 {}".format(conn.execute(text("""
+                UPDATE data_freshness f SET valid_until = f.fetched_at
+                WHERE f.kind = 'financials' AND f.stock_id = ANY(:ids) AND f.valid_until > f.fetched_at
+                  AND EXISTS (SELECT 1 FROM financial_statements x WHERE x.stock_id = f.stock_id AND x.period_type = 'FY'
+                                AND (x.notes IS NULL OR x.notes LIKE 'path=DART_BULK%' OR x.notes LIKE 'path=SEC_FRAMES%'))"""),
+                {"ids": chosen_ids}).rowcount))
             # 빠진 비교군은 상장 목록 종목으로 돌아간다(데이터는 보존). 관심종목·포트폴리오에 있으면 4시간 갱신 대상으로 남는다
             dropped = conn.execute(text("""
                 UPDATE stocks s SET coverage = 'listed'
@@ -215,10 +223,11 @@ def load_benchmark(engine: Engine, providers: Providers, *, today: date | None =
 
 
 def prune_benchmark(engine: Engine, today: date) -> int:
-    """상세를 30일 넘게 열지 않은 비교군 종목은 평시 데이터(일봉 price_days, 밸류에이션 10일, FY fin_years)만 남긴다."""
+    """상세를 30일 넘게 열지 않은 비교군 종목은 평시 데이터(일봉 price_days, 밸류에이션 10일, FY fin_years,
+    분기 FIN_QUARTERS)만 남긴다."""
     cfg = config()
     params = {"cut": today - timedelta(days=cfg["price_days"]), "vcut": today - timedelta(days=10),
-              "years": cfg["fin_years"], "grace": f"{PRUNE_AFTER_DAYS} days"}
+              "years": cfg["fin_years"], "quarters": jobs.FIN_QUARTERS, "grace": f"{PRUNE_AFTER_DAYS} days"}
     target = f"""SELECT s.stock_id FROM stocks s WHERE s.coverage = 'benchmark' AND NOT {FREQUENT_SQL}
                  AND (s.detail_synced_at IS NULL OR s.detail_synced_at < now() - CAST(:grace AS interval))"""
     with engine.begin() as conn:
@@ -231,6 +240,10 @@ def prune_benchmark(engine: Engine, today: date) -> int:
             AND f.period_end < (SELECT MIN(p) FROM (SELECT x.period_end AS p FROM financial_statements x
                                  WHERE x.stock_id = f.stock_id AND x.period_type = 'FY'
                                  ORDER BY x.period_end DESC LIMIT :years) t)"""), params).rowcount
+        n += conn.execute(text(f"""DELETE FROM financial_statements f WHERE f.stock_id IN ({target}) AND f.period_type <> 'FY'
+            AND f.period_end < (SELECT MIN(p) FROM (SELECT x.period_end AS p FROM financial_statements x
+                                 WHERE x.stock_id = f.stock_id AND x.period_type <> 'FY'
+                                 ORDER BY x.period_end DESC LIMIT :quarters) t)"""), params).rowcount
     return n
 
 

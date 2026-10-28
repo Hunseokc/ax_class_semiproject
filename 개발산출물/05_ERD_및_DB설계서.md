@@ -110,6 +110,13 @@ erDiagram
         varchar accounting_std
         varchar currency
         numeric fx_rate
+        date filed_at
+        boolean consolidated
+        text notes
+        numeric operating_cf
+        numeric comprehensive_income
+        numeric borrowings
+        numeric cash
     }
     disclosures {
         int disclosure_id PK
@@ -438,6 +445,20 @@ FK가 없는 독립 테이블은 4개다.
 | accounting_std | character varying(20) | Y |  |  | K-IFRS / US-GAAP |
 | currency | character varying(3) | Y |  |  | 공시 표시통화(KRW·USD). 금액은 시장 통화로 환산해 저장(D-026, migration 014). NULL = 기록 전 행 |
 | fx_rate | numeric(12,4) | Y |  |  | 환산에 쓴 결산일 USD/KRW(원화 공시면 NULL). `CHECK (fx_rate > 0)` |
+| filed_at | date | Y |  |  | 그 결산기 값이 처음 공시된 보고서 제출일(DART 접수일·SEC filed — 신호 유효 시점, migration 016, D-033) |
+| consolidated | boolean | Y |  |  | 연결 true / 별도 false |
+| notes | text | Y |  |  | 수집 경로(`path=DART_API`·`SEC_API`·`YFINANCE`·`DART_BULK`·`SEC_FRAMES`)·대체 계정·전기값(D-039). NULL = 수정 4 전 행 |
+| operating_cf | numeric(24,2) | Y |  |  | 영업활동 현금흐름 |
+| comprehensive_income | numeric(24,2) | Y |  |  | 총포괄이익(지배 우선) |
+| equity_method_income | numeric(24,2) | Y |  |  | 지분법손익 |
+| borrowings | numeric(24,2) | Y |  |  | 차입금·사채 합계(리스부채 제외) |
+| cash | numeric(24,2) | Y |  |  | 현금및현금성자산 |
+| goodwill | numeric(24,2) | Y |  |  | 영업권(따로 표시할 때만) |
+| intangibles | numeric(24,2) | Y |  |  | 무형자산(영업권 포함 합계) |
+| interest_expense | numeric(24,2) | Y |  |  | 이자비용(국내는 손익계산서에 없으면 현금흐름표 이자 지급액) |
+| nci_net_income | numeric(24,2) | Y |  |  | 비지배지분 순이익 |
+
+분기 행(`Q1`~`Q4`)은 3개월치(4분기 = 연간 − 3분기 누적), 재무상태표 칸은 분기 말 값이다. 비교 표본(노출·비교군)만 최근 20개 분기를 받는다. 추가 계정 9개는 점수에 아직 쓰지 않는다(측정 라운드 M1 입력 — 09 2절).
 
 제약: `CHECK (((data_source)::text = ANY ((ARRAY['DART'::character varying, 'SEC'::character varying, 'YFINANCE'::character varying])::text[])))` / `CHECK (((period_type)::text = ANY ((ARRAY['FY'::character varying, 'Q1'::character varying, 'Q2'::character varying, 'Q3'::character varying, 'Q4'::character varying])::text[])))` / `UNIQUE (stock_id, period_end, period_type)`
 
@@ -901,6 +922,7 @@ FK 컬럼 중 별도 인덱스가 없는 것은 PK·UNIQUE의 선두 컬럼으�
 | `012_themes.sql` | `stocks.ksic`, `peer_groups.sector`·`scoring`·`commodity_linked`, `indices.category`·`unit`, 국내 업종 확인 시각 초기화(뷰 `v_stock_theme`은 views.sql) | `master` → `benchmark --reselect` |
 | `014_fin_currency.sql` | `financial_statements.currency`·`fx_rate`(재무 표시통화와 원화 환산 환율 — 09 2절, D-026) | 외화 공시 종목 `financials --tickers 241560` → `scores` |
 | `015_sanity_runs.sql` | `sanity_runs`(매력도 sanity 실행 기록 — 통과·감수한 실패·target 실패·미검증·required 실패, 결과 JSON·보고, D-030) | `sanity --save --env deploy`(배포 Job) |
+| `016_fin_collection.sql` | `financial_statements.filed_at`·`consolidated`·`notes`와 추가 계정 9개(영업현금흐름·총포괄이익·지분법손익·차입금·현금·영업권·무형자산·이자비용·비지배 순이익 — 09 2절, D-033·D-039) | `financials --scope sample`(비교 표본 한 경로 재수집 — FY 5·분기 20) → `scores` |
 
 **적용 순서 주의 (011·012)**: `migrate`는 마이그레이션 파일 뒤에 `views.sql` 전체를 다시 적용한다. `views.sql`의 `v_stock_theme`이 012에서 생기는 `peer_groups.sector`·`scoring`·`commodity_linked`를 읽기 때문에, **010 이하인 DB에서 011을 먼저 돌리면 뷰 단계에서 실패하고 011 전체가 롤백된다**(파일과 뷰가 한 트랜잭션). 그런 DB는 **012 → 011 순서**로 적용한다(둘 다 멱등이라 다시 돌려도 결과가 같다). 2026-10-26 배포 DB 적용 때 실제로 겪었다(troubleshooting 3).
 - 012 직후 `master`가 테마 38개를 맞춘다. `benchmark --reselect`가 업종 코드(국내 DART KSIC 약 2,500개 — 분당 45회라 약 1시간, 미국 SIC 약 6분)를 받은 뒤 비교군을 고른다. 이미 업종 코드를 받은 DB가 있으면 `stocks.ksic·sic·industry·industry_checked_at`을 시장+티커로 복사해 이 시간을 건너뛸 수 있다(2026-10-26 배포에서 로컬 값 4,089행 복사).

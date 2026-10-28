@@ -4,6 +4,7 @@ frames 값은 회사별 companyfacts와 97% 같다(2026-10-19 노출·비교군 
 최근 제출값을 골라 위임장(DEF 14A) 반올림 값이 들어가거나, 52/53주 회계연도 경계에서 한 해가 빠지는 경우다.
 그래서 **임시 값**으로만 넣는다: 재무 유효기간을 PROVISIONAL_TTL(7일)로 짧게 두고, 그 뒤 상세 화면을 열면
 회사별 API(sec.py — 정확한 10-K 값 + yfinance 보완)로 다시 받는다. 노출 종목·비교군은 지금처럼 회사별 API만 쓴다.
+행 notes에 path=SEC_FRAMES를 남긴다 — 비교군에 뽑히면 그날 API로 다시 받는다(D-039, benchmark.select_benchmark).
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import Engine, text
 
+from app.ingest.jobs import fix_zero_equity
 from app.ingest.store import job_log, upsert
 from app.providers.sec_bulk import SecFrames, get_annual_financials_bulk
 from app.services import freshness
@@ -44,9 +46,12 @@ def load_us_bulk(engine: Engine, *, years: int = 3, frames: SecFrames | None = N
             for i in range(0, len(items), CHUNK):
                 with engine.begin() as conn:
                     for sid, fs in items[i:i + CHUNK]:
+                        for f in fs:
+                            fix_zero_equity(f)
                         out["rows"] += upsert(conn, "financial_statements", [
                             {"stock_id": sid, "period_end": f.period_end, "period_type": "FY",
-                             **{k: getattr(f, k) for k in FIN_FIELDS}, "data_source": "SEC", "accounting_std": "US-GAAP"}
+                             **{k: getattr(f, k) for k in FIN_FIELDS}, "data_source": "SEC", "accounting_std": "US-GAAP",
+                             "notes": "; ".join(["path=SEC_FRAMES", *f.notes])}
                             for f in fs], ["stock_id", "period_end", "period_type"])
                         freshness.mark_provisional(conn, "financials", sid, PROVISIONAL_TTL, now=now)
             out["companies"] = len(items)

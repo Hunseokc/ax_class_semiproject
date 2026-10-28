@@ -20,7 +20,7 @@ from app.ingest.store import (DART_LOCK_KEY, LOCK_WAIT_NOTE_SECONDS, BatchWriter
                               error_text, job_log, provider_lock_key, upsert)
 from app.ingest.sectors import assign_themes, primary_theme, sync_themes
 from app.ingest.universe import index_refs, load_universe, stock_refs
-from app.providers.base import Financial, FxProvider, ProviderError, StockRef
+from app.providers.base import Financial, ForeignFilerError, FxProvider, ProviderError, StockRef
 from app.providers.factory import Providers
 from app.services import freshness
 from app.services.scoring import sync_presets
@@ -556,9 +556,14 @@ def load_valuations(engine: Engine, providers: Providers, *, full: bool = False,
 # D의 RefreshService·Stage 4 상세 수집이 load_financials·load_disclosures를 부른다. 반환은 {대상: 상태}
 DISCLOSURE_DAYS = 365
 FIN_YEARS = 5
+FIN_QUARTERS = 20     # 비교 표본(노출·비교군)의 분기 재무 수 — 상장 목록 종목은 받지 않는다(D-033, 상세 화면 대기 시간)
 
 
 FIN_FIELDS = ["revenue", "operating_income", "net_income", "total_assets", "total_equity", "total_debt"]
+# 수정 4(D-033) 추가 계정 — 저장만 하고 점수에는 아직 쓰지 않는다(M1 측정용)
+EXTRA_FIN_FIELDS = ["operating_cf", "comprehensive_income", "equity_method_income", "borrowings", "cash", "goodwill",
+                    "intangibles", "interest_expense", "nci_net_income"]
+MONEY_FIELDS = FIN_FIELDS + EXTRA_FIN_FIELDS
 
 
 MARKET_CURRENCY = {"KR": "KRW", "US": "USD"}     # 재무 금액을 저장하는 통화(시장 통화)
@@ -582,7 +587,7 @@ def to_krw(fins: list[Financial], rate_on: Callable[[date], Decimal | None]) -> 
             raise ProviderError(f"{f.period_end} USD/KRW 환율 없음 — 원화로 환산하지 못함")
         out.append(replace(f, currency=cur, fx_rate=rate, notes=[*f.notes, f"{cur}→KRW {rate}(결산일)"],
                            **{k: None if getattr(f, k) is None else (getattr(f, k) * rate).quantize(Decimal("0.01"))
-                              for k in FIN_FIELDS}))
+                              for k in MONEY_FIELDS}))
     return out
 
 
@@ -605,12 +610,15 @@ def merge_supplement(primary: list[Financial], supplement: list[Financial], tole
     for s in supplement:
         match = next((p for p in out if abs((p.period_end - s.period_end).days) <= tolerance_days), None)
         if match is None:
+            s.notes = ["path=YFINANCE", *s.notes]
             out.append(s)
             continue
         if match is s:
             continue
         for f in FIN_FIELDS:
             pv, sv = getattr(match, f), getattr(s, f)
+            if f == "total_equity" and sv == 0:          # yfinance는 파트너십 자본을 0으로 준다(EPD — R4-9)
+                continue
             if pv is None and sv is not None:
                 setattr(match, f, sv)
                 match.notes.append(f"{f}←yfinance")
@@ -619,16 +627,65 @@ def merge_supplement(primary: list[Financial], supplement: list[Financial], tole
     return sorted(out, key=lambda x: x.period_end)
 
 
+def fix_zero_equity(f: Financial) -> None:
+    """자본이 정확히 0이면 신고하지 않은 값으로 본다(파트너십 EPD — R4-9): 자산 − 부채로 채우고, 못 채우면 비운다
+    (B/P 사유 '자본 정보 없음'). 실제 음수 자본(자사주 매입)은 그대로 둔다(D-027)."""
+    if f.total_equity is None or f.total_equity != 0:
+        return
+    if f.total_assets is not None and f.total_debt is not None and f.total_assets - f.total_debt != 0:
+        f.total_equity = f.total_assets - f.total_debt
+        f.notes.append("total_equity←자산−부채(신고값 0)")
+    else:
+        f.total_equity = None
+        f.notes.append("total_equity 신고값 0 → 비움(자본 정보 없음)")
+
+
+def fin_row(stock_id: int, f: Financial, country: str) -> dict:
+    """financial_statements 1행. notes는 수집 경로·대체 계정·전기값(D-039 — 어느 길로 들어온 값인지 남긴다)."""
+    return {"stock_id": stock_id, "period_end": f.period_end, "period_type": f.period_type,
+            **{k: getattr(f, k) for k in MONEY_FIELDS},
+            "data_source": f.data_source, "accounting_std": f.accounting_std,
+            "currency": f.currency or MARKET_CURRENCY[country], "fx_rate": f.fx_rate,
+            "filed_at": f.filed_at, "consolidated": f.consolidated, "notes": "; ".join(f.notes)[:2000] or None}
+
+
+def replace_financials(stock_id: int, rows: list[dict], types: list[str]) -> Callable[[Connection, Unit], None]:
+    """같은 트랜잭션에서 그 종목의 types 행 중 이번 결과에 없는 결산기를 지운다 — 현재 코드가 만들지 않는 값(이전 경로의
+    영업이익, 20-F 재무)이 남지 않게(D-039). 분기를 받지 않은 수집은 분기 행을 건드리지 않는다."""
+    def run(conn: Connection, u: Unit) -> None:
+        n = conn.execute(text("""
+            DELETE FROM financial_statements f
+            WHERE f.stock_id = :s AND f.period_type = ANY(:types)
+              AND (f.period_end, f.period_type) NOT IN (
+                  SELECT e, CAST(t AS varchar) FROM unnest(CAST(:ends AS date[]), CAST(:pts AS text[])) AS k(e, t))"""),
+            {"s": stock_id, "types": types, "ends": [r["period_end"] for r in rows],
+             "pts": [r["period_type"] for r in rows]}).rowcount
+        if n:
+            u.notes.append(f"이번 결과에 없는 옛 행 {n}개 지움")
+    return run
+
+
+def sample_quarters(engine: Engine, stock_ids: list[int]) -> dict[int, int]:
+    """종목별 분기 수: 비교 표본(노출·비교군)이면 FIN_QUARTERS, 상장 목록 종목은 0."""
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT stock_id, coverage FROM stocks WHERE stock_id = ANY(:ids)"), {"ids": stock_ids}).all()
+    return {sid: FIN_QUARTERS if cov in ("featured", "benchmark") else 0 for sid, cov in rows}
+
+
 def load_financials(engine: Engine, providers: Providers, *, years: int = FIN_YEARS,
                     tickers: list[str] | None = None, stock_ids: list[int] | None = None,
-                    flush_every: int | None = None) -> dict[str, str]:
-    """FY 재무 years개년 — 국내 DART, 미국 SEC(+yfinance 보완). 잠금은 회사 단위, 저장은 flush_every개 회사씩 묶음."""
+                    flush_every: int | None = None, quarters: int | None = None) -> dict[str, str]:
+    """FY 재무 years개년(+ 분기) — 국내 DART, 미국 SEC(+yfinance 보완). 잠금은 회사 단위, 저장은 flush_every개 회사씩 묶음.
+    quarters: None이면 종목마다 비교 표본은 FIN_QUARTERS·상장 목록은 0, 숫자면 모든 종목에 그 수."""
     with engine.connect() as conn:
         refs = stock_refs(conn, tickers, stock_ids=stock_ids)
-    return _load_financials(engine, providers, refs, years, flush_every or default_flush_every())
+    qmap = (sample_quarters(engine, [r.stock_id for r in refs]) if quarters is None
+            else {r.stock_id: quarters for r in refs})
+    return _load_financials(engine, providers, refs, years, flush_every or default_flush_every(), qmap)
 
 
-def _load_financials(engine: Engine, providers: Providers, refs: list, years: int, flush_every: int) -> dict[str, str]:
+def _load_financials(engine: Engine, providers: Providers, refs: list, years: int, flush_every: int,
+                     quarters: dict[int, int] | None = None) -> dict[str, str]:
     def on_flush(units: list[Unit]) -> None:          # 미국: 기초값 저장 뒤 기초값 × 종가 밸류에이션
         ids = [u.stock_id for u in units if any(t == "fundamental_bases" for t, _, _ in u.writes)]
         if ids:
@@ -638,14 +695,15 @@ def _load_financials(engine: Engine, providers: Providers, refs: list, years: in
     with LockSession(engine) as locks:
         try:
             for ref in refs:
-                writer.add(_fetch_financials(providers, locks, ref, years))
+                writer.add(_fetch_financials(providers, locks, ref, years, (quarters or {}).get(ref.stock_id, 0)))
         finally:
             writer.flush()
     return {u.label: u.status for u in writer.done}
 
 
-def _fetch_financials(providers: Providers, locks: LockSession, ref: StockRef, years: int) -> Unit:
-    """회사 1개 재무를 받아 저장할 행을 만든다(DB 쓰기 없음). 실패는 Unit.error에 남기고 예외를 올리지 않는다."""
+def _fetch_financials(providers: Providers, locks: LockSession, ref: StockRef, years: int, quarters: int = 0) -> Unit:
+    """회사 1개 재무(FY years개 + 분기 quarters개)를 받아 저장할 행을 만든다(DB 쓰기 없음). 실패는 Unit.error에 남기고
+    예외를 올리지 않는다. 20-F·40-F만 내는 회사는 성공으로 기록하고 남아 있던 재무를 지운다(D-014·D-039)."""
     p = providers.financial(ref.country)
     source = p.source if p else ("DART" if ref.country == "KR" else "SEC")
     u = Unit(source=source, job_type="FINANCIALS", stock_id=ref.stock_id, label=ref.ticker, country=ref.country,
@@ -655,11 +713,19 @@ def _fetch_financials(providers: Providers, locks: LockSession, ref: StockRef, y
             raise ProviderError(f"{source} 설정 없음(API 키/User-Agent)")
         if ref.country == "KR" and not ref.corp_code or ref.country == "US" and not ref.cik:
             raise ProviderError("corp_code/CIK 미매핑 — master 먼저 실행")
-        base = None
+        base, qs = None, []
+        types = ["FY"] + (["Q1", "Q2", "Q3", "Q4"] if quarters else [])
         with locks.hold(provider_lock_key(ref.country)) as waited:     # DART·SEC를 부르는 구간만
-            fins = p.get_annual_financials(ref, years)
+            try:
+                fins = p.get_annual_financials(ref, years)
+            except ForeignFilerError as e:
+                u.notes.append(str(e))
+                u.after.append(replace_financials(ref.stock_id, [], ["FY", "Q1", "Q2", "Q3", "Q4"]))
+                return u
             if not fins:          # 공시 직후 재무 API가 아직 비어 있을 수 있다 → 최신으로 기록하지 않고 1일 뒤 다시
                 raise ProviderError("재무 빈 응답")
+            if quarters and hasattr(p, "get_quarterly_financials"):
+                qs = p.get_quarterly_financials(ref, quarters)
             # 미국 기초값(발행주식수·주당 배당)은 재무와 같은 SEC 응답에서 꺼낸다
             if ref.country == "US" and ref.cik and providers.us_reference is not None:
                 try:
@@ -670,24 +736,28 @@ def _fetch_financials(providers: Providers, locks: LockSession, ref: StockRef, y
             u.notes.append(f"잠금 대기 {waited:.1f}초")
         if ref.country == "KR":                                          # 외화 공시는 원화로(D-026), 환율 조회는 잠금 밖
             fins = to_krw(fins, fx_rate_on(providers.fx))
+            qs = to_krw(qs, fx_rate_on(providers.fx))
         if ref.country == "US" and providers.us_financial_supplement:     # yfinance 보완은 잠금 밖
             try:
                 fins = merge_supplement(fins, providers.us_financial_supplement.get_annual_financials(ref, years))
             except ProviderError as e:
                 u.notes.append(f"yfinance 보완 실패: {e}")
             fins = fins[-years:]
-        rows = [{"stock_id": ref.stock_id, "period_end": f.period_end, "period_type": f.period_type,
-                 **{k: getattr(f, k) for k in FIN_FIELDS},
-                 "data_source": f.data_source, "accounting_std": f.accounting_std,
-                 "currency": f.currency or MARKET_CURRENCY[ref.country], "fx_rate": f.fx_rate} for f in fins]
+        for f in fins + qs:
+            fix_zero_equity(f)
+        rows = [fin_row(ref.stock_id, f, ref.country) for f in fins + qs]
         u.writes.append(("financial_statements", rows, ["stock_id", "period_end", "period_type"]))
+        u.after.append(replace_financials(ref.stock_id, rows, types))
         u.rows = len(rows)
-        for f in fins:
+        for f in fins:                                                   # 로그에는 FY의 대체 계정·빈 칸만(경로 표시 제외)
+            extra = [n for n in f.notes if not n.startswith("path=")]
             missing = [k for k in FIN_FIELDS if getattr(f, k) is None]
-            if f.notes or missing:
-                u.notes.append(f"{f.period_end.year}: " + ", ".join(f.notes + [f"{m} 없음" for m in missing]))
+            if extra or missing:
+                u.notes.append(f"{f.period_end.year}: " + ", ".join(extra + [f"{m} 없음" for m in missing]))
         if len(fins) < years:
             u.notes.append(f"FY {len(fins)}/{years}개")
+        if quarters:
+            u.notes.append(f"분기 {len(qs)}/{quarters}개")
         if base is not None:
             if base.shares_outstanding is None and base.dps is None:
                 u.notes.append("기초값 없음")
