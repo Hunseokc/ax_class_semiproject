@@ -17,7 +17,7 @@ from typing import Protocol
 
 __all__ = ["Bar", "FxPoint", "Valuation", "Financial", "Disclosure", "StockRef", "IndexRef",
            "PriceProvider", "IndexProvider", "FxProvider", "ValuationProvider", "FinancialProvider",
-           "DisclosureProvider", "MarketBulkProvider", "BatchPriceProvider", "ProviderError",
+           "DisclosureProvider", "MarketBulkProvider", "BatchPriceProvider", "ProviderError", "ForeignFilerError",
            "ValuationBase", "ReferenceDataProvider", "KrReferenceProvider", "Listing", "ListingProvider"]
 
 
@@ -67,6 +67,18 @@ class Financial:
     notes: list[str] = field(default_factory=list)   # 대체 계정 사용 등 추적 정보
     currency: str | None = None      # 공시 표시통화(DART 행의 currency). 원화가 아니면 적재 때 결산일 환율로 환산(D-026)
     fx_rate: Decimal | None = None   # 환산에 쓴 환율(환산하지 않았으면 None)
+    # ── 수정 4(D-033·D-039): 제출일·연결 구분·추가 계정. 점수는 아직 위 6계정만 쓴다(M1 측정용) ──
+    filed_at: date | None = None     # 이 결산기 값이 처음 공시된 보고서 제출일(DART 접수일·SEC filed)
+    consolidated: bool | None = None # 연결 True / 별도 False
+    operating_cf: Decimal | None = None          # 영업활동 현금흐름
+    comprehensive_income: Decimal | None = None  # 총포괄이익(지배기업 소유주 귀속 우선)
+    equity_method_income: Decimal | None = None  # 지분법손익
+    borrowings: Decimal | None = None            # 차입금·사채 합계(리스부채 제외)
+    cash: Decimal | None = None                  # 현금및현금성자산
+    goodwill: Decimal | None = None              # 영업권(따로 표시할 때만)
+    intangibles: Decimal | None = None           # 무형자산(영업권 포함 합계)
+    interest_expense: Decimal | None = None      # 이자비용
+    nci_net_income: Decimal | None = None        # 비지배지분 순이익
 
 
 # ── [S5-D] 미국 밸류에이션 기초값 ──
@@ -148,6 +160,7 @@ class ValuationProvider(Protocol):
 class FinancialProvider(Protocol):
     source: str
     def get_annual_financials(self, stock: StockRef, years: int) -> list[Financial]: ...
+    # 분기(3개월치)는 선택 — 있는 provider(DART·SEC)만 get_quarterly_financials(stock, quarters)를 둔다(D-033)
 
 
 class DisclosureProvider(Protocol):
@@ -191,3 +204,7 @@ class ListingProvider(Protocol):
 
 class ProviderError(Exception):
     """외부 소스 호출 실패 (재시도 후에도 실패)."""
+
+
+class ForeignFilerError(ProviderError):
+    """SEC에 10-K 대신 20-F·40-F만 내는 해외 기업 — 재무를 받지 않고 남은 행을 지운다(D-014·D-039)."""

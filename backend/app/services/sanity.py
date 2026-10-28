@@ -834,6 +834,60 @@ def case_cj_history(s: Stock):
     return len(years) >= 3 and 2024 in years, f"이어지는 FY {years}"
 
 
+# ── 라운드 4 데이터 (수정 4 PR A, D-039) — 재무가 어느 경로로 들어왔는지(financial_statements.notes) ──
+def _sample_fy(d: Data, country: str | None = None) -> list:
+    return d.conn.execute(text("""
+        SELECT s.stock_id, s.ticker, m.country, f.period_end, f.notes, f.total_equity, f.total_assets, f.total_debt
+        FROM financial_statements f
+        JOIN stocks s  ON s.stock_id = f.stock_id
+        JOIN markets m ON m.market_id = s.market_id
+        WHERE f.period_type = 'FY' AND s.is_active AND s.coverage <> 'listed'
+          AND (CAST(:c AS text) IS NULL OR m.country = :c)
+        ORDER BY s.stock_id, f.period_end"""), {"c": country}).all()
+
+
+def _path(notes: str | None) -> str | None:
+    return notes.split(";")[0].strip().removeprefix("path=") if notes and notes.startswith("path=") else None
+
+
+def rule_dart_fy_path(d: Data, c: dict):
+    """국내 표본 FY는 모두 API 한 경로이고, 5년 창 안에서 빠진 해는 provider가 '직전 연도 없음'(그해 보고서도, 다음 해 보고서
+    전기값도 없음)을 남겼을 때만 — 일괄 경로(당기만)·경로 기록 없는 옛 행이 섞이면 실패(R4-1)."""
+    by: dict[str, list] = defaultdict(list)
+    for r in _sample_fy(d, "KR"):
+        by[r.ticker].append(r)
+    other = sorted({t for t, rs in by.items() for r in rs if _path(r.notes) != "DART_API"})
+    gaps = []
+    for t, rs in by.items():
+        years = {r.period_end.year: r for r in rs}
+        top = max(years)
+        for y, r in years.items():
+            if top - 4 < y and y - 1 not in years and "직전 연도 없음" not in (r.notes or ""):
+                gaps.append(f"{t} {y - 1}")
+    named = " · ".join(f"{t} FY {sorted(r.period_end.year for r in by.get(str(t), [])) or '없음'}" for t in c.get("ticker", []))
+    missing = [t for t in c.get("ticker", []) if str(t) not in by]
+    ok = not other and not gaps and not missing
+    return ok, (f"국내 표본 {len(by)}종목 · API 밖 경로 {len(other)} {other[:10]} · 사유 없이 빠진 해 {len(gaps)} {gaps[:10]} · {named}")
+
+
+def rule_sec_op_path(d: Data):
+    """미국 표본 FY가 모두 현재 코드 경로(SEC_API, 빈 결산기 보완은 YFINANCE)로 쓴 행 — 수정 1 이전 경로 값 0(R4-2)."""
+    rows = _sample_fy(d, "US")
+    old = sorted({r.ticker for r in rows if _path(r.notes) not in ("SEC_API", "YFINANCE")})
+    yf = sorted({r.ticker for r in rows if _path(r.notes) == "YFINANCE"})
+    return not old, (f"미국 표본 FY {len(rows)}행 · 현재 코드 경로가 아닌 종목 {len(old)} {old[:15]}"
+                     f" · yfinance 보완 결산기가 있는 종목 {len(yf)} {yf[:10]}")
+
+
+def rule_lp_equity(d: Data):
+    """자본이 정확히 0인데 자산 − 부채가 0이 아니면 신고값 0(파트너십)을 그대로 쓴 것 — 0개여야 함(R4-9)."""
+    bad = sorted({r.ticker for r in _sample_fy(d) if r.total_equity is not None and r.total_equity == 0
+                  and r.total_assets is not None and r.total_debt is not None and r.total_assets - r.total_debt != 0})
+    lp = sorted({r.ticker for r in _sample_fy(d) if "total_equity←PartnersCapital" in (r.notes or "")
+                 or "total_equity←자산−부채" in (r.notes or "")})
+    return not bad, f"자본 0 · 자산−부채 ≠ 0: {len(bad)} {bad} · 파트너 자본·자산−부채로 채운 종목 {lp[:10]}"
+
+
 SPECIAL = {
     "KCC-oneoff-cut": lambda d, c: _with_stock(d, c, oneoff_cut),
     "MICHANG-oneoff-cut": lambda d, c: _with_stock(d, c, oneoff_cut),
@@ -876,6 +930,9 @@ SPECIAL = {
     "INSURER-oci-roe": lambda d, c: (None, "총포괄이익(지배)을 아직 수집하지 않음 — D-033 수집 뒤 required"),
     "GROWTH-label": lambda d, c: case_growth_label(d),
     "DEPLOY-sanity-ran": lambda d, c: rule_deploy_sanity(d),
+    "DATA-dart-fy-path": lambda d, c: rule_dart_fy_path(d, c),
+    "DATA-sec-op-path": lambda d, c: rule_sec_op_path(d),
+    "LP-equity-not-zero": lambda d, c: rule_lp_equity(d),
 }
 
 

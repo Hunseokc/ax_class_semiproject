@@ -14,6 +14,7 @@
 -- 국내 우선주(D-029): e는 보통주·우선주 전체 주주 몫, 시총은 보통주만이다. KRX BPS의 주식수(= 최신 FY 지배 자본 ÷ BPS)가
 --   보통주보다 3% 넘게 많으면 e × 보통주 수 ÷ BPS 주식수로 보통주 몫만 쓴다(B/P와 같은 주식수 기준). 3% 이하는 기준일·반올림 차이로 본다
 -- 자본 ≤ 0(최신 FY 지배 자본 또는 BPS)이면 B/P를 비운다(D-027 — 자사주 매입 우량 기업을 '가장 비싼 종목'으로 세지 않음)
+--   자본과 BPS가 모두 없으면(신고값 0을 채우지 못한 파트너십 등 — 수정 4 R4-9) 사유 '자본 정보 없음'
 WITH base AS (
     SELECT vm.stock_id, vm.country, vm.close, vm.bps, vm.volatility_1y,
            COALESCE(vm.market_cap, CAST(vs.shares_outstanding AS numeric) * vm.close) AS mcap,
@@ -128,7 +129,8 @@ CROSS JOIN LATERAL (VALUES
         CAST(NULL AS text)),
     ('book_yield',       'value',
         CASE WHEN NOT c.neg_book THEN c.bps / NULLIF(c.close, 0) END, NULL,
-        CASE WHEN c.neg_book THEN '자본 음수(자사주 매입 등) — 장부가 기준 저평가를 계산하지 않음' END),
+        CASE WHEN c.neg_book THEN '자본 음수(자사주 매입 등) — 장부가 기준 저평가를 계산하지 않음'
+             WHEN c.eq0 IS NULL AND c.bps IS NULL THEN '자본 정보 없음 — 장부가 기준 저평가를 계산하지 않음' END),
     ('trap_signal',      'value',
         CASE WHEN NOT c.fin AND c.end2 IS NOT NULL AND c.sig_n >= 3 THEN CAST(c.sig_yes AS numeric) / c.sig_n END,
         NULL,

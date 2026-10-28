@@ -7,8 +7,12 @@
   손익 파일은 이름 없는 빈 열이 끼어 있어 열 위치가 파일마다 다르다 → 헤더 이름으로 찾는다.
   손익은 '손익계산서'(02)와 '단일 포괄손익계산서'(03) 중 회사가 고른 쪽에 있어 둘 다 읽는다.
 
-계정 규칙은 DART API 적재와 같다(DartClient._extract — ACCOUNT_MAP, 연결 우선 → 별도). 파일마다 '당기' 값만 쓴다
-(API도 연도마다 그해 사업보고서의 당기 값을 쓴다). 여러 해를 넣으려면 연도별 파일을 함께 넘긴다.
+계정 규칙은 DART API 적재와 같다(DartClient._extract — ACCOUNT_MAP, 연결 우선 → 별도). 파일마다 '당기' 값만 쓴다.
+여러 해를 넣으려면 연도별 파일을 함께 넘긴다.
+
+**임시 값이다(D-039)**: API 경로는 빈 해를 다음 해 보고서 전기값으로 채우고 추가 계정·분기도 받지만, 이 경로는 당기만 읽어
+같은 회사의 FY 수가 달라진다(라운드 4 R4-1 — 대한조선 가치 14 ↔ 42위). 그래서 재무 유효기간을 PROVISIONAL_TTL(7일)로
+짧게 두고 notes에 path=DART_BULK를 남긴다. 비교군에 뽑히면 그날 API로 다시 받는다(benchmark.select_benchmark).
 """
 from __future__ import annotations
 
@@ -24,6 +28,7 @@ from sqlalchemy import Engine, text
 
 from app.ingest.jobs import to_krw
 from app.ingest.store import job_log, upsert
+from app.ingest.us_bulk import PROVISIONAL_TTL
 from app.providers.base import Financial, ProviderError
 from app.providers.convert import to_dec
 from app.providers.dart import DartClient
@@ -162,9 +167,10 @@ def load_bulk(engine: Engine, paths: list[Path], *, as_of: date, years: int = 4)
                     out["rows"] += upsert(conn, "financial_statements", [
                         {"stock_id": sid, "period_end": f.period_end, "period_type": "FY", **{k: getattr(f, k) for k in FIN_FIELDS},
                          "data_source": f.data_source, "accounting_std": f.accounting_std,
-                         "currency": f.currency, "fx_rate": f.fx_rate} for f in fs],
+                         "currency": f.currency, "fx_rate": f.fx_rate,
+                         "notes": "; ".join(["path=DART_BULK", *f.notes])} for f in fs],
                         ["stock_id", "period_end", "period_type"])
-                    freshness.mark(conn, "financials", sid, True, country="KR", now=now)
+                    freshness.mark_provisional(conn, "financials", sid, PROVISIONAL_TTL, now=now)
         out["companies"] = len(matched)
         with engine.begin() as conn:
             conn.execute(text("""
