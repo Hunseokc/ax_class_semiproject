@@ -152,6 +152,13 @@ financial_statements FY                  20896
 **배포**: 서비스와 Jobs는 같은 이미지(`asia-northeast3-docker.pkg.dev/stockmind-512107/stockmind/api:<커밋>-<MMDDHHMM>`)를 쓴다.
 - 지금 배포된 이미지: 서비스·Jobs 3개 모두 `api:33419c8-10271544`(2026-10-27, 매력도 모델 v2.2 — 수정 2 PR #117~#119).
 - Cloud Build는 쓰지 않는다. 로컬에서 빌드해 올린다.
+- **대량 수집은 로컬에서 배포 DB로 직접 한다**(2026-10-28 결정). 재무 재수집(`financials --scope sample`), 미국 시가총액 순위(`rank_us`), `benchmark --reselect`처럼 수십 분~수 시간 걸리는 일회성 작업은 Cloud Run Job으로 돌리지 않는다 — DART 분당 45회·yfinance 대기처럼 대부분이 기다리는 시간인데 Job은 그동안에도 CPU·메모리 시간이 과금된다. PC를 켜 두고 `.env`의 `SUPABASE_DB_*`로 만든 `DATABASE_URL`을 넘겨 로컬 컨테이너로 실행한다:
+  ```bash
+  set -a; . ./.env; set +a
+  PROD_URL="postgresql+psycopg://$SUPABASE_DB_USER:$SUPABASE_DB_PASSWORD@$SUPABASE_DB_HOST:$SUPABASE_DB_PORT/$SUPABASE_DB_NAME"
+  docker compose run --rm -e DATABASE_URL="$PROD_URL" api python -m app.ingest <명령>   # 코드는 배포 이미지와 같은 커밋인지 먼저 확인
+  ```
+  매일 정해진 시각의 Job(refresh·benchmark 07:00·sanity 07:40·background 08:00)은 PC와 무관하게 돌아야 하므로 클라우드에 둔다. migrate·master·scores·sanity 같은 짧은 일회성 명령은 Job으로 돌려도 된다.
 
 ```bash
 TAG=$(git rev-parse --short HEAD)-$(date +%m%d%H%M)
