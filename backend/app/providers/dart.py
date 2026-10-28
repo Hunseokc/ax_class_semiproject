@@ -344,8 +344,8 @@ class DartClient:
                     else:
                         vals[c] = cum[c] - prev if cum[c] is not None and prev is not None else None
                 cum_prev, fs_prev = cum, fs
-                if all(vals[c] is None for c in CORE_COLS):
-                    continue
+                if all(vals[c] is None for c in ("revenue", "operating_income", "net_income")):
+                    continue                             # 손익이 없는 분기(직전 분기 누적이 없어 4분기를 못 만듦 등)는 행을 만들지 않는다
                 m = fiscal_month - 3 * (4 - k)
                 qy, qm = (y, m) if m > 0 else (y - 1, m + 12)
                 notes = ["path=DART_API", f"report={REPORT_Q.get(k, REPORT_FY)}"] + ([f"fs_div={fs}"] if fs != "CFS" else [])
