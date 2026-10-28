@@ -20,8 +20,8 @@
 #                  점수를 내지 않는 테마(지주회사·신탁·리츠)라 표본에서 빠진 종목(D-004·D-014·D-025·D-028).
 #   scored       : 점수가 있음.
 #   표본 밖       : 검사할 종목이 그 밖의 이유(테마 시가총액 상위 n 밖·거래정지)로 비교군에 없으면 식을 계산하지 않고
-#                  미검증으로 센다(D-043). 사유 칸에 '표본 밖(테마 상위 n 밖)'이 남는다. required 미검증이 3개를 넘으면
-#                  표본 안 종목으로 케이스를 바꾼다.
+#                  미검증으로 센다(D-043). 사유 칸에 '표본 밖(테마 상위 n 밖)'이 남는다. required 표본 밖 미검증이 3개를
+#                  넘으면 케이스를 다시 정한다 — 종목 교체 대신 표본 전체 규칙으로 옮긴다(D-044).
 # 종목코드는 DB 기준으로 한 번 확인할 것.
 #
 # 주의(순환성): independent: false 인 규칙만 통과했다고 개선됐다고 판단하지 말 것.
@@ -32,7 +32,7 @@ cases:
     ticker: SIRI
     market: US
     check: growth_rank > 50
-    status: required
+    status: target          # D-044: 표본 밖으로 자주 밀려 기록만 — 같은 패턴은 R2-turnaround-growth가 표본 전체에서 검사
     issue: P1
     why: 매출 3년 연속 감소, EPS 변화의 대부분이 전년 손실 항
     # 수정 4 PR B 뒤 게임·엔터·미디어 US 상위 10 밖(cap_rank 808)이면 표본 밖 — 통과가 아니라 미검증(D-043)
@@ -202,11 +202,11 @@ cases:
     why: 지주회사, 영업이익률 623%(지분법)
 
   # ── R1-6 데이터 누락으로 정상 대형주가 빠지면 안 됨 ──
-  - id: SEC-tags-scored
+  - id: SEC-tags-scored-list
     ticker: [XOM, CLX, EMN, EXP, GTX, OSK, AEIS]
     market: US
     check: scored
-    status: required
+    status: target          # D-044: 7종목 목록은 기록만 — required는 규칙 SEC-tags-scored(표본 전체)
     issue: R1-6
     why: XOM 재무 0건(CIK 변경), 나머지는 SEC 영업이익·순이익 태그 누락
     # '재무가 수집됐고 표본 안이면 점수 있음'으로 읽는다. 표본 밖 종목(수정 4 뒤 OSK — 기계·로봇 US 상위 10 밖)은 미검증(D-043)
@@ -242,7 +242,7 @@ cases:
     ticker: SIRI
     market: US
     check: value_rank > 20 and balanced_rank > 20
-    status: required
+    status: target          # D-044: 표본 밖으로 자주 밀려 기록만 — 같은 패턴은 R3-value-trap이 표본 전체에서 검사
     issue: P6, P8
     why: 합병 장부가 B/P 1.25, 매출 감소 가치 함정
     # 수정 4 PR B 뒤 게임·엔터·미디어 US 상위 10 밖(cap_rank 808)이면 표본 밖 — 통과가 아니라 미검증(D-043)
@@ -575,6 +575,14 @@ rules:
     decision: D-039
     why: 배포 DB 27/288종목이 이전 경로 값(JNJ 2025 255.96억 vs 335.52억, NEM 2023 +7.08억 vs −20.31억 달러). 실행기는 외부를 부르지 않으므로 '다시 받은 값과 5% 안'을 '현재 코드가 쓴 행'으로 확인한다
 
+  - id: SEC-tags-scored
+    check: 표본 안 미국 종목 중 재무(FY 행)가 있는데 최신 FY 영업이익·순이익이 모두 비어 점수를 잃은 종목 0개
+    status: required
+    independent: true
+    issue: R1-6
+    decision: D-044
+    why: 7종목 목록(SEC-tags-scored-list)은 비교군이 다시 뽑힐 때마다 표본 밖으로 밀려 미검증이 된다 — 태그 누락을 표본 전체에서 센다
+
   - id: LP-equity-not-zero
     check: 비교 표본 FY 자본이 정확히 0이면서 자산 − 부채가 0이 아닌 종목 0개
     status: required        # 라운드 4 제안은 target — D-042가 PR A에서 required로
@@ -613,10 +621,10 @@ rules:
   - id: SPINOFF-basis
     ticker: HON
     market: US
-    check: 최신 FY 결산일 뒤 분할한 종목(config corporate_actions)은 저평가 지표 없음 + 사유(score_null_code corporate_action)
-    status: required        # 라운드 4 제안은 target — D-042가 PR B에서 required로
+    check: 분할 목록(config corporate_actions) 중 표본 안이고 최신 FY 결산일 뒤 분할한 종목은 저평가 지표 없음 + 사유(score_null_code corporate_action). 표본 안 대상이 0개면 '대상 없음'(미검증이지만 표본 밖 경고에 넣지 않음 — 로직은 pytest)
+    status: required        # 라운드 4 제안은 target — D-042가 PR B에서 required로, D-044가 표본 전체 규칙으로
     issue: R4-8
-    decision: D-039
+    decision: D-039, D-044
     why: 분할 전 FY2025 이익 ÷ 분할 뒤 시총 — 분할 전 시총 기준이면 가치 45 → 106. HON 분할 완료 2026-06-29(8-K Item 2.01)
 
   # ── 라운드 4 — 데이터 (수정 4 PR C 계산 규칙, D-039·D-040·D-041·D-042) ──
