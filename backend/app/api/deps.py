@@ -157,15 +157,15 @@ def get_portfolio_service(db: Session = Depends(get_db), fx: FxService = Depends
 
 # ── [S3-D] 갱신 서비스 ──
 def get_scorer():
-    """매력도 점수 계산기 (갱신 SCORES 작업·비교군 갱신에서 쓴다)."""
+    """매력도 점수 계산기 (07:00 비교군 갱신에서 쓴다 — 매시 갱신 SCORES에는 넘기지 않는다, 수정 4 R4-5)."""
     from app.services.scoring import compute_scores
     return compute_scores
 
 
 def get_refresh_service(engine: Engine = Depends(get_engine_dep), providers: Providers = Depends(get_providers),
-                        fx: FxService = Depends(get_fx_service), scorer=Depends(get_scorer)) -> RefreshService:
+                        fx: FxService = Depends(get_fx_service)) -> RefreshService:
     st = get_settings()
-    return RefreshService(engine, providers, fx, st.refresh_ttl_hours, scorer=scorer, sector_loader=load_sectors,
+    return RefreshService(engine, providers, fx, st.refresh_ttl_hours, sector_loader=load_sectors,
                           fast_ttl_hours=st.refresh_fast_ttl_hours)
 
 

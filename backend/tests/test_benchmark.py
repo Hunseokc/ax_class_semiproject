@@ -172,7 +172,7 @@ def test_refresh_runs_scores_only_with_scorer(engine):
     from app.services.refresh import RefreshService
     p = make_providers()
     jobs_ = {j.job_type: j for j in RefreshService(engine, p, FxService(engine, p.fx, 4), 4).refresh().jobs}
-    assert jobs_["SCORES"].status == "SKIPPED" and jobs_["SCORES"].detail == "점수 계산기 미연결"
+    assert jobs_["SCORES"].status == "SKIPPED" and jobs_["SCORES"].detail.startswith("점수 계산기 미연결")
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM ingestion_logs"))
     jobs_ = {j.job_type: j for j in RefreshService(engine, p, FxService(engine, p.fx, 4), 4,

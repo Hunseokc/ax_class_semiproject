@@ -1,6 +1,8 @@
 """시장 데이터 갱신 (POST /market/refresh, python -m app.ingest refresh).
 
 작업: FX(SNAPSHOT + DAILY 증분) → INDICES → SECTORS_US·SECTORS_KR(대시보드 섹터 히트맵) → PRICES(증분) → VALUATION → SCORES
+- SCORES는 점수 계산기를 넘길 때만 돈다. 앱·CLI 갱신은 넘기지 않는다 — 점수는 매일 07:00 비교군 갱신에서만 계산한다
+  (수정 4 R4-5: 4시간마다 다시 계산하면 국내 노출 종목은 당일 종가, 비교군은 전날 종가로 섞인 점수가 그날 이력으로 남았다)
 - 작업 단위 결과를 ingestion_logs에 source='REFRESH' 1행으로 남기고, 그 마지막 성공 시각이 TTL 이내면 외부 호출 없이 SKIPPED
 - TTL: 주가·지수·환율(FAST_JOBS)은 REFRESH_FAST_TTL_HOURS(1시간), 그 밖은 REFRESH_TTL_HOURS(4시간)
   (종목 단위 행은 비교군 갱신·상세 수집도 남기므로 TTL 판단에 쓰지 않는다)
@@ -30,6 +32,7 @@ REFRESH_LOCK_KEY = 7_301_002
 JOB_TYPES = ("FX", "INDICES", "SECTORS_US", "SECTORS_KR", "PRICES", "VALUATION", "SCORES")
 SECTOR_JOBS = {"SECTORS_US": "US", "SECTORS_KR": "KR"}   # 섹터 수집기(sector_loader)를 연결했을 때만 실행
 JOB_SOURCE = "REFRESH"                 # 작업 단위 결과 행의 source
+SCORES_SKIPPED = "점수 계산기 미연결 — 점수는 매일 07:00 비교군 갱신에서만 계산"   # R4-5
 RETRY_AFTER = timedelta(minutes=30)    # 실패한 작업을 다시 시도하기까지 최소 간격(갱신 버튼 연타 방지)
 PER_STOCK_JOBS = ("PRICES", "VALUATION")
 FAST_JOBS = ("FX", "INDICES", "PRICES")   # fast_ttl_hours(1시간)마다 — 주가·지수·환율
@@ -183,7 +186,7 @@ class RefreshService:
                 for job_type in JOB_TYPES:
                     if job_type not in self.job_types:
                         if job_type == "SCORES":
-                            outcomes.append(JobOutcome(job_type, "SKIPPED", "점수 계산기 미연결"))
+                            outcomes.append(JobOutcome(job_type, "SKIPPED", SCORES_SKIPPED))
                         continue
                     with self.engine.connect() as conn:
                         last = self.last_success(conn).get(job_type)

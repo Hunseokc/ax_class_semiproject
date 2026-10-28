@@ -3,7 +3,10 @@
 --       stock_id를 주면 그 종목만(상장 종목 목록의 참고 점수 계산용 — app/services/reference_score.py)
 -- 지표 정의·NULL 사유는 개발산출물/09 2절(D-002). 한 종목당 10행(값이 없으면 raw_value NULL)
 -- note: 대체 계산 메모, null_note: 규칙으로 일부러 비운 지표의 사유(missing_metrics에 기본 사유 대신 쓴다)
--- fy_count: 이어지는 FY 수(최대 3) — 3 미만이면 저평가 팩터를 그 비율만큼 줄인다(D-010, score_aggregate.sql)
+-- fy_count: 이어지는 FY 수(최대 3) — 배지(재무 이력 짧음)
+-- value_rules: 저평가 보수 규칙 중 쓸 수 있는 수(D-040) — 3년 평균 이익(t·t−1·t−2 이익이 모두 있음) + 가치 함정 신호
+--   (t−2가 있고 신호 3개 이상, 금융은 t−2만 있으면 — 해당 없음). 0 → 저평가 × 1/3, 1 → × 2/3, 2 → 그대로(score_aggregate.sql)
+-- price_date: 점수에 쓴 최신 일봉 날짜(sanity PRICE-same-date — 국가마다 하나여야 함, R4-5)
 -- fy_end·ni0·oi0(·ni1·oi1·ni2·oi2): FY t(·t−1·t−2) 결산일·순이익·영업이익 — 경고 배지(순이익 > 영업이익·결산 시점, D-003·D-029)를
 --   scoring.py가 만든다
 -- 재무 FY: 자산과 이익(순이익 또는 영업이익)이 있는 FY만 쓴다(일부 칸만 들어온 최신 FY는 건너뜀).
@@ -133,6 +136,9 @@ calc AS (
     FROM earn e
 )
 SELECT c.stock_id, c.fy_count, c.end0 AS fy_end, c.ni0, c.oi0, c.ni1, c.oi1, c.ni2, c.oi2,
+       CASE WHEN c.fy_count = 3 AND c.e1 IS NOT NULL AND c.e2 IS NOT NULL THEN 1 ELSE 0 END
+     + CASE WHEN c.end2 IS NOT NULL AND (c.fin OR c.sig_n >= 3) THEN 1 ELSE 0 END AS value_rules,
+       c.last_trade AS price_date,
        v.metric, v.factor,
        CASE WHEN c.halted OR (c.ca_done > c.end0 AND v.factor = 'value') THEN NULL ELSE v.raw_value END AS raw_value,
        CASE WHEN c.halted OR (c.ca_done > c.end0 AND v.factor = 'value') THEN NULL ELSE v.note END AS note,
