@@ -26,6 +26,7 @@ import yaml
 from sqlalchemy import Connection, text
 
 from app.core.config import CONFIG_DIR
+from app.ingest.universe import load_universe
 from app.queries import sql
 from app.services.scoring import (FACTORS, FISCAL_GAP_DAYS, METRICS, MIN_FACTORS, REQUIRED_FACTORS, load_config,
                                   theme_positions, value_shrink)
@@ -177,6 +178,24 @@ class Data:
         """market(US·KR)을 주면 그 국가 종목만 — 국내 숫자 티커와 미국 영문 티커가 겹치지 않아도 시장을 섞어 찾지 않는다."""
         country = MARKET_COUNTRY.get(market or "")
         return next((s for s in self.stocks.values() if s.ticker == ticker and (country is None or s.country == country)), None)
+
+    def outside(self, ticker: str, market: str | None = None) -> tuple[bool, str]:
+        """표본에 없는 종목이 왜 없는지(D-043). (미검증, 사유) — 점수를 내지 않는 테마(scoring none — 지주회사·신탁·리츠,
+        D-004·D-025)라 빠졌으면 설계상 점수 없음(False), 그 밖(테마 시가총액 상위 n 밖·거래정지·DB에 없음)은 표본 밖(True)."""
+        country = MARKET_COUNTRY.get(market or "")
+        r = self.conn.execute(text("""
+                SELECT mk.country, s.cap_rank, t.theme, t.family
+                FROM stocks s JOIN markets mk ON mk.market_id = s.market_id
+                LEFT JOIN v_stock_theme t ON t.stock_id = s.stock_id
+                WHERE s.ticker = :t AND s.is_active AND (CAST(:c AS text) IS NULL OR mk.country = :c)
+                ORDER BY s.stock_id LIMIT 1"""), {"t": ticker, "c": country}).first()
+        if r is None:
+            return True, "표본 밖(상장 종목 DB에 없음)"
+        if r.family == "none":
+            return False, f"표본에 없음(설계상 점수 없음 — {r.theme} 테마)"
+        per_sector = load_universe().benchmark["per_sector"]
+        return True, (f"표본 밖({r.theme or '주 테마 없음'} {r.country} 상위 {per_sector} 밖"
+                      + (f", cap_rank {r.cap_rank}" if r.cap_rank else "") + ")")
 
     def general(self, country: str) -> list[Stock]:
         return [s for s in self.stocks.values() if s.country == country and s.family == "general"]
@@ -867,7 +886,10 @@ def case_buyback(d: Data):
 
 def _with_stock(d: Data, c: dict, fn):
     s = d.by_ticker(str(c["ticker"]), c.get("market"))
-    return fn(d, s) if s is not None else (False, "표본에 없음")
+    if s is not None:
+        return fn(d, s)
+    out, why = d.outside(str(c["ticker"]), c.get("market"))
+    return (None if out else False), why                  # 표본 밖은 미검증(D-043)
 
 
 def _all_stocks(d: Data, c: dict, fn):
@@ -988,12 +1010,11 @@ def rule_halted(d: Data):
 
 def case_spinoff(d: Data, c: dict):
     """분할(config corporate_actions) 완료일이 최신 FY 결산일보다 뒤면 저평가 지표 없음 + 사유(R4-8 — HON)."""
-    from app.ingest.universe import load_universe
     out, res = [], []
     for a in load_universe().corporate_actions:
         s = d.by_ticker(str(a["ticker"]), a["market"])
         if s is None:
-            out.append(f"{a['ticker']} 표본에 없음")
+            out.append(f"{a['ticker']} {d.outside(str(a['ticker']), a['market'])[1]}")
             continue
         end = s.fins[-1]["period_end"] if s.fins else None
         if end is not None and end >= a["date"]:
@@ -1096,12 +1117,19 @@ def run_case(d: Data, c: dict) -> tuple[bool | None, str]:
     results, vals = [], []
     for t in tickers:
         s = d.by_ticker(str(t), c.get("market"))
+        if s is None:
+            out, why = d.outside(str(t), c.get("market"))
+            if out:          # 표본 밖은 통과도 실패도 아닌 미검증(D-043) — not_scored로 통과시키지 않는다
+                vals.append(f"{t}: {why}")
+                continue
         r = eval_check(c["check"], s)
+        if r is None:
+            return None, f"식을 해석하지 못함 — {c['check']}"
         results.append(r)
-        vals.append(f"{t}: {describe(s)}")
-    if any(r is None for r in results):
-        return None, f"식을 해석하지 못함 — {c['check']}"
-    return all(results), " · ".join(vals)
+        vals.append(f"{t}: {describe(s) if s is not None else why}")
+    # 한 종목이라도 실패면 실패, 실패 없이 표본 밖 종목이 있으면 미검증(OSK — SEC-tags-scored), 모두 판정되면 통과
+    ok = False if not all(results) else (True if len(results) == len(tickers) else None)
+    return ok, " · ".join(vals)
 
 
 def run(conn: Connection, cases_path: Path | None = None, as_of: date | None = None, *,
@@ -1131,8 +1159,14 @@ def run(conn: Connection, cases_path: Path | None = None, as_of: date | None = N
              f"required(known_fail 포함) {req_total}개: 통과 {req_total - n['required_fail'] - len(req_unverified) - n['known_fail']}"
              f" + 감수한 실패 {n['known_fail']}" + (f" · 미검증 {len(req_unverified)} ({', '.join(req_unverified)})" if req_unverified else "")
              + (f" · 실패 {n['required_fail']}" if n["required_fail"] else ""),
-             "",
-             "| id | status | 결과 | 실제 값 |", "|---|---|---|---|"]
+             ""]
+    # 종료 조건 2는 미검증을 실패로 보지 않지만, 표본 밖 미검증이 3개를 넘으면 표본 안 종목으로 케이스를 바꾼다(D-043).
+    # 실행 환경 때문에 못 본 것(DEPLOY-sanity-ran 등)은 종목을 바꿔 풀 수 없어 세지 않는다
+    req_outside = [r["id"] for r in rows if r["id"] in req_unverified and "표본 밖" in r["value"]]
+    if len(req_outside) > 3:
+        lines += [f"⚠ required 표본 밖 미검증 {len(req_outside)}개 > 3 ({', '.join(req_outside)}) — "
+                  "표본 안 종목으로 케이스를 바꿀 것(D-043)", ""]
+    lines += ["| id | status | 결과 | 실제 값 |", "|---|---|---|---|"]
     lines += [f"| {r['id']} | {r['status']} | {r['result']} | {r['value'].replace('|', '/')} |" for r in rows]
     report, ok = "\n".join(lines), not kinds["required_fail"]
     if save:

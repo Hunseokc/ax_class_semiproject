@@ -16,8 +16,12 @@
 #   *_rank       : 같은 시장(market)·같은 묶음(family) 안 프리셋 종합 순위. 1이 가장 높음.
 #   *_percentile : 같은 범위의 백분위(0~100, 높을수록 상위).
 #   *_factor     : 팩터 F 값(재표준화 후).
-#   not_scored   : 점수가 없음(신탁·지주 테마·리츠 등).
+#   not_scored   : 설계상 점수가 없음 — 표본 안에서 점수를 내지 않는 종목(금융·재무 없음 등)이거나
+#                  점수를 내지 않는 테마(지주회사·신탁·리츠)라 표본에서 빠진 종목(D-004·D-014·D-025·D-028).
 #   scored       : 점수가 있음.
+#   표본 밖       : 검사할 종목이 그 밖의 이유(테마 시가총액 상위 n 밖·거래정지)로 비교군에 없으면 식을 계산하지 않고
+#                  미검증으로 센다(D-043). 사유 칸에 '표본 밖(테마 상위 n 밖)'이 남는다. required 미검증이 3개를 넘으면
+#                  표본 안 종목으로 케이스를 바꾼다.
 # 종목코드는 DB 기준으로 한 번 확인할 것.
 #
 # 주의(순환성): independent: false 인 규칙만 통과했다고 개선됐다고 판단하지 말 것.
@@ -27,11 +31,11 @@ cases:
   - id: SIRI-growth
     ticker: SIRI
     market: US
-    check: growth_rank > 50 or not_scored
+    check: growth_rank > 50
     status: required
     issue: P1
     why: 매출 3년 연속 감소, EPS 변화의 대부분이 전년 손실 항
-    # 수정 4 PR B: yfinance 시총 순위로 게임·엔터·미디어 US 상위 10 밖(cap_rank 808)이면 표본에 없음 — 순위가 부풀 위험이 없어 통과(LOTTE-HOLDINGS와 같은 방식)
+    # 수정 4 PR B 뒤 게임·엔터·미디어 US 상위 10 밖(cap_rank 808)이면 표본 밖 — 통과가 아니라 미검증(D-043)
 
   - id: RIVN-growth
     ticker: RIVN
@@ -205,6 +209,7 @@ cases:
     status: required
     issue: R1-6
     why: XOM 재무 0건(CIK 변경), 나머지는 SEC 영업이익·순이익 태그 누락
+    # '재무가 수집됐고 표본 안이면 점수 있음'으로 읽는다. 표본 밖 종목(수정 4 뒤 OSK — 기계·로봇 US 상위 10 밖)은 미검증(D-043)
 
   # ── R1-5 재무 이력 부족 ──
   - id: DAEHAN-SHIPBUILDING-value
@@ -236,11 +241,11 @@ cases:
   - id: SIRI-value
     ticker: SIRI
     market: US
-    check: (value_rank > 20 and balanced_rank > 20) or not_scored
+    check: value_rank > 20 and balanced_rank > 20
     status: required
     issue: P6, P8
     why: 합병 장부가 B/P 1.25, 매출 감소 가치 함정
-    # 수정 4 PR B: yfinance 시총 순위로 게임·엔터·미디어 US 상위 10 밖(cap_rank 808)이면 표본에 없음 — 순위가 부풀 위험이 없어 통과(LOTTE-HOLDINGS와 같은 방식)
+    # 수정 4 PR B 뒤 게임·엔터·미디어 US 상위 10 밖(cap_rank 808)이면 표본 밖 — 통과가 아니라 미검증(D-043)
 
   - id: KGSTEEL-value
     ticker: "016380"   # KG스틸

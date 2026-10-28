@@ -120,6 +120,38 @@ rules:
     assert "| GROWTH-label | required | 통과 |" in report and "미래 성장 예측이 아닙니다" in report
 
 
+def test_out_of_sample_is_unverified_not_passed(engine, universe, tmp_path):  # noqa: F811
+    """D-043: 검사할 종목이 표본 밖(테마 상위 n 밖·DB에 없음)이면 not_scored로 통과시키지 않고 미검증. 점수를 내지 않는 테마
+    (지주회사)라 빠진 종목만 설계상 점수 없음으로 식을 계산한다. 여러 종목 중 하나라도 실패면 실패, 실패 없이 표본 밖이 있으면 미검증."""
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO peer_groups (group_id, name, scoring) VALUES (4, '지주회사', 'none')"))
+        conn.execute(text("INSERT INTO peer_group_members VALUES (3, 8, true), (4, 7, true)"))
+        conn.execute(text("UPDATE stocks SET coverage = 'listed', cap_rank = 808 WHERE stock_id = 8"))     # 카카오 — 자동차 상위 밖
+        conn.execute(text("UPDATE stocks SET coverage = 'listed' WHERE stock_id = 7"))                     # 기아 — 지주회사 테마
+    compute_scores(engine, as_of=D)
+    cases = tmp_path / "cases.yaml"
+    cases.write_text("""
+cases:
+  - {id: OUT-growth, ticker: "035720", market: KR, check: growth_rank > 50 or not_scored, status: required}
+  - {id: HOLD-growth, ticker: "000270", market: KR, check: growth_percentile < 80 or not_scored, status: required}
+  - {id: MIX-scored, ticker: ["035420", "035720"], market: KR, check: scored, status: required}
+  - {id: MIX-fail, ticker: ["035420", "035720"], market: KR, check: not_scored, status: required}
+  - {id: NODB-scored, ticker: ZZZZ, market: US, check: scored, status: required}
+  - {id: CJ-LOGISTICS-history, ticker: "035720", market: KR, check: 재무 FY ≥ 3, status: required}
+""", encoding="utf-8")
+    with engine.connect() as conn:
+        report, ok = run(conn, cases)
+    assert "| OUT-growth | required | 확인 못함 | 035720: 표본 밖(자동차 KR 상위 10 밖, cap_rank 808) |" in report
+    assert "| HOLD-growth | required | 통과 | 000270: 표본에 없음(설계상 점수 없음 — 지주회사 테마) |" in report
+    assert "| MIX-scored | required | 확인 못함 | 035420: 균형 " in report and "035720: 표본 밖(" in report
+    assert "| MIX-fail | required | 실패 |" in report                    # 실패가 표본 밖(미검증)에 가려지지 않는다
+    assert "| NODB-scored | required | 확인 못함 | ZZZZ: 표본 밖(상장 종목 DB에 없음) |" in report
+    assert "| CJ-LOGISTICS-history | required | 확인 못함 | 표본 밖(자동차 KR 상위 10 밖, cap_rank 808) |" in report
+    assert not ok and ("⚠ required 표본 밖 미검증 4개 > 3 (OUT-growth, MIX-scored, NODB-scored, CJ-LOGISTICS-history)"
+                       " — 표본 안 종목으로 케이스를 바꿀 것(D-043)") in report
+
+
 def test_classify_four_columns():
     """D-030: 결정 번호 없는 known_fail은 감수한 실패가 아니라 required 실패, 판정 못함은 상태와 관계없이 미검증."""
     assert classify("required", True, None) == "passed" and classify("target", None, None) == "unverified"
