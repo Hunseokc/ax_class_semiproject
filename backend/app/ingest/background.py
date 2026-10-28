@@ -90,10 +90,13 @@ INFLATED_CAP_TO_ASSETS = 200         # yfinance 값이 없을 때 SEC 기준 시
 
 def rank_us(engine: Engine, providers: Providers, now: datetime | None = None, *, force: bool = False) -> int | None:
     """미국 활성 종목(CIK 있음)의 시가총액 순위 → stocks.cap_rank(상위 us_rank_pool개, 나머지 NULL)·cap_usd·share_ratio.
-    1) SEC 발행주식수 × 종가로 후보를 고른다(상위 pool × 4/3개 + 발행주식수가 비는 회사).
+    1) SEC 발행주식수 × 종가로 후보를 고른다(상위 pool × 4/3개 + 발행주식수가 비는 회사 중 DB 일봉이 있는 종목과
+       최근 거래대금 상위 pool / 3개 — 비는 회사는 1,800여 개이고 대부분 20-F를 내는 해외 기업이다).
     2) 후보는 yfinance 시총으로 바꾸고, SEC 기준과 20% 넘게 다르면 그 비율(share_ratio = SEC 원주 수 ÷ 상장 단위 주식수)을
        남긴다 — 미국 밸류에이션(jobs.DERIVED_US_SQL)이 이 비율로 상장 단위 주식수를 쓴다(ADR, R4-3).
     3) yfinance 값이 없으면 SEC 기준을 쓰되 최신 FY 총자산의 200배를 넘으면 뺀다(부푼 ADR).
+    4) 발행주식수가 비는 회사가 순위 안에 들면 10-K·10-Q를 내는 회사인지 확인하고, 20-F·40-F만 내면 뺀다 — 재무를 받지 않아
+       점수가 없는데(D-014) 비교군 자리를 차지하지 않게.
     마지막으로 매긴 지 us_rank_days가 안 지났으면 하지 않고 None. 반환: 순위를 매긴 종목 수."""
     cfg, now = config(), now or datetime.now(timezone.utc)
     ref, batch = providers.us_reference, providers.us_batch_price
@@ -114,6 +117,7 @@ def rank_us(engine: Engine, providers: Providers, now: datetime | None = None, *
     shares = ref.get_shares_frame(now.date())
     mc, pool = providers.us_market_cap, int(cfg.get("us_rank_pool", 1500))
     closes = {r.stock_id: r.close for r in rows if r.close}
+    dollar_vol: dict[int, Decimal] = {}                 # 묶음으로 받은 종목의 최근 평균 거래대금(발행주식수 없는 후보 고르기)
     missing = [r.stock_id for r in rows if not r.close and (r.cik in shares or mc is not None)]
     if missing:                                         # listed 종목은 일봉이 없어 묶음으로 최근 종가만
         with engine.connect() as conn:
@@ -123,12 +127,15 @@ def rank_us(engine: Engine, providers: Providers, now: datetime | None = None, *
             bars = [b for b in got.get(r.ticker, []) if b.close]
             if bars:
                 closes[r.stock_id] = bars[-1].close
+                dollar_vol[r.stock_id] = sum(b.close * (b.volume or 0) for b in bars) / len(bars)
     sec_caps = {r.stock_id: Decimal(shares[r.cik]) * closes[r.stock_id] for r in rows
                 if r.cik in shares and r.stock_id in closes}
     caps, ratios = dict(sec_caps), {}
+    no_share = {r.stock_id for r in rows if r.cik not in shares and r.stock_id in closes}   # 주식 종류 여럿(V·MA·BRK)·해외
     if mc is not None:
         cand = sorted(sec_caps, key=lambda s: (-sec_caps[s], s))[:pool + pool // 3]
-        cand += [r.stock_id for r in rows if r.cik not in shares and r.stock_id in closes]   # 주식 종류 여럿(V·MA·BRK)
+        cand += [s for s in no_share if s not in dollar_vol]                             # DB 일봉이 있는 표본 종목(META 등)
+        cand += sorted((s for s in no_share if s in dollar_vol), key=lambda s: (-dollar_vol[s], s))[:pool // 3]
         with engine.connect() as conn:
             refs = stock_refs(conn, stock_ids=cand)
             assets = dict(conn.execute(text("""
@@ -146,7 +153,18 @@ def rank_us(engine: Engine, providers: Providers, now: datetime | None = None, *
                 caps.pop(sid, None)
         log.info("미국 시가총액: 후보 %d · yfinance %d · 비율 %d · 부풀어 뺀 종목 %d", len(cand), len(yf), len(ratios),
                  sum(1 for s in cand if s not in caps))
-    ranked = sorted(caps, key=lambda s: (-caps[s], s))[:pool]
+    files_us = getattr(ref, "files_us_reports", None) if mc is not None else None
+    cik_of = {r.stock_id: r.cik for r in rows}
+    ranked, foreign = [], []
+    for sid in sorted(caps, key=lambda s: (-caps[s], s)):
+        if len(ranked) >= pool:
+            break
+        if files_us is not None and sid in no_share and sid in caps and not files_us(cik_of[sid]):
+            foreign.append(sid)
+            continue
+        ranked.append(sid)
+    if foreign:
+        log.info("미국 시가총액: 발행주식수가 없고 20-F·40-F만 내는 회사 %d개 순위에서 뺌", len(foreign))
     with engine.begin() as conn:
         conn.execute(text("""UPDATE stocks s SET cap_rank = NULL, cap_usd = NULL, share_ratio = NULL, cap_ranked_at = :now
                              FROM markets m WHERE m.market_id = s.market_id AND m.country = 'US'"""), {"now": now})
