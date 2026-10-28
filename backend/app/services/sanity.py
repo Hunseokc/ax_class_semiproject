@@ -28,7 +28,7 @@ from sqlalchemy import Connection, text
 from app.core.config import CONFIG_DIR
 from app.queries import sql
 from app.services.scoring import (FACTORS, FISCAL_GAP_DAYS, METRICS, MIN_FACTORS, REQUIRED_FACTORS, load_config,
-                                  theme_positions)
+                                  theme_positions, value_shrink)
 
 PRESET_KR = {"aggressive": "위험", "growth": "성장", "balanced": "균형", "value": "가치"}
 FACTOR_ALIAS = {"stability": "safety"}
@@ -631,9 +631,8 @@ def raw_factors(d: Data) -> dict[int, dict[str, float]]:
             pairs = [(METRICS[m].weight, v) for m, v in s.z_raw.items() if METRICS[m].factor == f]
             if pairs:
                 fs[f] = sum(w * v for w, v in pairs) / sum(w for w, _ in pairs)
-        n = s.dq.get("fy_history") or 0
-        if "value" in fs and n < 3:
-            fs["value"] *= n / 3
+        if "value" in fs:                            # 저평가 보수 규칙 쓸 수 있는 수 0~2 → × 1/3·2/3·1(D-040)
+            fs["value"] *= value_shrink(s.dq.get("value_rules"))
         if fs:
             f0[s.stock_id] = fs
     return f0

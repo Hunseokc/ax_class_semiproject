@@ -55,3 +55,15 @@ def test_r10_i1_uses_d025_list_not_names():
     assert not i1(psk) and i1_name(psk)
     assert i1(st("한국앤컴퍼니", "지주회사")) and i1(st("다우기술", "지주회사", "023590"))
     assert i1(st("SPDR Gold", None, "GLD", "US"))
+
+
+def test_sanity_raw_factors_use_value_rules_shrink():
+    """sanity가 따로 다시 계산하는 팩터(THEME-position-raw·R6)도 점수와 같은 축소 — FY 수가 아니라 value_rules(D-040)."""
+    from types import SimpleNamespace
+
+    from app.services.sanity import METRICS, raw_factors
+    m = next(k for k, v in METRICS.items() if v.factor == "value")
+    stocks = {i: Stock(i, f"T{i}", "x", "KR", "general", "반도체", False, z_raw={m: 1.5}, dq={"fy_history": 3, "value_rules": r})
+              for i, r in ((1, 2), (2, 1), (3, 0), (4, None))}
+    got = {i: f["value"] for i, f in raw_factors(SimpleNamespace(stocks=stocks)).items()}
+    assert got == {1: 1.5, 2: 1.0, 3: 0.5, 4: 0.5}       # 같은 FY 3개라도 쓸 수 있는 보수 규칙 수만큼(옛 규칙이면 모두 1.5)
