@@ -1010,6 +1010,7 @@ def rule_halted(d: Data):
 
 def case_spinoff(d: Data, c: dict):
     """분할(config corporate_actions) 완료일이 최신 FY 결산일보다 뒤면 저평가 지표 없음 + 사유(R4-8 — HON)."""
+    from app.ingest.universe import load_universe
     out, res = [], []
     for a in load_universe().corporate_actions:
         s = d.by_ticker(str(a["ticker"]), a["market"])
