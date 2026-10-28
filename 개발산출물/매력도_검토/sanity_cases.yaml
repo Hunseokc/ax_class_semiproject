@@ -27,10 +27,11 @@ cases:
   - id: SIRI-growth
     ticker: SIRI
     market: US
-    check: growth_rank > 50
+    check: growth_rank > 50 or not_scored
     status: required
     issue: P1
     why: 매출 3년 연속 감소, EPS 변화의 대부분이 전년 손실 항
+    # 수정 4 PR B: yfinance 시총 순위로 게임·엔터·미디어 US 상위 10 밖(cap_rank 808)이면 표본에 없음 — 순위가 부풀 위험이 없어 통과(LOTTE-HOLDINGS와 같은 방식)
 
   - id: RIVN-growth
     ticker: RIVN
@@ -235,10 +236,11 @@ cases:
   - id: SIRI-value
     ticker: SIRI
     market: US
-    check: value_rank > 20 and balanced_rank > 20
+    check: (value_rank > 20 and balanced_rank > 20) or not_scored
     status: required
     issue: P6, P8
     why: 합병 장부가 B/P 1.25, 매출 감소 가치 함정
+    # 수정 4 PR B: yfinance 시총 순위로 게임·엔터·미디어 US 상위 10 밖(cap_rank 808)이면 표본에 없음 — 순위가 부풀 위험이 없어 통과(LOTTE-HOLDINGS와 같은 방식)
 
   - id: KGSTEEL-value
     ticker: "016380"   # KG스틸
@@ -276,7 +278,7 @@ cases:
     ticker: ["007340", "074600", "225570", "347700", "051910", "030530", "028260", "081660", "127710",
              "000150", "020150", "058470", "102710", "100090", "025770", "036800", "462860", "037460",
              "022100", "010780", "046890", "328130", "466100", "026960", "047050", "039200", "121600",
-             "281740", "011790", "010170", "018260", "181710", "457190", "300080", "420770"]
+             "281740", "011790", "010170", "018260", "181710", "457190", "300080", "420770", "083650"]
     market: KR
     check: 주 테마 == expected
     expected: {"007340": 기계·로봇, "074600": 반도체 장비·소재, "225570": 게임·엔터·미디어, "347700": 항공우주·방산,
@@ -288,7 +290,8 @@ cases:
                "466100": 기계·로봇, "026960": 유통·커머스, "047050": 유통·커머스, "039200": 바이오,
                "121600": 2차전지, "281740": 반도체 장비·소재, "011790": 석유화학, "010170": 하드웨어·통신장비,
                "018260": 운송·물류, "181710": 소프트웨어·IT서비스, "457190": 정밀화학, "300080": 소프트웨어·IT서비스,
-               "420770": 반도체 장비·소재}
+               "420770": 반도체 장비·소재,
+               "083650": 전력 인프라}      # 수정 4 PR B — 라운드 4 보류(발전용 설비 제작 단일 부문, 2025 사업보고서)
     status: required
     issue: U-2, R3-1
     decision: D-024
@@ -296,7 +299,7 @@ cases:
 
   - id: THEME-main-business-US
     ticker: [IT, KMB, LTH, MTN, CHDN, HXL, OSK, FSS, CVS, SHW, MMM, WWD, HUBB, ABT, WOR, CALX, QCOM, ECL, FELE, LFUS,
-             SNDK, CRS, ATI, APO, CCL, RCL, IFF, SXT, MOD, APP]
+             SNDK, CRS, ATI, APO, CCL, RCL, IFF, SXT, MOD, APP, HON, NEU, V, MA, GPN, FIS, FISV, CPAY, PYPL]
     market: US
     check: 주 테마 == expected
     expected: {IT: 소프트웨어·IT서비스, KMB: 화장품·생활용품, LTH: 레저·의류·소비서비스, MTN: 레저·의류·소비서비스,
@@ -305,7 +308,10 @@ cases:
                WOR: 건자재, CALX: 하드웨어·통신장비, QCOM: 반도체, ECL: 정밀화학, FELE: 기계·로봇,
                LFUS: 전자부품·디스플레이, SNDK: 반도체, CRS: 항공우주·방산, ATI: 항공우주·방산, APO: 보험,
                CCL: 레저·의류·소비서비스, RCL: 레저·의류·소비서비스, IFF: 식음료·담배, SXT: 식음료·담배,
-               MOD: 기계·로봇, APP: 인터넷 플랫폼}
+               MOD: 기계·로봇, APP: 인터넷 플랫폼,
+               # 수정 4 PR B (D-036): HON 분할 뒤 사업, NEU 라운드 4 보류, 미국 결제사 7종목 결제·핀테크
+               HON: 기계·로봇, NEU: 정밀화학, V: 결제·핀테크, MA: 결제·핀테크, GPN: 결제·핀테크, FIS: 결제·핀테크,
+               FISV: 결제·핀테크, CPAY: 결제·핀테크, PYPL: 결제·핀테크}
     status: required
     issue: U-2, R3-1
     decision: D-024
@@ -313,8 +319,8 @@ cases:
 
   # 보류 33종목 중 D-024로 판정하지 못한 종목 — 업종 코드 그대로 두고 미검증으로 센다(09 11절)
   - id: THEME-main-business-unjudged
-    ticker: ["048410", HON, CTAS, FISV, CPAY, PYPL]
-    check: 사람이 판정 — 현대바이오(매출이 사업을 대표하지 못함) · HON(2026-08 분할) · CTAS(맞는 테마 없음) · FISV·CPAY·PYPL(결제 업종 테마 결정 필요)
+    ticker: ["048410", CTAS]
+    check: 사람이 판정 — 현대바이오(매출이 사업을 대표하지 못함) · CTAS(맞는 테마 없음). HON·FISV·CPAY·PYPL은 수정 4 PR B에서 판정(D-036)
     status: target
     issue: U-2
     decision: D-024
@@ -571,3 +577,56 @@ rules:
     issue: R4-9
     decision: D-039
     why: EPD 자본 0.00(자산 − 부채 306억 달러) → '자본 음수(자사주 매입 등)' 사유
+
+  # ── 라운드 4 — 데이터 (수정 4 PR B 표본·시총·분류, D-039·D-036·D-042) ──
+  - id: ADR-mcap-sane
+    check: 미국 cap_rank 상위 300 안 종목(재무가 있는 종목)은 순위에 쓴 시가총액 ÷ 총자산 ≤ 200 (최신 FY 매출 1억 달러 미만은 기록만)
+    status: required
+    independent: true
+    issue: R4-3
+    decision: D-039
+    why: AKTX(매출 0) 시총 1.19조 달러로 cap_rank 16 → 미국 제약 비교군. 동료 7종목 5~36계단 위로
+    # 라운드 4 제안의 '매출 ≥ 1억 달러'는 매출 없는 바이오(RVMD — yfinance 시총 399억·총자산의 17배, cap_rank 294)를 잡아 기록만으로(수정 4 측정)
+
+  - id: MULTICLASS-ranked
+    ticker: [V, MA, BRK-B, CMCSA, NKE, UPS, ACN]
+    market: US
+    check: 모두 cap_rank 있음
+    status: required        # 라운드 4 제안은 target — D-042가 PR B에서 required로
+    issue: R4-4
+    decision: D-039
+    why: SEC frames 발행주식수가 비어 시총 순위·업종 분류·비교군에서 빠짐. 배포 V 상세 NO_PRICE. D-036 결제 테마의 전제
+
+  - id: HALTED-not-scored
+    check: 마지막 일봉이 같은 국가 표본의 최근 21번째 거래일보다 앞선(20거래일 넘게 거래 없는) 종목은 점수 없음·비교군 아님
+    status: required        # 라운드 4 제안은 target — D-042가 PR B에서 required로
+    independent: true
+    issue: R4-7
+    decision: D-039
+    why: 버킷스튜디오(066410) 마지막 일봉 2025-03-06인데 통신 비교군·균형 25.59
+
+  - id: SPINOFF-basis
+    ticker: HON
+    market: US
+    check: 최신 FY 결산일 뒤 분할한 종목(config corporate_actions)은 저평가 지표 없음 + 사유(score_null_code corporate_action)
+    status: required        # 라운드 4 제안은 target — D-042가 PR B에서 required로
+    issue: R4-8
+    decision: D-039
+    why: 분할 전 FY2025 이익 ÷ 분할 뒤 시총 — 분할 전 시총 기준이면 가치 45 → 106. HON 분할 완료 2026-06-29(8-K Item 2.01)
+
+  # ── 라운드 4 — 데이터 (수정 4 PR C 계산 규칙, D-039·D-040·D-041·D-042) ──
+  - id: PRICE-same-date
+    check: 같은 점수 계산일, 국가별 일반 묶음 점수 종목(거래정지 제외 — 점수 없음)이 쓴 최신 일봉 날짜(data_quality.price_date)가 하나
+    status: required
+    independent: true
+    issue: R4-5
+    decision: D-039
+    why: 배포 2026-10-28 점수 — 국내 노출 16종목 10-27, 비교군 280종목 10-26. 매시 갱신 Job이 4시간마다 점수를 다시 계산했다
+
+  - id: R10-I1-consistent
+    check: (기록만) R10 이상 중 I1이 이름 규칙으로만 잡혔을 칸 수(옛 정의)와 I3에서 3년 창 가장 오래된 해만 적자인 칸 수
+    status: target
+    independent: false
+    issue: R4-6
+    decision: D-041
+    why: 배포 19칸 중 이름 I1 3·오래된 해 I3 6, 개발 23칸 중 2·9. I1은 D-025 판정 목록으로 바꿨고(D-041), I3 처리는 S1·S2에서 정한다

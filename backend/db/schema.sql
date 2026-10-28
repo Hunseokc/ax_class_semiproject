@@ -19,6 +19,7 @@
 --   2차 로그인: users.email·password_hash·google_sub·last_login_at·last_seen_at, user_preferences — 기존 DB는 011_auth
 --   2차 테마 분류: stocks.ksic, peer_groups.sector·scoring·commodity_linked, indices.category·unit — 기존 DB는 012_themes
 --   수정 4 재무 수집: financial_statements.filed_at·consolidated·notes + 추가 계정 9개 — 기존 DB는 016_fin_collection
+--   수정 4 미국 시가총액: stocks.cap_usd·share_ratio — 기존 DB는 017_us_cap
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -57,6 +58,9 @@ CREATE TABLE stocks (
   -- 시가총액 순위 (migration 009): 미국 상위 1,500개만 값이 있다. 백그라운드 재무 적재 우선순위용(화면에는 쓰지 않음)
   cap_rank      INT CHECK (cap_rank > 0),
   cap_ranked_at TIMESTAMPTZ,
+  -- 수정 4(migration 017, R4-3·R4-4): 순위에 쓴 시가총액(yfinance)과 SEC 발행주식수 ÷ 상장 단위 주식수(ADR·주식 종류 여럿)
+  cap_usd       NUMERIC(20,0),
+  share_ratio   NUMERIC(14,6) CONSTRAINT ck_stocks_share_ratio CHECK (share_ratio > 0),
   UNIQUE (market_id, ticker)
 );
 

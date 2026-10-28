@@ -17,6 +17,7 @@ import math
 import re
 import statistics as st
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -27,7 +28,7 @@ from sqlalchemy import Connection, text
 from app.core.config import CONFIG_DIR
 from app.queries import sql
 from app.services.scoring import (FACTORS, FISCAL_GAP_DAYS, METRICS, MIN_FACTORS, REQUIRED_FACTORS, load_config,
-                                  theme_positions)
+                                  theme_positions, value_shrink)
 
 PRESET_KR = {"aggressive": "위험", "growth": "성장", "balanced": "균형", "value": "가치"}
 FACTOR_ALIAS = {"stability": "safety"}
@@ -505,8 +506,14 @@ def _fins3(s: Stock) -> list[dict]:
 
 
 def i1(s: Stock) -> bool:
-    return s.family != "financial" and (s.ticker in TRUSTS or s.ticker in FIN_LINKED or s.theme == "지주회사"
-                                        or (s.country == "KR" and bool(HOLD_RE.search(s.name or ""))))
+    """비주식·지주·금융 연결 — D-025 판정 목록(상품 신탁, 금융 연결, 지주회사 테마)만 센다(D-041). 이름의 '홀딩스·지주'는
+    D-025가 점수를 주기로 한 사업형 지주(한진중공업홀딩스)·이름만 홀딩스인 사업 회사(피에스케이홀딩스)를 이상으로 셌다(R4-6)."""
+    return s.family != "financial" and (s.ticker in TRUSTS or s.ticker in FIN_LINKED or s.theme == "지주회사")
+
+
+def i1_name(s: Stock) -> bool:
+    """수정 4 전 I1 — 국내 이름 규칙 포함. R10-I1-consistent가 옛 정의 값을 함께 적는 데만 쓴다(D-041)."""
+    return i1(s) or (s.family != "financial" and s.country == "KR" and bool(HOLD_RE.search(s.name or "")))
 
 
 def i2(s: Stock) -> bool:
@@ -519,7 +526,7 @@ def i3(s: Stock) -> bool:
     return len(oi) >= 2 and any(x <= 0 for x in oi)
 
 
-def independent(d: Data) -> tuple[int, int, dict]:
+def independent(d: Data, first: Callable[[Stock], bool] = i1) -> tuple[int, int, dict]:
     vol90, volmed = {}, {}
     for c in ("US", "KR"):
         v = sorted(s.raw["volatility"] for s in d.general(c) if "volatility" in s.raw)
@@ -532,7 +539,8 @@ def independent(d: Data) -> tuple[int, int, dict]:
     def c_ok(s):
         return s.country in vol90
 
-    rules = {"aggressive": (i1, i2, i3), "growth": (i1, i2, i3), "balanced": (i1, i2, i3), "value": (i1, i2, i3, i5)}
+    rules = {"aggressive": (first, i2, i3), "growth": (first, i2, i3), "balanced": (first, i2, i3),
+             "value": (first, i2, i3, i5)}
     weird, per = 0, {}
     for c in ("US", "KR"):
         for p, fns in rules.items():
@@ -558,9 +566,53 @@ def independent(d: Data) -> tuple[int, int, dict]:
 
 
 def rule_r10(d: Data):
-    """경계는 측정 잡음(k 3~8에서 이상 12~16, 거짓 음성 25~27)에 맞춘다(D-021)."""
+    """경계는 측정 잡음(k 3~8에서 이상 12~16, 거짓 음성 25~27)에 맞춘다(D-021). 합격선은 기준 스냅샷 S1·S2에서 잡음 폭을
+    다시 잰 뒤에만 바꾼다(D-041). I1이 D-025 판정 목록으로 바뀌어(수정 4) 옛 정의 값도 함께 적는다."""
     weird, fn, per = independent(d)
-    return weird <= 16 and fn <= 27, f"이상 종목 {weird}(≤16) · 우량 거짓 음성 {fn}(≤27) · {per}"
+    old, _, _ = independent(d, i1_name)
+    return weird <= 16 and fn <= 27, f"이상 종목 {weird}(≤16) · 우량 거짓 음성 {fn}(≤27) · {per} · 옛 I1(이름 규칙) 정의 이상 {old}"
+
+
+def _r10_cells(d: Data) -> list[tuple[str, Stock]]:
+    """R10 이상 칸 후보 = (시장·프리셋, top10 종목)."""
+    return [(f"{c}{PRESET_KR[p]}", s) for c in ("US", "KR") for p in PRESET_KR for s in d.top(c, p, 10)]
+
+
+def rule_r10_i1_consistent(d: Data):
+    """(기록만, D-041·R4-6) R10 이상 칸 중 이름 규칙으로만 잡혔을 칸 수(옛 I1)와, I3가 3년 창 가장 오래된 해만 적자라
+    잡힌 칸 수 — I3 처리는 기준 스냅샷 S1·S2에서 잡음 폭과 함께 정한다."""
+    vol90 = {}
+    for c in ("US", "KR"):
+        v = sorted(s.raw["volatility"] for s in d.general(c) if "volatility" in s.raw)
+        if v:
+            vol90[c] = v[int(len(v) * 0.9)]
+
+    def other(s: Stock, preset: str) -> bool:
+        hit = i2(s) or i3(s)
+        if preset.endswith("가치") and "volatility" in s.raw and s.country in vol90:
+            hit = hit or s.raw["volatility"] >= vol90[s.country]
+        return hit
+
+    name_only = [f"{cell} {s.ticker}" for cell, s in _r10_cells(d) if i1_name(s) and not i1(s) and not other(s, cell)]
+    oldest = []
+    for cell, s in _r10_cells(d):
+        oi = [f["operating_income"] for f in _fins3(s)]
+        if (len(oi) == 3 and None not in oi and oi[0] <= 0 and all(x > 0 for x in oi[1:])
+                and not i1(s) and not i2(s)):
+            oldest.append(f"{cell} {s.ticker}")
+    return True, f"이름 규칙으로만 잡혔을 칸 {len(name_only)} {name_only[:8]} · I3 가장 오래된 해만 적자 {len(oldest)} {oldest[:10]}"
+
+
+def rule_price_same_date(d: Data):
+    """같은 점수 계산일, 국가별 일반 묶음 점수 종목이 쓴 최신 일봉 날짜(data_quality.price_date)가 하나(R4-5)."""
+    by: dict[str, Counter] = defaultdict(Counter)
+    for s in d.stocks.values():
+        if s.family == "general" and s.scored:
+            by[s.country][s.dq.get("price_date") or "기록 없음"] += 1
+    if not by:
+        return None, "점수 없음"
+    ok = all(len(c) == 1 and "기록 없음" not in c for c in by.values())
+    return ok, " · ".join(f"{k} " + ", ".join(f"{dt} {n}종목" for dt, n in sorted(c.items())) for k, c in sorted(by.items()))
 
 
 def rule_trap(d: Data):
@@ -579,9 +631,8 @@ def raw_factors(d: Data) -> dict[int, dict[str, float]]:
             pairs = [(METRICS[m].weight, v) for m, v in s.z_raw.items() if METRICS[m].factor == f]
             if pairs:
                 fs[f] = sum(w * v for w, v in pairs) / sum(w for w, _ in pairs)
-        n = s.dq.get("fy_history") or 0
-        if "value" in fs and n < 3:
-            fs["value"] *= n / 3
+        if "value" in fs:                            # 저평가 보수 규칙 쓸 수 있는 수 0~2 → × 1/3·2/3·1(D-040)
+            fs["value"] *= value_shrink(s.dq.get("value_rules"))
         if fs:
             f0[s.stock_id] = fs
     return f0
@@ -888,6 +939,74 @@ def rule_lp_equity(d: Data):
     return not bad, f"자본 0 · 자산−부채 ≠ 0: {len(bad)} {bad} · 파트너 자본·자산−부채로 채운 종목 {lp[:10]}"
 
 
+# ── 라운드 4 데이터 (수정 4 PR B, D-039·D-036) — 표본·시가총액 ──
+def rule_adr_mcap(d: Data):
+    """미국 시가총액 순위 상위 300 중 재무가 있는 종목은 순위에 쓴 시가총액 ÷ 총자산 ≤ 200
+    (AKTX — 매출 0인데 SEC 원주 수 × ADS 종가로 1.19조 달러·cap_rank 16, R4-3). 매출 1억 달러 미만은 기록만 — 매출 없는
+    바이오(RVMD: yfinance 시총 399억·총자산의 17배)는 부푼 값이 아니다. 재무가 없는 상장 목록 종목은 셀 수 없어 따로 적는다."""
+    rows = d.conn.execute(text("""
+        SELECT s.ticker, s.cap_rank, s.cap_usd, f.revenue, f.total_assets
+        FROM stocks s JOIN markets m ON m.market_id = s.market_id
+        LEFT JOIN LATERAL (SELECT x.revenue, x.total_assets FROM financial_statements x
+                           WHERE x.stock_id = s.stock_id AND x.period_type = 'FY' AND x.total_assets > 0
+                           ORDER BY x.period_end DESC LIMIT 1) f ON true
+        WHERE m.country = 'US' AND s.cap_rank <= 300 ORDER BY s.cap_rank""")).all()
+    if not rows or all(r.cap_usd is None for r in rows):
+        return None, "시가총액 순위(cap_usd)가 아직 없음 — background 순위 뒤 확인"
+    checked = [r for r in rows if r.total_assets is not None and r.cap_usd is not None]
+    def show(r):
+        return (f"{r.ticker}(#{r.cap_rank} 매출 {0 if r.revenue is None else float(r.revenue) / 1e8:.1f}억·시총/자산 "
+                f"{float(r.cap_usd / r.total_assets):.0f})")
+    bad = [show(r) for r in checked if r.cap_usd > 200 * r.total_assets]
+    low = [show(r) for r in checked if r.revenue is None or r.revenue < 1e8]
+    return not bad, (f"상위 300 중 재무 있는 {len(checked)}종목 확인 · 위반 {len(bad)} {bad[:8]} · 매출 1억 달러 미만(기록만) "
+                     f"{len(low)} {low[:8]} · 재무 없어 못 봄 {len(rows) - len(checked)}")
+
+
+def rule_multiclass_ranked(d: Data, c: dict):
+    """주식 종류가 여럿인 회사(SEC frames 발행주식수가 비는 회사)도 시가총액 순위에 들어옴(R4-4 — V·MA가 표본 밖이었다)."""
+    rows = dict(d.conn.execute(text("""SELECT s.ticker, s.cap_rank FROM stocks s JOIN markets m ON m.market_id = s.market_id
+                                       WHERE m.country = 'US' AND s.ticker = ANY(:t)"""), {"t": [str(t) for t in c["ticker"]]}).all())
+    miss = [t for t in c["ticker"] if rows.get(str(t)) is None]
+    return not miss, " · ".join(f"{t} {rows.get(str(t)) or '순위 없음'}" for t in c["ticker"])
+
+
+def rule_halted(d: Data):
+    """거래정지(마지막 일봉이 같은 국가 표본의 최근 21번째 거래일보다 앞섬)는 점수 없음·비교군 아님(R4-7 — 버킷스튜디오)."""
+    from app.ingest.benchmark import HALTED_SQL                  # 선정과 같은 기준
+    ids = list(d.conn.execute(text(HALTED_SQL)).scalars())
+    rows = d.conn.execute(text("""
+        SELECT s.ticker, s.name, s.coverage, lp.trade_date,
+               EXISTS (SELECT 1 FROM stock_scores x WHERE x.stock_id = s.stock_id AND x.as_of = :d AND x.score IS NOT NULL) AS scored
+        FROM stocks s JOIN v_latest_price lp ON lp.stock_id = s.stock_id WHERE s.stock_id = ANY(:ids)"""),
+        {"ids": ids, "d": d.as_of}).all()
+    bad = [f"{r.ticker} {r.name}({r.trade_date}, {'점수' if r.scored else ''}{' 비교군' if r.coverage == 'benchmark' else ''})"
+           for r in rows if r.scored or r.coverage == "benchmark"]
+    return not bad, (f"거래정지 {len(rows)}종목 — 점수 있거나 비교군 {len(bad)} {bad[:8]} · "
+                     + ", ".join(f"{r.ticker} {r.name} {r.trade_date} {r.coverage}" for r in rows[:6]))
+
+
+def case_spinoff(d: Data, c: dict):
+    """분할(config corporate_actions) 완료일이 최신 FY 결산일보다 뒤면 저평가 지표 없음 + 사유(R4-8 — HON)."""
+    from app.ingest.universe import load_universe
+    out, res = [], []
+    for a in load_universe().corporate_actions:
+        s = d.by_ticker(str(a["ticker"]), a["market"])
+        if s is None:
+            out.append(f"{a['ticker']} 표본에 없음")
+            continue
+        end = s.fins[-1]["period_end"] if s.fins else None
+        if end is not None and end >= a["date"]:
+            out.append(f"{s.ticker} 최신 FY {end} ≥ 분할 {a['date']} — 해당 없음")
+            continue
+        value = [m for m in ("conservative_yield", "book_yield", "trap_signal") if m in s.raw]
+        reason = (s.dq.get("missing_metrics") or {}).get("conservative_yield", "")
+        ok = not value and "분할" in reason and s.dq.get("score_null_code") == "corporate_action"
+        res.append(ok)
+        out.append(f"{s.ticker} 최신 FY {end} · 분할 {a['date']} · 저평가 지표 {value or '없음'} · {s.dq.get('score_null_code')}")
+    return (all(res) if res else None), " · ".join(out) or "분할 목록 없음"
+
+
 SPECIAL = {
     "KCC-oneoff-cut": lambda d, c: _with_stock(d, c, oneoff_cut),
     "MICHANG-oneoff-cut": lambda d, c: _with_stock(d, c, oneoff_cut),
@@ -933,6 +1052,12 @@ SPECIAL = {
     "DATA-dart-fy-path": lambda d, c: rule_dart_fy_path(d, c),
     "DATA-sec-op-path": lambda d, c: rule_sec_op_path(d),
     "LP-equity-not-zero": lambda d, c: rule_lp_equity(d),
+    "ADR-mcap-sane": lambda d, c: rule_adr_mcap(d),
+    "MULTICLASS-ranked": rule_multiclass_ranked,
+    "HALTED-not-scored": lambda d, c: rule_halted(d),
+    "SPINOFF-basis": case_spinoff,
+    "PRICE-same-date": lambda d, c: rule_price_same_date(d),
+    "R10-I1-consistent": lambda d, c: rule_r10_i1_consistent(d),
 }
 
 

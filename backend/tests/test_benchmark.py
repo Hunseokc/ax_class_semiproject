@@ -172,7 +172,7 @@ def test_refresh_runs_scores_only_with_scorer(engine):
     from app.services.refresh import RefreshService
     p = make_providers()
     jobs_ = {j.job_type: j for j in RefreshService(engine, p, FxService(engine, p.fx, 4), 4).refresh().jobs}
-    assert jobs_["SCORES"].status == "SKIPPED" and jobs_["SCORES"].detail == "점수 계산기 미연결"
+    assert jobs_["SCORES"].status == "SKIPPED" and jobs_["SCORES"].detail.startswith("점수 계산기 미연결")
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM ingestion_logs"))
     jobs_ = {j.job_type: j for j in RefreshService(engine, p, FxService(engine, p.fx, 4), 4,
@@ -214,7 +214,8 @@ def test_select_benchmark_by_theme_and_market_cap(engine):
     kref = FakeKrReference({"C1": "2611", "C2": "26112", "C3": "64121", "C4": "68"})   # 반도체·반도체·은행·리츠
     uref = FakeReference(sic={"11": 3674, "12": 3674, "13": 3674})
     caps = {"100001": Decimal(10), "100002": Decimal(20), "100003": Decimal(5), "100004": Decimal(50)}
-    pv = replace(make_providers(), kr_reference=kref, us_reference=uref, kr_bulk=FakeKrBulk(caps=caps))
+    bulk = FakeKrBulk(tickers=set(caps) | {"005930", "000660"}, caps=caps)   # 그날 일봉에 없으면 거래정지(R4-7)
+    pv = replace(make_providers(), kr_reference=kref, us_reference=uref, kr_bulk=bulk)
 
     out = benchmark.select_benchmark(engine, pv, per_sector=3)
     with engine.connect() as conn:

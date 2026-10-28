@@ -203,17 +203,18 @@ def test_factor_weighting_restandardization_missing_zero_and_required(engine):
 
 
 def test_short_financial_history_shrinks_value_factor(engine):
-    """재무 FY가 3개 미만이면 저평가 팩터를 FY 수 / 3만큼 줄인 뒤 재표준화한다(D-010)."""
+    """저평가 보수 규칙(3년 평균 이익·가치 함정 신호)을 못 쓴 만큼 저평가 팩터를 줄인 뒤 재표준화한다 —
+    둘 다 쓰면 그대로, 하나만 × 2/3, 둘 다 못 쓰면 × 1/3(D-040. D-010의 FY 수 / 3을 대체)."""
     with engine.begin() as conn:
         add_kr_stocks(conn, [5, 6, 7])
         for sid in (5, 6, 7):
             put_z(conn, sid, {"conservative_yield": 1.5, "return_on_assets": 0.1 * sid, "momentum": 0.0})
-        aggregate(conn, D, history={5: 3, 6: 1, 7: 0})
+        aggregate(conn, D, history={5: 2, 6: 1, 7: 0})
         sc = scores_by(conn)
-    zs = dict(zip((5, 6, 7), _std([1.5, 0.5, 0.0])))
+    zs = dict(zip((5, 6, 7), _std([1.5, 1.0, 0.5])))
     for sid in (5, 6, 7):
         assert float(sc[sid]["value_score"]) == pytest.approx(zs[sid], abs=1e-4)
-    assert sc[6]["data_quality"]["fy_history"] == 1
+    assert sc[6]["data_quality"]["value_rules"] == 1
 
 
 # ------------------------------------------------------------------ 전체 파이프라인 손계산
@@ -276,7 +277,9 @@ def reference_raw(closes) -> tuple[dict[int, dict[str, float | None]], dict[int,
     for s, cl in closes.items():
         close = cl[-1]
         fy = FIN.get(s, [])
-        hist[s] = len(fy)                                    # 픽스처 FY는 모두 1년 간격으로 이어진다
+        # 쓸 수 있는 저평가 보수 규칙 수(D-040): 픽스처 FY는 모두 1년 간격·이익이 다 있어 FY 3개면 3년 평균과
+        # 가치 함정 신호(t−2, 신호 3개 이상)를 둘 다 쓰고, 1·2개면 둘 다 못 쓴다
+        hist[s] = 2 if len(fy) >= 3 else 0
         t = fy[-1] if fy else None
         t2 = fy[-3] if len(fy) >= 3 else None
         r: dict[str, float | None] = {m: None for m in METRICS}
@@ -338,8 +341,8 @@ def reference_scores(raw, hist):
             pairs = [(METRICS[m].weight, v) for m, v in z_adj[s].items() if METRICS[m].factor == f]
             if pairs:
                 f_s[f] = sum(w * v for w, v in pairs) / sum(w for w, _ in pairs)
-        if "value" in f_s and hist[s] < 3:
-            f_s["value"] *= hist[s] / 3
+        if "value" in f_s and hist[s] < 2:
+            f_s["value"] *= (hist[s] + 1) / 3
         fac[s] = f_s
     fz = {s: {} for s in raw}                                           # 국가 안 재표준화
     for c in ("KR", "US"):
@@ -592,7 +595,7 @@ def test_theme_position_uses_pre_neutralization_factors(client, engine, universe
     def raw_f(s, f):
         pairs = [(METRICS[m].weight, v) for m, v in z_raw[s].items() if METRICS[m].factor == f]
         v = sum(w * x for w, x in pairs) / sum(w for w, _ in pairs)
-        return v * hist[s] / 3 if f == "value" and hist[s] < 3 else v
+        return v * (hist[s] + 1) / 3 if f == "value" and hist[s] < 2 else v
 
     themes = {1: (1, 2), 3: (5, 6)}                                      # KR 반도체·자동차(점수 있는 구성원 2개씩)
     assert tp["group_name"] == "반도체" and "momentum" in tp["factors"]
@@ -605,14 +608,14 @@ def test_preset_parameter_on_lists_and_unknown_preset(client, engine, universe):
     compute_scores(engine, as_of=D)
     client.post(f"{API}/watchlist", json={"market": "KOSPI", "ticker": "005930"})
     by = {}
-    for p in ("balanced", "value"):
+    for p in ("balanced", "value", "growth", "aggressive"):
         items = client.get(f"{API}/stocks?preset={p}&country=KR").json()
         assert items["preset"] == p
         by[p] = {x["ticker"]: x["score"] for x in items["items"]}
         w = client.get(f"{API}/watchlist?preset={p}").json()
         assert w["preset"] == p and w["items"][0]["score"] == by[p]["005930"]
         assert client.get(f"{API}/stocks/KOSPI/005930?preset={p}").json()["score"] == by[p]["005930"]
-    assert by["balanced"] != by["value"]
+    assert len({tuple(sorted(v.items())) for v in by.values()}) > 1         # 프리셋마다 순위가 다르다
     assert client.get(f"{API}/stocks").json()["preset"] == "balanced"
     assert client.get(f"{API}/stocks?preset=quality").status_code == 422          # 없어진 프리셋
     r = client.get(f"{API}/stocks?preset=buffett")

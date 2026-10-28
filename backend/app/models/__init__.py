@@ -54,6 +54,8 @@ class Stock(Base):
     industry_checked_at: Mapped[datetime | None] = mapped_column()
     cap_rank: Mapped[int | None] = mapped_column(Integer)          # 미국 시가총액 순위(상위 1,500개) — migration 009
     cap_ranked_at: Mapped[datetime | None] = mapped_column()
+    cap_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 0))       # 순위에 쓴 시가총액(yfinance) — migration 017
+    share_ratio: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))   # SEC 발행주식수 ÷ 상장 단위 주식수(ADR)
     market: Mapped[Market] = relationship(lazy="joined")
     __table_args__ = (UniqueConstraint("market_id", "ticker"), CheckConstraint("coverage IN ('featured','benchmark','listed')"))
 

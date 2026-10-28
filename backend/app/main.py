@@ -40,7 +40,7 @@ async def lifespan(_: FastAPI):
 
         def refresh_service():
             pv = deps.get_providers()
-            return deps.RefreshService(engine, pv, FxService(engine, pv.fx, fast), ttl, scorer=deps.get_scorer(),
+            return deps.RefreshService(engine, pv, FxService(engine, pv.fx, fast), ttl,   # 점수는 07:00 비교군만(R4-5)
                                        sector_loader=deps.load_sectors, fast_ttl_hours=fast)
 
         task = asyncio.create_task(Scheduler(engine, refresh_service, deps.get_providers, deps.get_scorer()).run_forever())

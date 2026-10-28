@@ -28,6 +28,7 @@ from app.queries import sql
 from app.services.data_quality import fiscal_year_mix
 from app.services.financial_profile import stock_profile
 from app.services.scoring import (BADGE_FACTS, FACTORS, METRICS, MIN_FACTORS, REQUIRED_FACTORS, load_config, metric_params,
+                                  value_shrink,
                                   null_reason, partition_label, rank_normal, score_badges)
 
 UNSCORED_DEFAULT = "업종 특성상 이익·매출 기준인 매력도 점수를 내지 않습니다."
@@ -42,9 +43,9 @@ UNIVERSE_SQL = text("""
     WHERE mv.as_of = :d AND mk.country = :c AND COALESCE(t.family, 'general') = :f
       AND mv.raw_value IS NOT NULL AND mv.stock_id <> :s""")
 
-# 같은 국가·같은 묶음 유니버스 종목의 z_adj와 이어지는 FY 수 — 팩터 재표준화의 평균·표준편차를 다시 만든다
+# 같은 국가·같은 묶음 유니버스 종목의 z_adj와 쓸 수 있는 저평가 보수 규칙 수 — 팩터 재표준화의 평균·표준편차를 다시 만든다
 UNIVERSE_ADJ_SQL = text("""
-    SELECT mv.stock_id, mv.metric, mv.z_adj, CAST(sc.data_quality->>'fy_history' AS int) AS fy_count
+    SELECT mv.stock_id, mv.metric, mv.z_adj, CAST(sc.data_quality->>'value_rules' AS int) AS rules
     FROM stock_metric_values mv
     JOIN stocks s ON s.stock_id = mv.stock_id JOIN markets mk ON mk.market_id = s.market_id
     LEFT JOIN v_stock_theme t ON t.stock_id = mv.stock_id
@@ -64,15 +65,14 @@ def rank_p(x: float, values: list[float]) -> float:
     return (less + 1 + equal / 2 - 0.5) / (len(values) + 1)
 
 
-def factor_scores(z_adj: dict[str, float | None], fy_count: int | None) -> dict[str, float | None]:
-    """score_aggregate.sql과 같은 규칙: 팩터 = 지표 z_adj 가중 평균, 재무 FY 3개 미만이면 저평가 × (FY 수 / 3)."""
+def factor_scores(z_adj: dict[str, float | None], rules: int | None) -> dict[str, float | None]:
+    """score_aggregate.sql과 같은 규칙: 팩터 = 지표 z_adj 가중 평균, 저평가 보수 규칙을 못 쓴 만큼 축소(D-040)."""
     out: dict[str, float | None] = {}
     for f in FACTORS:
         pairs = [(METRICS[m].weight, v) for m, v in z_adj.items() if v is not None and METRICS[m].factor == f]
         out[f] = sum(w * v for w, v in pairs) / sum(w for w, _ in pairs) if pairs else None
-    n = fy_count if fy_count is not None else 0
-    if out["value"] is not None and n < 3:
-        out["value"] *= n / 3
+    if out["value"] is not None:
+        out["value"] *= value_shrink(rules)
     return out
 
 
@@ -112,7 +112,7 @@ def reference_score(conn: Connection, stock_id: int, country: str, preset: dict)
     mine = conn.execute(sql("score_metrics"), metric_params(cfg, stock_id)).mappings().all()
     if not mine:
         return None
-    fy_count = mine[0]["fy_count"]
+    fy_count, rules = mine[0]["fy_count"], mine[0]["value_rules"]
     universe: dict[str, list[float]] = {}
     group: dict[str, list[float]] = {}             # 같은 주 테마 구성원의 z_raw (중립화)
     for r in conn.execute(UNIVERSE_SQL, {"d": as_of, "c": country, "f": family, "s": stock_id,
@@ -146,13 +146,13 @@ def reference_score(conn: Connection, stock_id: int, country: str, preset: dict)
     hist: dict[int, int | None] = {}
     for r in conn.execute(UNIVERSE_ADJ_SQL, {"d": as_of, "c": country, "f": family, "p": preset["preset_id"]}):
         by_stock[r.stock_id][r.metric] = float(r.z_adj)
-        hist[r.stock_id] = r.fy_count
+        hist[r.stock_id] = r.rules
     dist: dict[str, list[float]] = defaultdict(list)
     for sid, zs in by_stock.items():
         for f, v in factor_scores(zs, hist.get(sid)).items():
             if v is not None:
                 dist[f].append(v)
-    raw_factor = factor_scores(z_adj, fy_count)
+    raw_factor = factor_scores(z_adj, rules)
     factor_score: dict[str, float | None] = {}
     for f in FACTORS:
         v, xs = raw_factor[f], dist.get(f, [])
@@ -192,7 +192,7 @@ def reference_score(conn: Connection, stock_id: int, country: str, preset: dict)
                       "contribution": _q(ew * s) if ew is not None else None, "available": s is not None,
                       "percentile": _q(pct, "0.01")}
     dq: dict = {"partition": partition_label(country, family), "family": family, "reference": True,
-                "fy_history": fy_count, "model_version": cfg["model_version"]}
+                "fy_history": fy_count, "value_rules": rules, "model_version": cfg["model_version"]}
     mode = conn.execute(text("""SELECT st.data_quality->>'fiscal_mode' FROM stock_scores st
                                 JOIN stocks s ON s.stock_id = st.stock_id JOIN markets mk ON mk.market_id = s.market_id
                                 WHERE st.as_of = :d AND mk.country = :c AND st.data_quality ? 'fiscal_mode' LIMIT 1"""),

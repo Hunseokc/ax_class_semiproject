@@ -39,6 +39,8 @@ class Providers:
     kr_reference: base.KrReferenceProvider | None = None    # 국내 업종 코드 KSIC(DART 기업개황). None이면 국내 테마는 직접 지정만
     # 국내 사업보고서 목록(회사 지정 없이 날짜로) — 공시 증분(jobs.load_dart_feed). None이면 건너뛴다
     kr_feed: object | None = None                             # DartClient (list_annual_reports)
+    # 미국 시가총액(yfinance) — 순위·ADR 비율(수정 4 R4-3·R4-4). None이면 SEC 발행주식수 × 종가만
+    us_market_cap: object | None = None                       # YahooProvider (get_market_caps)
 
     def price(self, country: str) -> base.PriceProvider:
         return self.kr_price if country == "KR" else self.us_price
@@ -97,7 +99,7 @@ def default_providers() -> Providers:
         # ── [S6-B] 상장 목록 ──
         kr_listing=kr if s.price_source_kr == "pykrx" else None, us_listing=sec,
         # ── [S5-D] 미국 참조 데이터 ──
-        us_reference=sec, kr_reference=dart,
+        us_reference=sec, kr_reference=dart, us_market_cap=yahoo,
         # ── [S3-B] 재무·공시 ──
         kr_financial=dart, us_financial=sec, us_financial_supplement=yahoo, kr_disclosure=dart, us_disclosure=sec,
         kr_feed=dart,                                     # 재무용과 같은 DartClient(분당 한도 공유)

@@ -253,6 +253,16 @@ class SecClient:
                         out.setdefault(str(r["cik"]).zfill(10), int(r["val"]))
         return out
 
+    def files_us_reports(self, cik: str) -> bool:
+        """10-K·10-Q를 내는 회사인가(submissions 최근 공시 서식). 20-F·40-F만 내는 해외 기업은 재무를 받지 않아(D-014)
+        미국 시가총액 순위에서 뺀다(수정 4 — 발행주식수가 비는 회사). 조회에 실패하면 True(빼지 않음)."""
+        try:
+            forms = set(self._json(f"https://data.sec.gov/submissions/CIK{cik}.json")["filings"]["recent"]["form"])
+        except (ProviderError, KeyError) as e:
+            log.warning("submissions 실패 %s: %s", cik, e)
+            return True
+        return bool(forms & (ANNUAL_FORMS | QUARTER_FORMS))
+
     def get_sic(self, cik: str) -> tuple[int | None, str | None]:
         d = self._json(f"https://data.sec.gov/submissions/CIK{cik}.json")
         sic = d.get("sic")

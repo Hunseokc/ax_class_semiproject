@@ -202,6 +202,17 @@ done
 8. 확인: `/api/v1/stocks/KOSPI/001450/analysis`의 `attractiveness.financial_profile`(금융 업종 비교), 홈 금융 탭, 모델 `v2.5-2026-10-27`, `SELECT environment, as_of, passed, known_fail, target_fail, unverified, required_fail FROM sanity_runs ORDER BY run_id DESC LIMIT 1`.
 - 다음 `benchmark --reselect`(30일 주기) 때 지주회사 테마로 옮긴 3종목(한국앤컴퍼니·한화·다우기술)이 비교 표본에서 빠진다.
 
+**6차 적용 절차 (수정 4 — 매력도 v2.6~v2.7, 검토_장부 D-039~D-042)** — PR A(수집)·B(표본·시총·분류)·C(계산 규칙)를 머지한 main으로 한 번에 배포한다. 스키마 변경 2개(016·017). 이 배포 뒤의 07:00 계산 직후 덤프가 기준 스냅샷 S1이다(D-041).
+1. 이미지 push → `gcloud run deploy stockmind --image $IMG …` → Jobs 4개(refresh·benchmark·background·sanity) `--image`(명령은 하나씩)
+2. `migrate,016_fin_collection` → `migrate,017_us_cap`
+3. `master,--offline` — 결제·핀테크 테마·HON·비에이치아이·NEU 직접 지정이 peer_groups·주 테마에 들어간다
+4. **재무 한 경로 재수집**(D-039): `financials,--scope,sample,--country,US`(SEC — 약 10분) → `financials,--scope,sample,--country,KR,--part,1/2`와 `--part,2/2`를 **차례로**(DART — 한 회사 보고서 약 20~25개, 분당 45회라 각각 약 1.5시간. 한 Job 실행 시간 상한 안에 들어가게 나눈다). 다시 받은 종목의 옛 결산기 행(수정 1 이전 미국 영업이익, 20-F 재무)은 이때 지워진다
+5. 미국 시가총액 순위(yfinance 시총·ADR 비율): `python,-c,from app.core.db import get_engine; from app.ingest.background import rank_us; from app.providers.factory import default_providers; print(rank_us(get_engine(), default_providers(), force=True))` (개발 DB 실측 34분 — yfinance가 401이면 60초 쉬고 남은 종목을 한 번 더 부른다. 로그 '시가총액 끝내 실패'가 있으면 다시 실행)
+6. `benchmark,--reselect` — V·MA 등 결제사가 표본에 들어오고 거래정지 종목이 빠진다. 새로 뽑힌 종목은 재무를 API로 받는다(일괄 경로 값은 만료)
+7. `scores` → `stockmind-sanity` 실행 → 결과 `sanity_runs`. 매시 `stockmind-refresh`는 이제 점수를 다시 계산하지 않는다(SCORES SKIPPED)
+8. 다음 날 07:00 `stockmind-benchmark` 완료 ~ 07:40 `stockmind-sanity` 사이에 배포 DB 덤프 → **S1**(이름을 장부 '기준 스냅샷' 행에). 2주 이상 뒤 같은 시각 덤프 → S2
+- DART 하루 한도(키 1개 약 2만 회): 4번 재수집이 약 7,000~8,000회를 쓰므로 같은 날 `background`(listed 재무) 예산을 0으로 두거나 다음 날로 미룬다.
+
 > 이 절차는 2026-10-22 배포 상태(이미지 태그 형식, Cloud Build 미사용, 서비스·Job이 같은 이미지)를 조회해 맞춘 것이다. 레포에는 배포 스크립트가 없으므로, 실제로 쓰던 명령과 다르면 이 절을 고친다.
 
 **배포 뒤 확인**(v1 → v2):

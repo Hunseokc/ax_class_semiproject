@@ -1,7 +1,7 @@
 """config/universe.yaml 읽기(불변 데이터클래스)와 DB 마스터 → Provider 참조 객체 변환."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 
 import yaml
@@ -56,6 +56,7 @@ class Universe:
     secondary_themes: dict          # 티커 → 보조 테마 이름 목록
     ingest: dict                    # 수집 적재 공통 (flush_every)
     background: dict                # 백그라운드 재무 적재 하루 예산 (app/ingest/background.py)
+    corporate_actions: list = field(default_factory=list)   # 최신 FY 결산 뒤 분할·대규모 매각(R4-8 — score_metrics.sql)
 
 
 @lru_cache
@@ -74,6 +75,7 @@ def load_universe() -> Universe:
         secondary_themes={str(k): v for k, v in (raw.get("secondary_themes") or {}).items()},
         ingest=raw.get("ingest") or {},
         background=raw.get("background") or {},
+        corporate_actions=raw.get("corporate_actions") or [],
     )
 
 
