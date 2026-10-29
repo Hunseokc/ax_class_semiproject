@@ -57,6 +57,14 @@ def test_clean_fx_quarantines_spike():
     assert "초과 이탈" in bad[0].reason
 
 
+def test_init_db_reset_refuses_deploy_db():
+    # 접속 전에 거부한다 — create_engine은 연결하지 않으므로 실제 배포 DB에 닿지 않는다
+    from sqlalchemy import create_engine
+    eng = create_engine("postgresql+psycopg://u:p@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres")
+    with pytest.raises(SystemExit, match="거부"):
+        jobs.init_db(eng, reset=True)
+
+
 def test_master_failure_is_logged_and_raised(engine, monkeypatch):
     """마스터 적재가 실패하면 FAILED 로그를 남기고 예외를 전파한다(CLI가 성공으로 끝나지 않는다)."""
     u = load_universe()

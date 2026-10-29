@@ -29,7 +29,14 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------- DB 초기화
+# 배포 DB(Supabase) 호스트. 로컬에서 `-e DATABASE_URL=<배포 DB>`로 적재를 돌리므로 --reset이 배포 DB를 지우지 못하게 막는다
+PROTECTED_DB_HOSTS = ("supabase.com", "supabase.co")
+
+
 def init_db(engine: Engine, reset: bool = False) -> None:
+    host = (engine.url.host or "").lower()
+    if reset and host.endswith(PROTECTED_DB_HOSTS):
+        raise SystemExit(f"init-db --reset 거부: 배포 DB({host})는 지우지 않는다 — 로컬·개발 DB에서만 쓴다")
     # SQL 파일은 파라미터 없이 psycopg로 직접 실행한다(주석 속 '%'가 placeholder로 해석되지 않도록)
     with engine.begin() as conn:
         raw = conn.connection.driver_connection
