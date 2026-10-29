@@ -158,7 +158,7 @@ financial_statements FY                  20896
   PROD_URL="postgresql+psycopg://$SUPABASE_DB_USER:$SUPABASE_DB_PASSWORD@$SUPABASE_DB_HOST:$SUPABASE_DB_PORT/$SUPABASE_DB_NAME"
   docker compose run --rm -e DATABASE_URL="$PROD_URL" api python -m app.ingest <명령>   # 코드는 배포 이미지와 같은 커밋인지 먼저 확인
   ```
-  매일 정해진 시각의 Job(refresh·benchmark 07:00·sanity 07:40·background 08:00)은 PC와 무관하게 돌아야 하므로 클라우드에 둔다. migrate·master·scores·sanity 같은 짧은 일회성 명령은 Job으로 돌려도 된다.
+  매일 정해진 시각의 Job(refresh 매시 5분·benchmark 07:00·snapshot 07:02·sanity 07:40·background 08:00)은 PC와 무관하게 돌아야 하므로 클라우드에 둔다. **정해진 시각에 해야 하는 일은 사람이나 세션이 시간 맞춰 하지 않는다** — 짧으면 Job + Cloud Scheduler로 만든다(6차 S1 덤프에서 겪음). migrate·master·scores·sanity 같은 짧은 일회성 명령은 Job으로 돌려도 된다.
 
 ```bash
 TAG=$(git rev-parse --short HEAD)-$(date +%m%d%H%M)
@@ -218,7 +218,7 @@ done
 5. 미국 시가총액 순위(yfinance 시총·ADR 비율): `python,-c,from app.core.db import get_engine; from app.ingest.background import rank_us; from app.providers.factory import default_providers; print(rank_us(get_engine(), default_providers(), force=True))` (개발 DB 실측 34분 — yfinance가 401이면 60초 쉬고 남은 종목을 한 번 더 부른다. 로그 '시가총액 끝내 실패'가 있으면 다시 실행)
 6. `benchmark,--reselect` — V·MA 등 결제사가 표본에 들어오고 거래정지 종목이 빠진다. 새로 뽑힌 종목은 재무를 API로 받는다(일괄 경로 값은 만료)
 7. `scores` → `stockmind-sanity` 실행 → 결과 `sanity_runs`. 매시 `stockmind-refresh`는 이제 점수를 다시 계산하지 않는다(SCORES SKIPPED)
-8. 다음 날 07:00 `stockmind-benchmark` 완료 ~ 07:40 `stockmind-sanity` 사이에 배포 DB 덤프 → **S1**(이름을 장부 '기준 스냅샷' 행에). 2주 이상 뒤 같은 시각 덤프 → S2
+8. S1·S2는 아래 **일일 스냅샷 Job**이 쌓은 덤프에서 고른다(D-041 개정): 메타 `mixed_writes: 0`인 첫 날 → **S1**(덤프 이름·sha256을 장부 '기준 스냅샷' 행에), S1 + 14일 이후 ~ 다음 자동 재선정 전 → S2
 - DART 하루 한도(키 1개 약 2만 회): 4번 재수집이 약 7,000~8,000회를 쓰므로 같은 날 `background`(listed 재무) 예산을 0으로 두거나 다음 날로 미룬다.
 
 **6차 적용 기록 (2026-10-28 ~ 10-29)** — 위 절차대로 했다. 4번 국내 2/2·5·6은 2026-10-28 결정(대량 수집은 로컬)에 따라 맥에서 로컬 컨테이너로 배포 DB에 직접 실행했다.
@@ -236,7 +236,24 @@ done
 - **지출 한도(Budgets & caps)**: 10-28 13:05~16:46 한도 도달로 Cloud Run이 컨테이너를 띄우지 못했다 — 로그 없이 'exit code 0, Unknown error', 서비스 503/429. 한도 삭제 뒤 약 1시간 만에 풀림. 증상이 같으면 코드보다 결제·한도를 먼저 본다.
 - `--no-traffic` 배포 성공은 인스턴스를 실제로 띄웠다는 뜻이 아니다(최소 인스턴스 0). 확인은 트래픽 전환 뒤 `/health`.
 - 진단 흔적: 트래픽 0% 리비전 00018~00022(쓰지 않음), `stockmind-probe` 이미지는 원래 `bed3747`로 되돌림.
-- **S1 덤프 창**: 07:40 뒤에는 08:00 `background`가 재무·미국 시가총액 순위를, 매시 `refresh`가 가격을 바꿀 수 있어 07:00 점수와 입력이 어긋난다. 창(07:00 Job 완료 ~ 07:40)을 놓치면 그날은 뜨지 않고 다음 날 같은 창에 뜬다.
+- **S1 덤프를 사람이 창에 맞춰 뜨게 짜 둔 것**: 10-29 세션이 09:04에 시작해 창을 놓쳤다. 덤프는 10초(11MB)라 Job으로 충분하다 → 아래 일일 스냅샷 Job으로 바꿨다. 창의 끝도 07:40이 아니라 07:05였다 — 07:05 `refresh`가 환율·가격을 쓴다(10-29 `ingestion_logs` 실측: 점수 07:01:42, FX 07:05:25).
+
+**일일 스냅샷 Job (`stockmind-snapshot`, 2026-10-29~)** — 측정용 배포 DB 덤프(D-041 개정). 코드 `ops/snapshot/`(공식 `postgres:17.11` + `snapshot.sh`, 앱 이미지와 따로).
+- 매일 07:02 Cloud Scheduler `stockmind-snapshot` → `ingestion_logs`에서 오늘 07:00 benchmark 일일 실행 완료와 `stock_scores` as_of = 오늘을 확인(최대 20분 대기, 연결 실패도 다시 시도) → `pg_dump -Fc -n public`(사용자 데이터 표 5개는 구조만) → 버킷 `gs://stockmind-512107-snapshots`(비공개, GCS 볼륨 마운트)에 `deploy_<YYYYMMDD_HHMM>.dump`와 메타 `.txt`
+- 메타: sha256·크기·덤프 시작(KST)·07:00 완료 시각·as_of·모델(`scores`)·**`mixed_writes`**(07:00 계산 뒤 ~ 덤프 시작 전에 다른 수집이 쓴 기록 수 — 0이어야 점수와 입력이 같은 시점)·실행 이름·서버/pg_dump 버전
+- 앱 배포 때 이 Job의 `--image`는 **바꾸지 않는다**(앱 이미지가 아님). Supabase 주 버전이 바뀌면 `ops/snapshot/Dockerfile`의 `postgres:<주 버전>`을 맞춰 다시 빌드한다(pg_dump는 서버보다 낮은 주 버전이면 거부)
+- 다시 만들 때(한 번만 한 명령 — PowerShell에서, Bash의 `gcloud.cmd`는 `=`·쉼표 인자를 깨뜨린다):
+  ```bash
+  docker build -t asia-northeast3-docker.pkg.dev/stockmind-512107/stockmind/snapshot:<커밋> ops/snapshot && docker push …
+  gcloud storage buckets create gs://stockmind-512107-snapshots --location asia-northeast3 --uniform-bucket-level-access --public-access-prevention
+  gcloud storage buckets add-iam-policy-binding gs://stockmind-512107-snapshots --member=serviceAccount:538269380647-compute@developer.gserviceaccount.com --role=roles/storage.objectUser
+  gcloud run jobs create stockmind-snapshot --image …/snapshot:<커밋> --service-account 538269380647-compute@developer.gserviceaccount.com --set-secrets "DATABASE_URL=DATABASE_URL:latest" --add-volume "name=snap,type=cloud-storage,bucket=stockmind-512107-snapshots" --add-volume-mount "volume=snap,mount-path=/snapshots" --max-retries 1 --task-timeout 30m --cpu 1 --memory 512Mi
+  gcloud run jobs add-iam-policy-binding stockmind-snapshot --member=serviceAccount:538269380647-compute@developer.gserviceaccount.com --role=roles/run.invoker
+  gcloud scheduler jobs create http stockmind-snapshot --location asia-northeast3 --schedule "2 7 * * *" --time-zone Asia/Seoul --uri https://run.googleapis.com/v2/projects/stockmind-512107/locations/asia-northeast3/jobs/stockmind-snapshot:run --http-method POST --oauth-service-account-email 538269380647-compute@developer.gserviceaccount.com --oauth-token-scope https://www.googleapis.com/auth/cloud-platform
+  ```
+  (`--region asia-northeast3 --project stockmind-512107`은 생략)
+- 받기: `gcloud storage ls -l gs://stockmind-512107-snapshots/` → `gcloud storage cat gs://…/<이름>.txt`로 메타 확인 → `gcloud storage cp gs://…/<이름>.dump .` → `sha256sum`이 메타와 같은지. 복원은 `pg_restore -d <빈 DB> <이름>.dump`
+- 첫 실행: 10-29 09:24 스케줄러 강제 실행 `stockmind-snapshot-mbz24` 성공 — 11MB, `mixed_writes: 183`(07:05 뒤라 S1 아님, 경로 확인용). 받은 파일 sha256 일치
 
 > 이 절차는 2026-10-22 배포 상태(이미지 태그 형식, Cloud Build 미사용, 서비스·Job이 같은 이미지)를 조회해 맞춘 것이다. 레포에는 배포 스크립트가 없으므로, 실제로 쓰던 명령과 다르면 이 절을 고친다.
 
