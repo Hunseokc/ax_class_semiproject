@@ -147,7 +147,7 @@ financial_statements FY                  20896
 
 **로컬**: 코드를 받으면 `docker compose up -d --build`.
 - 스키마가 바뀐 경우(`backend/db/migrations/` 새 파일)는 `python -m app.ingest migrate <이름>`을 실행한다(05 8절).
-- 데이터를 처음부터 다시 만들 때는 `init-db --reset` → `master --offline` → `import-sample` → `seed-demo` 순서다. `--reset`은 DB를 통째로 비운다.
+- 데이터를 처음부터 다시 만들 때는 `init-db --reset` → `master --offline` → `import-sample` → `seed-demo` 순서다. `--reset`은 DB를 통째로 비운다. 배포 DB(Supabase) 호스트에서는 거부된다(PR #138).
 
 **배포**: 서비스와 Jobs는 같은 이미지(`asia-northeast3-docker.pkg.dev/stockmind-512107/stockmind/api:<커밋>-<MMDDHHMM>`)를 쓴다.
 - 지금 배포된 이미지: 서비스(리비전 `stockmind-00023-mct`)·Jobs 4개(refresh·benchmark·background·sanity) 모두 `api:b0fb4a5-10281604`(2026-10-28, 매력도 모델 v2.7 — 수정 4 PR #129~#135).
