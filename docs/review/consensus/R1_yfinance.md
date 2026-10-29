@@ -9,11 +9,11 @@
 |---|---|
 | 일시 | 2026-10-29 (KST 오후), 1회 |
 | 라이브러리 | `yfinance==1.7.0` (`backend/requirements.txt`, 앱 이미지 `stockmind-api`) |
-| 실행 | `docker compose run --rm -v C:/seokhunchoi_Ax_Fullstack/consensus_work:/work api python /work/scripts/r1_yfinance.py` |
+| 실행 | `docker compose run --rm -v C:/seokhunchoi_Ax_Fullstack/stockmind/ax_stockmind/개발산출물/매력도_검토/컨센서스:/work api python /work/scripts/r1_yfinance.py` |
 | 표본 | AAPL · NVDA · FSLR · EDU(ADR) · `005930.KS` (R0 3절) |
 | 호출 | 5종목 × 9속성(요청서 2장 8행, `eps_trend`·`eps_revisions`는 한 행에 두 속성) = 45회, 호출 사이 0.5초 |
 | 소요 | 45회 합계 10.7초(가장 긴 것 `get_earnings_dates` 1.1초). 429·차단 없음 |
-| 원본 | `consensus_work/raw/R1/<티커>__<속성>.csv`(DataFrame) / `.json`(dict), 요약 `raw/R1/_summary.json`. 요약 스크립트 `scripts/r1_inspect.py`(호출 없음) |
+| 원본 | `개발산출물/매력도_검토/컨센서스/raw/R1/<티커>__<속성>.csv`(DataFrame) / `.json`(dict), 요약 `raw/R1/_summary.json`. 요약 스크립트 `scripts/r1_inspect.py`(호출 없음) |
 
 ## 2. 커버리지 (8행 × 5종목 = 40칸)
 
