@@ -1,0 +1,226 @@
+as_of: 2026-10-29
+sources_note: 각 기업의 연간 사업보고서(DART, SEC 10-K)에 기반한 최근 수년간의 매출·이익 추이 및 시장에 널리 알려진 밸류에이션·주가 변동성 상식
+cases:
+  - market: KR
+    ticker: "000660"
+    name: SK하이닉스
+    preset: 성장
+    expect: bottom_half_이상
+    reason: HBM 수요 폭발로 최근 수년간 매출과 영업이익이 적자에서 사상 최대 흑자로 급증했으므로 과거 실적 기반 성장 순위 하위권이면 이상함.
+    source: 일반 지식 (DART 사업보고서 실적 추이)
+
+  - market: KR
+    ticker: "278470"
+    name: 에이피알
+    preset: 성장
+    expect: bottom_half_이상
+    reason: 뷰티 디바이스 수출 호조로 최근 수년간 매년 높은 매출·영업이익 증가율을 기록했으므로 성장 성향 하위 절반에 있으면 이상함.
+    source: 일반 지식 (DART 사업보고서)
+
+  - market: KR
+    ticker: "003230"
+    name: 삼양식품
+    preset: 성장
+    expect: bottom_half_이상
+    reason: 불닭볶음면 글로벌 수출 확대로 최근 몇 년간 매출과 영업이익이 가파르게 늘어났으므로 성장 순위 하위 절반이면 이상함.
+    source: 일반 지식 (DART 사업보고서)
+
+  - market: KR
+    ticker: "033780"
+    name: KT&G
+    preset: 성장
+    expect: top20_이상
+    reason: 성숙기 담배·인삼 사업을 영위하며 최근 수년간 매출과 영업이익이 완만하거나 정체 수준이므로 고성장 상위 20위 안에 들면 이상함.
+    source: 일반 지식
+
+  - market: KR
+    ticker: "017670"
+    name: SK텔레콤
+    preset: 성장
+    expect: top20_이상
+    reason: 국내 통신 시장 포화로 최근 몇 년간 매출 성장률이 한 자릿수 초반에 머물러 있어 실적 급증을 보는 성장 상위 20위면 이상함.
+    source: 일반 지식
+
+  - market: KR
+    ticker: "051910"
+    name: LG화학
+    preset: 성장
+    expect: top20_이상
+    reason: 석유화학 업황 부진과 배터리 판가 하락으로 최근 수년간 영업이익이 크게 감소했으므로 최근 실적 성장을 보는 성장 상위 20위면 이상함.
+    source: 일반 지식 (DART 사업보고서)
+
+  - market: KR
+    ticker: "005380"
+    name: 현대자동차
+    preset: 가치
+    expect: bottom_half_이상
+    reason: 역대급 실적에도 불구하고 PER·PBR이 국내 대형주 중 현저히 낮은 수준에 거래되고 주가도 비교적 안정적이므로 가치 하위 절반이면 이상함.
+    source: 일반 지식
+
+  - market: KR
+    ticker: "000270"
+    name: 기아
+    preset: 균형
+    expect: bottom_half_이상
+    reason: 낮은 밸류에이션(PER·PBR)과 두 자릿수 영업이익률, 최근 몇 년간의 실적 성장을 동시에 갖췄으므로 균형 하위 절반이면 이상함.
+    source: 일반 지식 (DART 사업보고서)
+
+  - market: KR
+    ticker: "012330"
+    name: 현대모비스
+    preset: 가치
+    expect: bottom_half_이상
+    reason: 장부가 대비 낮은 PBR과 안정적인 이익 창출력을 보유한 대표적 저평가 대형주이므로 가치 성향 하위 절반에 있으면 이상함.
+    source: 일반 지식
+
+  - market: KR
+    ticker: "196170"
+    name: 알테오젠
+    preset: 가치
+    expect: top20_이상
+    reason: 기술수출 기대감으로 시가총액이 수십조 원에 달해 연간 순이익·장부가 대비 밸류에이션이 극단적으로 높고 변동성이 크므로 가치 상위 20위면 이상함.
+    source: 일반 지식
+
+  - market: KR
+    ticker: "247540"
+    name: 에코프로비엠
+    preset: 가치
+    expect: top20_이상
+    reason: 장부가 및 최근 이익 대비 주가 배수가 매우 높고 주가 출렁임이 큰 대표적 고밸류·고변동성 종목이므로 가치 상위 20위면 이상함.
+    source: 일반 지식
+
+  - market: KR
+    ticker: "267260"
+    name: HD현대일렉트릭
+    preset: 위험
+    expect: bottom_half_이상
+    reason: 북미 전력기기 호황으로 최근 몇 년간 실적이 폭발적으로 증가하고 주가 상승폭과 변동성이 모두 컸으므로 위험 성향 하위 절반이면 이상함.
+    source: 일반 지식 (DART 사업보고서)
+
+  - market: KR
+    ticker: "042700"
+    name: 한미반도체
+    preset: 위험
+    expect: bottom_half_이상
+    reason: TC본더 수주로 최근 실적이 급증하고 주가 모멘텀과 변동성이 매우 컸던 종목이므로 위험 성향 하위 절반에 위치하면 이상함.
+    source: 일반 지식
+
+  - market: KR
+    ticker: "030200"
+    name: KT
+    preset: 위험
+    expect: top20_이상
+    reason: 전형적인 내수 통신 방어주로 실적과 주가의 출렁임이 작으므로 강한 실적 급증과 고변동성을 요구하는 위험 상위 20위면 이상함.
+    source: 일반 지식
+
+  - market: KR
+    ticker: "090430"
+    name: 아모레퍼시픽
+    preset: 균형
+    expect: top20_이상
+    reason: 중국 사업 부진 등으로 최근 수년간 과거 대비 이익 규모와 수익성이 크게 흔들렸고 밸류에이션 부담도 있어 균형 상위 20위면 이상함.
+    source: 일반 지식
+
+  - market: US
+    ticker: NVDA
+    name: NVIDIA
+    preset: 성장
+    expect: bottom_half_이상
+    reason: AI 가속기 독점으로 최근 수년간 매출과 순이익이 수 배씩 폭발적으로 증가했으므로 과거 실적 기반 성장 순위 하위 절반이면 이상함.
+    source: 일반 지식 (SEC 10-K)
+
+  - market: US
+    ticker: META
+    name: Meta Platforms
+    preset: 균형
+    expect: bottom_half_이상
+    reason: 높은 영업이익률과 탄탄한 매출·이익 성장, 막대한 현금흐름과 양호한 주가 흐름을 고루 갖췄으므로 균형 하위 절반이면 이상함.
+    source: 일반 지식 (SEC 10-K)
+
+  - market: US
+    ticker: GOOGL
+    name: Alphabet
+    preset: 균형
+    expect: bottom_half_이상
+    reason: 빅테크 중 비교적 합리적인 밸류에이션과 높은 수익성, 꾸준한 매출·이익 성장을 동시에 보여왔으므로 균형 하위 절반이면 이상함.
+    source: 일반 지식 (SEC 10-K)
+
+  - market: US
+    ticker: MSFT
+    name: Microsoft
+    preset: 균형
+    expect: bottom_half_이상
+    reason: 클라우드와 소프트웨어 기반으로 수년간 높은 이익률과 안정적인 실적 성장, 견조한 재무구조를 유지했으므로 균형 하위 절반이면 이상함.
+    source: 일반 지식 (SEC 10-K)
+
+  - market: US
+    ticker: PLTR
+    name: Palantir Technologies
+    preset: 가치
+    expect: top20_이상
+    reason: 연간 이익과 장부가 대비 주가 배수(PER·PBR)가 미국 대형주 중에서도 극단적으로 높고 주가 변동성이 크므로 가치 상위 20위면 이상함.
+    source: 일반 지식
+
+  - market: US
+    ticker: TSLA
+    name: Tesla
+    preset: 가치
+    expect: top20_이상
+    reason: 전통 완성차나 일반 대형주 대비 이익·장부가 배수가 매우 높고 주가 변동성이 극심하므로 저평가·안정성을 보는 가치 상위 20위면 이상함.
+    source: 일반 지식
+
+  - market: US
+    ticker: INTC
+    name: Intel
+    preset: 균형
+    expect: top20_이상
+    reason: 최근 수년간 파운드리 적자와 점유율 하락으로 매출 감소 및 대규모 순손실을 기록하고 주가도 부진했으므로 균형 상위 20위면 이상함.
+    source: 일반 지식 (SEC 10-K)
+
+  - market: US
+    ticker: BA
+    name: Boeing
+    preset: 균형
+    expect: top20_이상
+    reason: 잇따른 품질 문제와 파업 등으로 수년간 연속 적자와 자본잠식(음수 자본) 상태를 겪었으므로 안정성과 수익성을 보는 균형 상위 20위면 이상함.
+    source: 일반 지식 (SEC 10-K)
+
+  - market: US
+    ticker: KO
+    name: Coca-Cola
+    preset: 위험
+    expect: top20_이상
+    reason: 주가 변동성이 매우 낮고 실적이 완만하게 움직이는 대표적 필수소비재 방어주이므로 고변동성·실적 급증을 보는 위험 상위 20위면 이상함.
+    source: 일반 지식
+
+  - market: US
+    ticker: JNJ
+    name: Johnson & Johnson
+    preset: 성장
+    expect: top20_이상
+    reason: 성숙기 대형 헬스케어 기업으로 최근 몇 년간 매출과 이익 성장률이 완만하므로 급격한 외형·이익 확장을 보는 성장 상위 20위면 이상함.
+    source: 일반 지식
+
+  - market: US
+    ticker: VZ
+    name: Verizon Communications
+    preset: 가치
+    expect: bottom_half_이상
+    reason: 낮은 PER과 높은 배당, 안정적인 현금흐름과 낮은 주가 변동성을 가진 대표적 저평가 통신주이므로 가치 하위 절반에 있으면 이상함.
+    source: 일반 지식
+
+  - market: US
+    ticker: SMCI
+    name: Super Micro Computer
+    preset: 위험
+    expect: bottom_half_이상
+    reason: AI 서버 수요로 최근 몇 년간 매출·이익이 급증하는 동시에 주가 급등락 폭이 매우 컸으므로 위험 성향 하위 절반에 있으면 이상함.
+    source: 일반 지식 (SEC 10-K)
+
+  - market: US
+    ticker: PFE
+    name: Pfizer
+    preset: 성장
+    expect: top20_이상
+    reason: 코로나19 백신·치료제 특수 종료 이후 최근 수년간 매출과 이익이 고점 대비 급감했으므로 최근 실적 성장을 보는 성장 상위 20위면 이상함.
+    source: 일반 지식 (SEC 10-K)
